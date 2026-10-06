@@ -1,0 +1,15 @@
+name: Video Motoru Testi
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: FFmpeg kontrolü
+        run: ffmpeg -version
+
+      - name: Başarılı mesajı
+        run: echo "FFmpeg video motoru başarıyla çalıştı."
