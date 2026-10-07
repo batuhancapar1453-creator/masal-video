@@ -1,7 +1,4 @@
-- name: FFmpeg kur
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpegname: Masal Video Uret
+name: Masal Video Uret
 
 on:
   workflow_dispatch:
@@ -11,11 +8,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: FFmpeg kurulu mu kontrol et
-        run: ffmpeg -version
+      - name: FFmpeg kur
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Python kontrolü
-        run: python3 --version
+      - name: FFmpeg kontrol
+        run: |
+          ffmpeg -version
+
+      - name: Python paketlerini kur
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install requests
 
       - name: Masal videosu oluştur
         env:
@@ -23,41 +28,58 @@ jobs:
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
           AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
         run: |
           cat > video_olustur.py <<'PY'
           import os
-          import json
           import time
           import requests
           import subprocess
+          import html
 
-          GEMINI = os.environ["GEMINI_API_KEY"]
+          GEMINI_KEY = os.environ["GEMINI_API_KEY"]
           AZURE_KEY = os.environ["AZURE_SPEECH_KEY"]
-          AZURE_ENDPOINT = os.environ["AZURE_SPEECH_ENDPOINT"]
           HF_TOKEN = os.environ["HF_TOKEN"]
 
-          print("1/4 Gemini ile masal oluşturuluyor...")
+          print("=== 1. MASAL OLUŞTURULUYOR ===")
 
           gemini_url = (
-              "https://generativelanguage.googleapis.com/v1beta/models/"
-              "gemini-3.5-flash-lite:generateContent"
+              "https://generativelanguage.googleapis.com/"
+              "v1beta/models/gemini-3.5-flash-lite:generateContent"
           )
 
           prompt = """
           Türkçe çocuk YouTube kanalı için tamamen özgün bir masal yaz.
+
           Yaklaşık 4-5 dakika uzunluğunda olsun.
-          Sevimli bir ana karakter, eğlenceli bir macera,
-          küçük bir gizem ve güzel bir son olsun.
-          Korku ve şiddet olmasın.
-          Çocuklara uygun sıcak ve güvenli bir dil kullan.
-          Başlık ve hikâye dışında hiçbir açıklama yazma.
+
+          Sevimli ve akılda kalıcı bir ana karakter olsun.
+          Eğlenceli bir macera olsun.
+          Küçük bir problem veya gizem olsun.
+          Sonunda problem güzel şekilde çözülsün.
+          Çocuklara uygun, sıcak ve güvenli bir dil kullan.
+          Korku ve şiddet kullanma.
+
+          Önce etkileyici bir başlık yaz.
+          Ardından sadece masalı yaz.
           """
 
-          r = requests.post(
+          response = requests.post(
               gemini_url,
-              headers={"x-goog-api-key": GEMINI},
+              headers={
+                  "x-goog-api-key": GEMINI_KEY,
+                  "Content-Type": "application/json"
+              },
               json={
-                  "contents": [{"parts": [{"text": prompt}]}],
+                  "contents": [
+                      {
+                          "parts": [
+                              {
+                                  "text": prompt
+                              }
+                          ]
+                      }
+                  ],
                   "generationConfig": {
                       "temperature": 0.9,
                       "maxOutputTokens": 5000
@@ -66,171 +88,265 @@ jobs:
               timeout=120
           )
 
-          if r.status_code != 200:
-              raise Exception("Gemini hatası: " + r.text)
+          if response.status_code != 200:
+              raise Exception(
+                  "Gemini hatası "
+                  + str(response.status_code)
+                  + ": "
+                  + response.text
+              )
 
-          data = r.json()
-          story = data["candidates"][0]["content"]["parts"][0]["text"]
+          data = response.json()
 
-          print("Masal oluşturuldu.")
-          print(story[:500])
+          story = (
+              data["candidates"][0]
+              ["content"]["parts"][0]["text"]
+          )
 
-          with open("masal.txt", "w", encoding="utf-8") as f:
-              f.write(story)
+          print("Masal başarıyla oluşturuldu.")
 
-          print("2/4 Azure ile ses oluşturuluyor...")
+          with open(
+              "masal.txt",
+              "w",
+              encoding="utf-8"
+          ) as file:
+              file.write(story)
 
-          parts = []
+          print("=== 2. SES OLUŞTURULUYOR ===")
+
+          chunks = []
           remaining = story
 
           while remaining:
-              n = min(2000, len(remaining))
+              length = min(2000, len(remaining))
 
-              if n < len(remaining):
-                  pos = remaining.rfind(" ", 0, n)
-                  if pos > 500:
-                      n = pos
+              if length < len(remaining):
+                  space = remaining.rfind(" ", 0, length)
 
-              parts.append(remaining[:n].strip())
-              remaining = remaining[n:].strip()
+                  if space > 500:
+                      length = space
+
+              chunk = remaining[:length].strip()
+
+              if chunk:
+                  chunks.append(chunk)
+
+              remaining = remaining[length:].strip()
 
           audio_files = []
 
-          for i, text in enumerate(parts):
-              ssml = f"""<speak version="1.0" xml:lang="tr-TR">
-              <voice xml:lang="tr-TR" name="tr-TR-EmelNeural">
-              {text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}
-              </voice>
-              </speak>"""
+          azure_url = (
+              "https://eastus.tts.speech.microsoft.com/"
+              "cognitiveservices/v1"
+          )
 
-              audio_url = (
-                  "https://eastus.tts.speech.microsoft.com/"
-                  "cognitiveservices/v1"
+          for index, text in enumerate(chunks):
+
+              safe_text = html.escape(text)
+
+              ssml = (
+                  "<speak version='1.0' xml:lang='tr-TR'>"
+                  "<voice xml:lang='tr-TR' "
+                  "name='tr-TR-EmelNeural'>"
+                  + safe_text +
+                  "</voice>"
+                  "</speak>"
               )
 
-              rr = requests.post(
-                  audio_url,
+              response = requests.post(
+                  azure_url,
                   headers={
                       "Ocp-Apim-Subscription-Key": AZURE_KEY,
                       "X-Microsoft-OutputFormat":
                           "audio-16khz-128kbitrate-mono-mp3",
-                      "Content-Type": "application/ssml+xml"
+                      "Content-Type":
+                          "application/ssml+xml",
+                      "User-Agent":
+                          "MasalOtomasyon"
                   },
                   data=ssml.encode("utf-8"),
                   timeout=120
               )
 
-              if rr.status_code != 200:
-                  raise Exception("Azure hatası: " + rr.text)
+              if response.status_code != 200:
+                  raise Exception(
+                      "Azure Speech hatası "
+                      + str(response.status_code)
+                      + ": "
+                      + response.text
+                  )
 
-              filename = f"ses_{i:02d}.mp3"
+              filename = (
+                  "ses_"
+                  + str(index).zfill(2)
+                  + ".mp3"
+              )
 
-              with open(filename, "wb") as f:
-                  f.write(rr.content)
+              with open(filename, "wb") as file:
+                  file.write(response.content)
 
               audio_files.append(filename)
 
-              print(f"Ses parçası {i+1}/{len(parts)} oluşturuldu.")
+              print(
+                  "Ses parçası "
+                  + str(index + 1)
+                  + "/"
+                  + str(len(chunks))
+                  + " oluşturuldu."
+              )
+
               time.sleep(2)
 
-          with open("concat.txt", "w", encoding="utf-8") as f:
+          with open(
+              "concat.txt",
+              "w",
+              encoding="utf-8"
+          ) as file:
+
               for filename in audio_files:
-                  f.write(f"file '{filename}'\n")
+                  file.write(
+                      "file '"
+                      + filename
+                      + "'\n"
+                  )
 
-          subprocess.run([
-              "ffmpeg", "-y",
-              "-f", "concat",
-              "-safe", "0",
-              "-i", "concat.txt",
-              "-c", "copy",
-              "ses.mp3"
-          ], check=True)
+          subprocess.run(
+              [
+                  "ffmpeg",
+                  "-y",
+                  "-f",
+                  "concat",
+                  "-safe",
+                  "0",
+                  "-i",
+                  "concat.txt",
+                  "-c",
+                  "copy",
+                  "ses.mp3"
+              ],
+              check=True
+          )
 
-          print("3/4 Hugging Face ile görseller oluşturuluyor...")
+          print("Ses tamamlandı.")
+
+          print("=== 3. GÖRSELLER OLUŞTURULUYOR ===")
 
           image_url = (
-              "https://router.huggingface.co/hf-inference/models/"
+              "https://router.huggingface.co/"
+              "hf-inference/models/"
               "stabilityai/stable-diffusion-3-medium-diffusers"
           )
 
-          scene_prompts = [
-              "A cute friendly rabbit in a magical colorful forest, "
+          prompts = [
+              "cute friendly rabbit in a magical colorful forest, "
               "children's storybook illustration, warm cheerful style, "
-              "safe for children, cinematic landscape 16:9",
+              "safe for young children, landscape 16:9",
 
-              "The same cute friendly rabbit discovering a mysterious "
-              "glowing path in a magical forest, children's storybook "
-              "illustration, warm colorful style, landscape 16:9",
+              "same cute friendly rabbit exploring a magical forest, "
+              "colorful flowers and trees, children's storybook art, "
+              "landscape 16:9",
 
-              "The same cute friendly rabbit happily exploring a magical "
-              "forest with colorful flowers and trees, children's book "
+              "same cute friendly rabbit discovering a mysterious "
+              "glowing path in a magical forest, children's book "
               "illustration, landscape 16:9",
 
-              "The same cute friendly rabbit finding a small magical "
-              "secret in the forest, cheerful children's storybook art, "
+              "same cute friendly rabbit having a fun adventure with "
+              "friendly forest animals, colorful children's storybook "
+              "illustration, landscape 16:9",
+
+              "same cute friendly rabbit solving a gentle mystery in "
+              "a magical forest, warm cheerful children's book art, "
               "landscape 16:9",
 
-              "The same cute friendly rabbit having a fun adventure "
-              "with friendly forest animals, colorful children's "
-              "storybook illustration, landscape 16:9",
-
-              "The same cute friendly rabbit solving a gentle mystery "
-              "in a magical forest, warm cheerful children's book art, "
+              "same cute friendly rabbit finding a beautiful magical "
+              "secret, colorful children's storybook illustration, "
               "landscape 16:9",
 
-              "The same cute friendly rabbit celebrating with friends "
-              "in a beautiful magical forest, colorful children's "
-              "storybook illustration, landscape 16:9",
+              "same cute friendly rabbit celebrating with friends in "
+              "a magical forest, heartwarming children's book art, "
+              "landscape 16:9",
 
-              "The same cute friendly rabbit peacefully watching a "
-              "beautiful sunset in the magical forest, heartwarming "
-              "children's storybook illustration, landscape 16:9"
+              "same cute friendly rabbit watching a beautiful sunset "
+              "with friends, peaceful children's storybook "
+              "illustration, landscape 16:9"
           ]
 
-          for i, prompt in enumerate(scene_prompts):
-              rr = requests.post(
+          for index, prompt in enumerate(prompts):
+
+              response = requests.post(
                   image_url,
-                  headers={"Authorization": "Bearer " + HF_TOKEN},
-                  json={"inputs": prompt},
+                  headers={
+                      "Authorization":
+                          "Bearer " + HF_TOKEN,
+                      "Content-Type":
+                          "application/json"
+                  },
+                  json={
+                      "inputs": prompt
+                  },
                   timeout=300
               )
 
-              if rr.status_code != 200:
+              if response.status_code != 200:
                   raise Exception(
-                      f"Hugging Face hatası {rr.status_code}: {rr.text}"
+                      "Hugging Face hatası "
+                      + str(response.status_code)
+                      + ": "
+                      + response.text
                   )
 
-              filename = f"sahne_{i:02d}.png"
+              filename = (
+                  "sahne_"
+                  + str(index).zfill(2)
+                  + ".png"
+              )
 
-              with open(filename, "wb") as f:
-                  f.write(rr.content)
+              with open(filename, "wb") as file:
+                  file.write(response.content)
 
-              print(f"Görsel {i+1}/8 oluşturuldu.")
+              print(
+                  "Görsel "
+                  + str(index + 1)
+                  + "/8 oluşturuldu."
+              )
+
               time.sleep(5)
 
-          print("4/4 MP4 video oluşturuluyor...")
+          print("=== 4. VIDEO OLUŞTURULUYOR ===")
 
-          subprocess.run([
-              "ffmpeg", "-y",
-              "-framerate", "1/8",
-              "-i", "sahne_%02d.png",
-              "-i", "ses.mp3",
-              "-vf",
-              "scale=1280:720:force_original_aspect_ratio=decrease,"
-              "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
-              "-c:v", "libx264",
-              "-pix_fmt", "yuv420p",
-              "-c:a", "aac",
-              "-shortest",
-              "masal-video.mp4"
-          ], check=True)
+          subprocess.run(
+              [
+                  "ffmpeg",
+                  "-y",
+                  "-framerate",
+                  "1/8",
+                  "-i",
+                  "sahne_%02d.png",
+                  "-i",
+                  "ses.mp3",
+                  "-vf",
+                  "scale=1280:720:force_original_aspect_ratio=decrease,"
+                  "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+                  "-c:v",
+                  "libx264",
+                  "-pix_fmt",
+                  "yuv420p",
+                  "-c:a",
+                  "aac",
+                  "-shortest",
+                  "masal-video.mp4"
+              ],
+              check=True
+          )
 
+          print("================================")
           print("VIDEO BAŞARIYLA OLUŞTURULDU!")
+          print("================================")
           PY
 
           python3 video_olustur.py
 
-      - name: Video dosyasını sakla
+      - name: Video dosyasını yükle
         uses: actions/upload-artifact@v4
         with:
           name: masal-video
