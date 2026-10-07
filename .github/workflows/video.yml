@@ -1,4 +1,4 @@
-      - name: FFmpeg kur
+- name: FFmpeg kur
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpegname: Masal Video Uret
