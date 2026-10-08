@@ -20,7 +20,7 @@ jobs:
       - name: Python paketlerini kur
         run: |
           python3 -m pip install --upgrade pip
-          pip3 install requests
+          pip3 install requests pillow
 
       - name: Masal videosu oluştur
         env:
@@ -36,6 +36,9 @@ jobs:
           import requests
           import subprocess
           import html
+
+          from PIL import Image
+          from io import BytesIO
 
           GEMINI_KEY = os.environ["GEMINI_API_KEY"]
           AZURE_KEY = os.environ["AZURE_SPEECH_KEY"]
@@ -56,7 +59,7 @@ jobs:
           Sevimli ve akılda kalıcı bir ana karakter olsun.
           Eğlenceli bir macera olsun.
           Küçük bir problem veya gizem olsun.
-          Sonunda problem güzel şekilde çözülsün.
+          Sonunda problem güzel şekilde çözülsin.
           Çocuklara uygun, sıcak ve güvenli bir dil kullan.
           Korku ve şiddet kullanma.
 
@@ -298,11 +301,27 @@ jobs:
               filename = (
                   "sahne_"
                   + str(index).zfill(2)
-                  + ".png"
+                  + ".jpg"
               )
 
-              with open(filename, "wb") as file:
-                  file.write(response.content)
+              try:
+                  image = Image.open(
+                      BytesIO(response.content)
+                  )
+
+                  image = image.convert("RGB")
+
+                  image.save(
+                      filename,
+                      "JPEG",
+                      quality=95
+                  )
+
+              except Exception as e:
+                  raise Exception(
+                      "Görsel JPEG'e dönüştürülemedi: "
+                      + str(e)
+                  )
 
               print(
                   "Görsel "
@@ -321,7 +340,7 @@ jobs:
                   "-framerate",
                   "1/8",
                   "-i",
-                  "sahne_%02d.png",
+                  "sahne_%02d.jpg",
                   "-i",
                   "ses.mp3",
                   "-vf",
