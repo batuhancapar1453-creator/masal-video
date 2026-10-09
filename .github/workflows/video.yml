@@ -1,6 +1,5 @@
 name: Masal Video Uret
-
-on:
+on: [workflow_dispatch]
   workflow_dispatch:
 
 permissions:
