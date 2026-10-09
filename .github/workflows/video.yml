@@ -1,8 +1,10 @@
-```yaml
 name: Masal Video Uret
 
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   video:
@@ -29,11 +31,11 @@ jobs:
           cat > video_olustur.py <<'PY'
           import os
           import time
-          import requests
-          import subprocess
           import html
           import base64
           import json
+          import subprocess
+          import requests
 
           from PIL import Image
           from io import BytesIO
@@ -41,27 +43,32 @@ jobs:
           GEMINI_KEY = os.environ["GEMINI_API_KEY"]
           AZURE_KEY = os.environ["AZURE_SPEECH_KEY"]
           CF_TOKEN = os.environ["CLOUDFLARE_API_TOKEN"]
-          CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"].strip()
+
+          if not CF_ACCOUNT or not CF_TOKEN:
+              raise RuntimeError("Cloudflare ayarları eksik.")
+
+          session = requests.Session()
 
           print("=== 1. MASAL OLUŞTURULUYOR ===")
 
           gemini_url = (
               "https://generativelanguage.googleapis.com/"
-              "v1beta/models/gemini-3.5-flash-lite:generateContent"
+              "v1beta/models/gemini-2.5-flash:generateContent"
           )
 
           prompt = """
-          Türkçe çocuk YouTube kanalı için tamamen özgün bir masal yaz.
+          Türkçe çocuk YouTube kanalı için özgün bir masal yaz.
           Yaklaşık 4-5 dakika uzunluğunda olsun.
           Sevimli ve akılda kalıcı bir ana karakter olsun.
-          Eğlenceli bir macera ve küçük bir gizem olsun.
+          Eğlenceli bir macera ve küçük bir gizem içersin.
           Sonunda problem güzel şekilde çözülsün.
           Çocuklara uygun, sıcak ve güvenli bir dil kullan.
           Korku ve şiddet kullanma.
-          Önce etkileyici bir başlık yaz, ardından masalı yaz.
+          Önce masal başlığını, sonra masalı yaz.
           """
 
-          response = requests.post(
+          response = session.post(
               gemini_url,
               headers={
                   "x-goog-api-key": GEMINI_KEY,
@@ -70,7 +77,7 @@ jobs:
               json={
                   "contents": [{"parts": [{"text": prompt}]}],
                   "generationConfig": {
-                      "temperature": 0.9,
+                      "temperature": 0.8,
                       "maxOutputTokens": 5000
                   }
               },
@@ -78,9 +85,10 @@ jobs:
           )
 
           if response.status_code != 200:
-              raise Exception(
+              raise RuntimeError(
                   "Gemini hatası "
-                  + str(response.status_code) + ": " + response.text[:500]
+                  + str(response.status_code)
+                  + ": " + response.text[:400]
               )
 
           story = response.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -97,30 +105,35 @@ jobs:
 
           while remaining:
               length = min(2000, len(remaining))
+
               if length < len(remaining):
                   space = remaining.rfind(" ", 0, length)
                   if space > 500:
                       length = space
+
               chunk = remaining[:length].strip()
+
               if chunk:
                   chunks.append(chunk)
+
               remaining = remaining[length:].strip()
 
           audio_files = []
+
           azure_url = (
               "https://eastus.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
 
-          for index, text in enumerate(chunks):
+          for index, chunk in enumerate(chunks):
               ssml = (
                   "<speak version='1.0' xml:lang='tr-TR'>"
                   "<voice xml:lang='tr-TR' name='tr-TR-EmelNeural'>"
-                  + html.escape(text) +
-                  "</voice></speak>"
+                  + html.escape(chunk)
+                  + "</voice></speak>"
               )
 
-              response = requests.post(
+              response = session.post(
                   azure_url,
                   headers={
                       "Ocp-Apim-Subscription-Key": AZURE_KEY,
@@ -134,103 +147,119 @@ jobs:
               )
 
               if response.status_code != 200:
-                  raise Exception(
-                      "Azure hatası "
-                      + str(response.status_code) + ": " + response.text[:500]
+                  raise RuntimeError(
+                      "Azure ses hatası "
+                      + str(response.status_code)
+                      + ": " + response.text[:400]
                   )
 
-              filename = "ses_" + str(index).zfill(2) + ".mp3"
+              filename = f"ses_{index:02d}.mp3"
 
               with open(filename, "wb") as f:
                   f.write(response.content)
 
               audio_files.append(filename)
-              print("Ses parçası", index + 1, "/", len(chunks))
-              time.sleep(2)
+
+              print(f"Ses parçası {index + 1}/{len(chunks)} hazır.")
+              time.sleep(1)
 
           with open("concat.txt", "w", encoding="utf-8") as f:
               for filename in audio_files:
-                  f.write("file '" + filename + "'\n")
+                  f.write(f"file '{filename}'\n")
 
           subprocess.run([
-              "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-              "-i", "concat.txt", "-c", "copy", "ses.mp3"
+              "ffmpeg", "-y",
+              "-f", "concat", "-safe", "0",
+              "-i", "concat.txt",
+              "-c", "copy", "ses.mp3"
           ], check=True)
 
           print("=== 3. CLOUDFLARE GÖRSELLERİ ===")
 
           image_url = (
               "https://api.cloudflare.com/client/v4/accounts/"
-              + CF_ACCOUNT.strip()
+              + CF_ACCOUNT
               + "/ai/run/@cf/lykon/dreamshaper-8-lcm"
           )
 
           prompts = [
-              "Cute friendly rabbit in a magical colorful forest, children's storybook illustration, warm cheerful colors, landscape composition, no text",
-              "The same cute rabbit exploring a forest with colorful flowers and tall trees, children's storybook illustration, landscape composition, no text",
-              "The same cute rabbit discovering a glowing path in a magical forest, friendly and cheerful children's illustration, landscape composition, no text",
-              "The same cute rabbit meeting friendly forest animals, warm colorful children's storybook art, landscape, no text",
-              "The same cute rabbit solving a gentle mystery in a magical forest, bright friendly children's illustration, no text",
-              "The same cute rabbit discovering a beautiful magical secret, colorful storybook illustration, landscape, no text",
-              "The same cute rabbit celebrating with forest friends, joyful children's storybook illustration, landscape, no text",
-              "The same cute rabbit watching a beautiful sunset with friends, peaceful warm children's storybook illustration, landscape, no text"
+              "Cute friendly rabbit in a magical colorful forest, "
+              "children's storybook illustration, warm colors, "
+              "landscape composition, no text",
+
+              "The same cute rabbit exploring a forest with colorful "
+              "flowers and tall trees, children's storybook illustration, "
+              "landscape composition, no text",
+
+              "The same cute rabbit discovering a glowing path in a "
+              "magical forest, cheerful children's illustration, no text",
+
+              "The same cute rabbit meeting friendly forest animals, "
+              "warm colorful children's storybook art, landscape, no text",
+
+              "The same cute rabbit solving a gentle mystery in a magical "
+              "forest, bright friendly children's illustration, no text",
+
+              "The same cute rabbit discovering a beautiful magical secret, "
+              "colorful storybook illustration, landscape, no text",
+
+              "The same cute rabbit celebrating with forest friends, "
+              "joyful children's storybook illustration, landscape, no text",
+
+              "The same cute rabbit watching a beautiful sunset with friends, "
+              "peaceful warm children's storybook illustration, no text"
           ]
 
           for index, scene_prompt in enumerate(prompts):
-              print("Cloudflare isteği gönderiliyor:", index + 1, "/8")
+              print(f"Görsel isteği {index + 1}/8 gönderiliyor.")
 
-              response = requests.post(
+              response = session.post(
                   image_url,
                   headers={
                       "Authorization": "Bearer " + CF_TOKEN,
                       "Content-Type": "application/json"
                   },
-                  json={
-                      "prompt": scene_prompt,
-                      "num_steps": 8
-                  },
+                  json={"prompt": scene_prompt},
                   timeout=300
               )
 
-              print("Cloudflare HTTP durumu:", response.status_code)
               content_type = response.headers.get("Content-Type", "")
+
+              print("Cloudflare HTTP:", response.status_code)
               print("Cloudflare içerik türü:", content_type)
 
               if response.status_code != 200:
-                  raise Exception(
+                  raise RuntimeError(
                       "Cloudflare HTTP hatası "
                       + str(response.status_code)
-                      + ". Yanıt: " + response.text[:500]
+                      + ": " + response.text[:400]
                   )
 
-              # Bazı modeller doğrudan resim baytları döndürebilir.
               if content_type.lower().startswith("image/"):
                   image_bytes = response.content
               else:
                   try:
                       data = response.json()
                   except ValueError:
-                      raise Exception(
-                          "Cloudflare JSON yerine farklı yanıt döndürdü. "
-                          "HTTP: " + str(response.status_code)
-                          + ", içerik türü: " + content_type
-                          + ", yanıt başlangıcı: "
-                          + response.text[:300]
+                      raise RuntimeError(
+                          "Cloudflare JSON yerine başka yanıt döndürdü. "
+                          "İçerik türü: " + content_type
+                          + ". Yanıt: " + response.text[:250]
                       )
 
                   if not data.get("success"):
-                      raise Exception(
+                      raise RuntimeError(
                           "Cloudflare model hatası: "
-                          + json.dumps(data, ensure_ascii=False)[:500]
+                          + json.dumps(data, ensure_ascii=False)[:400]
                       )
 
                   result = data.get("result") or {}
                   encoded = result.get("image")
 
                   if not encoded:
-                      raise Exception(
-                          "Cloudflare yanıtında image alanı bulunamadı. "
-                          "Alanlar: " + str(list(result.keys()))
+                      raise RuntimeError(
+                          "Cloudflare yanıtında image alanı yok. "
+                          "Mevcut alanlar: " + str(list(result.keys()))
                       )
 
                   image_bytes = base64.b64decode(encoded)
@@ -238,30 +267,34 @@ jobs:
               try:
                   image = Image.open(BytesIO(image_bytes)).convert("RGB")
               except Exception as exc:
-                  raise Exception(
-                      "Dönen veri görsel olarak açılamadı: " + str(exc)
+                  raise RuntimeError(
+                      "Görsel açılamadı: " + str(exc)
                   )
 
-              filename = "sahne_" + str(index).zfill(2) + ".jpg"
-              image.save(filename, "JPEG", quality=95)
+              filename = f"sahne_{index:02d}.jpg"
+              image.save(filename, "JPEG", quality=90)
 
-              print("Görsel", index + 1, "/8 oluşturuldu.")
-              time.sleep(2)
+              print(f"Görsel {index + 1}/8 kaydedildi.")
+              time.sleep(1)
 
           print("=== 4. VIDEO OLUŞTURULUYOR ===")
 
           subprocess.run([
               "ffmpeg", "-y",
-              "-framerate", "1/8",
+              "-loop", "1",
+              "-framerate", "1",
               "-i", "sahne_%02d.jpg",
               "-i", "ses.mp3",
               "-vf",
               "scale=1280:720:force_original_aspect_ratio=decrease,"
-              "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+              "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
+              "format=yuv420p",
               "-c:v", "libx264",
-              "-pix_fmt", "yuv420p",
+              "-tune", "stillimage",
               "-c:a", "aac",
+              "-b:a", "128k",
               "-shortest",
+              "-pix_fmt", "yuv420p",
               "masal-video.mp4"
           ], check=True)
 
@@ -274,5 +307,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: masal-video
-          path: masal-video.mp4
+          path: |
+            masal-video.mp4
+            masal.txt
 ```
