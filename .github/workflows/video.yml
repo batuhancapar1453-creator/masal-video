@@ -1,4 +1,3 @@
-```yaml
 name: Masal Video Uret
 
 on:
@@ -10,78 +9,74 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Kodu indir
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Python kur
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: FFmpeg kur
+      - name: Install FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
 
-      - name: Gerekli paketleri kur
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Masal videosunu oluştur
+      - name: Create story video
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_REGION: ${{ secrets.AZURE_REGION }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cat > create_video.py <<'PY'
           import os
           import sys
-          import json
           import time
           import base64
           import subprocess
+          import html
           import requests
 
-          GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-          AZURE_KEY = os.environ.get("AZURE_SPEECH_KEY", "")
-          CF_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-          CF_ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-
-          def require(value, name):
+          def require(name):
+              value = os.environ.get(name, "").strip()
               if not value:
-                  print(f"EKSİK GİZLİ AYAR: {name}")
-                  sys.exit(1)
+                  sys.exit(f"Missing GitHub secret: {name}")
+              return value
 
-          require(GEMINI_KEY, "GEMINI_API_KEY")
-          require(AZURE_KEY, "AZURE_SPEECH_KEY")
-          require(CF_TOKEN, "CLOUDFLARE_API_TOKEN")
-          require(CF_ACCOUNT, "CLOUDFLARE_ACCOUNT_ID")
+          GEMINI_KEY = require("GEMINI_API_KEY")
+          AZURE_KEY = require("AZURE_SPEECH_KEY")
+          CF_TOKEN = require("CLOUDFLARE_API_TOKEN")
+          CF_ACCOUNT = require("CLOUDFLARE_ACCOUNT_ID")
+          AZURE_REGION = os.environ.get("AZURE_REGION", "westeurope").strip()
 
           def run(command):
-              result = subprocess.run(command, capture_output=True, text=True)
-              if result.returncode != 0:
-                  print(result.stderr[-4000:])
-                  raise RuntimeError("Komut başarısız oldu")
+              result = subprocess.run(
+                  command, text=True, capture_output=True
+              )
+              if result.returncode:
+                  print(result.stderr[-3000:])
+                  raise RuntimeError("Command failed")
               return result
 
-          print("1/5 Masal yazılıyor...")
+          print("1/5 Generating Turkish story...")
 
           prompt = """
-          Türkçe, 4-6 yaş çocukları için özgün ve sıcak bir masal yaz.
-          Kahramanlar sevimli bir tavşan ve küçük bir yıldız olsun.
-          Korkutucu olay, şiddet, tehlikeli davranış ve telifli karakter kullanma.
-          Masal yaklaşık 450-600 kelime olsun.
-          Sadece masal metnini ver; başlık ekleyebilirsin.
-          Sonu mutlu bitsin ve nazik olma mesajı versin.
+          Write an original Turkish bedtime story for children aged 4-7.
+          The main characters are a kind little rabbit and a friendly star.
+          Use simple Turkish, gentle humor, and a happy ending.
+          Include a lesson about kindness and helping others.
+          Around 450-600 words. No violence or frightening scenes.
+          Return only the story text with a short title.
           """
 
-          gemini_url = (
-              "https://generativelanguage.googleapis.com/v1beta/"
-              "models/gemini-2.5-flash:generateContent"
-          )
-
           response = requests.post(
-              gemini_url,
+              "https://generativelanguage.googleapis.com/v1beta/"
+              "models/gemini-2.5-flash:generateContent",
               params={"key": GEMINI_KEY},
               json={
                   "contents": [{"parts": [{"text": prompt}]}],
@@ -94,72 +89,63 @@ jobs:
           )
 
           if not response.ok:
-              print("Gemini hatası:", response.status_code, response.text[:2000])
+              print("Gemini error:", response.status_code, response.text[:1500])
               response.raise_for_status()
 
-          data = response.json()
-          story = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+          story = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
           with open("masal.txt", "w", encoding="utf-8") as f:
               f.write(story)
 
-          print("Masal yazıldı:", len(story), "karakter")
-
-          print("2/5 Seslendiriliyor...")
+          print("2/5 Generating Turkish narration...")
 
           ssml = (
               '<speak version="1.0" xml:lang="tr-TR">'
               '<voice name="tr-TR-EmelNeural">'
-              + story.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+              + html.escape(story)
               + '</voice></speak>'
           )
 
-          # Azure Speech için Türkiye bölgesi.
-          # Anahtarın farklı bir Azure bölgesine aitse AZURE_REGION secret'ı ekleyebilirsin.
-          azure_region = os.environ.get("AZURE_REGION", "westeurope")
-
           tts_url = (
-              f"https://{azure_region}.tts.speech.microsoft.com/"
+              f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
 
-          audio_response = requests.post(
+          audio = requests.post(
               tts_url,
               headers={
                   "Ocp-Apim-Subscription-Key": AZURE_KEY,
                   "Content-Type": "application/ssml+xml",
-                  "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3"
+                  "X-Microsoft-OutputFormat":
+                      "audio-24khz-48kbitrate-mono-mp3"
               },
               data=ssml.encode("utf-8"),
               timeout=180
           )
 
-          if not audio_response.ok:
-              print("Azure ses hatası:", audio_response.status_code)
-              print(audio_response.text[:2000])
-              audio_response.raise_for_status()
+          if not audio.ok:
+              print("Azure TTS error:", audio.status_code, audio.text[:1500])
+              audio.raise_for_status()
 
           with open("narration.mp3", "wb") as f:
-              f.write(audio_response.content)
+              f.write(audio.content)
 
-          print("Ses dosyası hazır:", len(audio_response.content), "bayt")
-
-          print("3/5 Görseller hazırlanıyor...")
+          print("3/5 Generating illustrations...")
 
           image_url = (
-              f"https://api.cloudflare.com/client/v4/accounts/"
+              "https://api.cloudflare.com/client/v4/accounts/"
               f"{CF_ACCOUNT}/ai/run/@cf/lykon/dreamshaper-8-lcm"
           )
 
-          image_prompts = [
-              "A cute little brown bunny in a magical flower meadow, children's storybook illustration, colorful, soft lighting, no text",
-              "A tiny glowing golden star smiling in a purple twilight sky, children's storybook illustration, no text",
-              "A cute bunny looking up at a friendly little star, enchanted forest, children's picture book illustration, no text",
-              "A bunny walking on a winding path with glowing flowers, whimsical children's storybook art, no text",
-              "A tiny star gently lighting a dark but friendly forest path, cute children's illustration, no text",
-              "A bunny and a little star helping a small bird find its nest, warm colorful storybook art, no text",
-              "A happy bunny, little star and forest animals celebrating under a magical sky, children's book illustration, no text",
-              "A cute bunny sleeping peacefully beneath a starry sky, cozy bedtime storybook illustration, no text"
+          prompts = [
+              "Cute brown rabbit in a colorful magical flower meadow, children's storybook illustration, no text",
+              "Tiny friendly glowing golden star in a twilight sky, children's picture book illustration, no text",
+              "Rabbit looking up at a smiling little star in an enchanted forest, colorful storybook art, no text",
+              "Cute rabbit walking along a path with glowing flowers, children's illustration, no text",
+              "Friendly little star lighting a forest path, gentle magical children's book art, no text",
+              "Rabbit and star helping a little bird find its nest, warm storybook illustration, no text",
+              "Happy rabbit, star and forest animals celebrating together, children's picture book art, no text",
+              "Cute rabbit sleeping peacefully under a starry sky, cozy bedtime story illustration, no text"
           ]
 
           headers = {
@@ -167,7 +153,7 @@ jobs:
               "Content-Type": "application/json"
           }
 
-          def save_cloudflare_image(prompt, filename):
+          def make_image(prompt, filename):
               r = requests.post(
                   image_url,
                   headers=headers,
@@ -181,66 +167,55 @@ jobs:
               )
 
               if not r.ok:
-                  print("Cloudflare görsel hatası:", r.status_code)
-                  print(r.text[:2000])
+                  print("Cloudflare error:", r.status_code, r.text[:1500])
                   r.raise_for_status()
 
               content_type = r.headers.get("content-type", "").lower()
 
-              if "image/" in content_type or r.content[:8] == b"\x89PNG\r\n\x1a\n":
+              if content_type.startswith("image/") or r.content.startswith(b"\x89PNG"):
                   image_bytes = r.content
               else:
                   try:
-                      result = r.json()
+                      data = r.json()
                   except Exception:
-                      print("Cloudflare beklenmeyen yanıt türü:", content_type)
+                      print("Unexpected Cloudflare response:", content_type)
                       print(r.text[:1000])
-                      raise RuntimeError("Cloudflare görsel yanıtı okunamadı")
+                      raise RuntimeError("Could not read image response")
 
-                  if isinstance(result.get("result"), dict):
-                      image_data = result["result"].get("image")
-                  else:
-                      image_data = None
+                  image_data = data.get("result", {}).get("image")
 
                   if not image_data:
-                      print("Cloudflare yanıtında görsel bulunamadı.")
-                      print(json.dumps(result, ensure_ascii=False)[:1500])
-                      raise RuntimeError("Görsel verisi eksik")
+                      print("Image missing from Cloudflare response")
+                      print(str(data)[:1500])
+                      raise RuntimeError("No image returned")
 
-                  if isinstance(image_data, str):
-                      if image_data.startswith("data:image"):
-                          image_data = image_data.split(",", 1)[1]
-                      image_bytes = base64.b64decode(image_data)
-                  else:
-                      raise RuntimeError("Görsel verisinin biçimi desteklenmiyor")
+                  if image_data.startswith("data:image"):
+                      image_data = image_data.split(",", 1)[1]
+
+                  image_bytes = base64.b64decode(image_data)
 
               if not image_bytes:
-                  raise RuntimeError("Boş görsel alındı")
+                  raise RuntimeError("Empty image received")
 
               with open(filename, "wb") as f:
                   f.write(image_bytes)
 
-              print(filename, "hazır:", len(image_bytes), "bayt")
-
-          for i, prompt_text in enumerate(image_prompts, start=1):
-              print(f"Görsel {i}/8 hazırlanıyor...")
-              save_cloudflare_image(prompt_text, f"scene_{i:02d}.png")
+          for i, prompt_text in enumerate(prompts, 1):
+              print(f"Generating image {i}/8...")
+              make_image(prompt_text, f"scene_{i:02d}.png")
               time.sleep(1)
 
-          print("4/5 Video oluşturuluyor...")
+          print("4/5 Creating video clips...")
 
-          # Görselleri videoya çevir ve birleştir.
           for i in range(1, 9):
-              filename = f"scene_{i:02d}.png"
-              if not os.path.exists(filename):
-                  raise RuntimeError(f"Görsel bulunamadı: {filename}")
-
               run([
                   "ffmpeg", "-y",
                   "-loop", "1",
-                  "-i", filename,
+                  "-i", f"scene_{i:02d}.png",
                   "-t", "7",
-                  "-vf", "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,format=yuv420p",
+                  "-vf",
+                  "scale=1280:720:force_original_aspect_ratio=increase,"
+                  "crop=1280:720,format=yuv420p",
                   "-r", "24",
                   "-an",
                   f"clip_{i:02d}.mp4"
@@ -258,6 +233,8 @@ jobs:
               "visuals.mp4"
           ])
 
+          print("5/5 Combining video and narration...")
+
           run([
               "ffmpeg", "-y",
               "-i", "visuals.mp4",
@@ -272,13 +249,12 @@ jobs:
               "masal-video.mp4"
           ])
 
-          print("5/5 Tamamlandı!")
-          print("Video:", os.path.getsize("masal-video.mp4"), "bayt")
+          print("SUCCESS: masal-video.mp4 created")
           PY
 
           python create_video.py
 
-      - name: Video ve masalı yükle
+      - name: Upload video and story
         uses: actions/upload-artifact@v4
         with:
           name: masal-video
@@ -288,3 +264,4 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 ```
+
