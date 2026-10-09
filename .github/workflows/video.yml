@@ -1,4 +1,4 @@
-
+```yaml
 name: Masal Video Uret
 
 on:
@@ -33,6 +33,7 @@ jobs:
           import subprocess
           import html
           import base64
+          import json
 
           from PIL import Image
           from io import BytesIO
@@ -79,7 +80,7 @@ jobs:
           if response.status_code != 200:
               raise Exception(
                   "Gemini hatası "
-                  + str(response.status_code) + ": " + response.text
+                  + str(response.status_code) + ": " + response.text[:500]
               )
 
           story = response.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -135,10 +136,11 @@ jobs:
               if response.status_code != 200:
                   raise Exception(
                       "Azure hatası "
-                      + str(response.status_code) + ": " + response.text
+                      + str(response.status_code) + ": " + response.text[:500]
                   )
 
               filename = "ses_" + str(index).zfill(2) + ".mp3"
+
               with open(filename, "wb") as f:
                   f.write(response.content)
 
@@ -159,73 +161,86 @@ jobs:
 
           image_url = (
               "https://api.cloudflare.com/client/v4/accounts/"
-              + CF_ACCOUNT
+              + CF_ACCOUNT.strip()
               + "/ai/run/@cf/lykon/dreamshaper-8-lcm"
           )
 
           prompts = [
-              "Cute friendly rabbit in a magical colorful forest, "
-              "children's storybook illustration, warm cheerful colors, "
-              "landscape composition, no text",
-
-              "The same cute rabbit exploring a forest with colorful "
-              "flowers and tall trees, children's storybook illustration, "
-              "landscape composition, no text",
-
-              "The same cute rabbit discovering a glowing path in a "
-              "magical forest, friendly and cheerful children's illustration, "
-              "landscape composition, no text",
-
-              "The same cute rabbit meeting friendly forest animals, "
-              "warm colorful children's storybook art, landscape, no text",
-
-              "The same cute rabbit solving a gentle mystery in a magical "
-              "forest, bright friendly children's illustration, no text",
-
-              "The same cute rabbit discovering a beautiful magical secret, "
-              "colorful storybook illustration, landscape, no text",
-
-              "The same cute rabbit celebrating with forest friends, "
-              "joyful children's storybook illustration, landscape, no text",
-
-              "The same cute rabbit watching a beautiful sunset with friends, "
-              "peaceful warm children's storybook illustration, no text"
+              "Cute friendly rabbit in a magical colorful forest, children's storybook illustration, warm cheerful colors, landscape composition, no text",
+              "The same cute rabbit exploring a forest with colorful flowers and tall trees, children's storybook illustration, landscape composition, no text",
+              "The same cute rabbit discovering a glowing path in a magical forest, friendly and cheerful children's illustration, landscape composition, no text",
+              "The same cute rabbit meeting friendly forest animals, warm colorful children's storybook art, landscape, no text",
+              "The same cute rabbit solving a gentle mystery in a magical forest, bright friendly children's illustration, no text",
+              "The same cute rabbit discovering a beautiful magical secret, colorful storybook illustration, landscape, no text",
+              "The same cute rabbit celebrating with forest friends, joyful children's storybook illustration, landscape, no text",
+              "The same cute rabbit watching a beautiful sunset with friends, peaceful warm children's storybook illustration, landscape, no text"
           ]
 
           for index, scene_prompt in enumerate(prompts):
+              print("Cloudflare isteği gönderiliyor:", index + 1, "/8")
+
               response = requests.post(
                   image_url,
                   headers={
                       "Authorization": "Bearer " + CF_TOKEN,
                       "Content-Type": "application/json"
                   },
-                  json={"prompt": scene_prompt},
+                  json={
+                      "prompt": scene_prompt,
+                      "num_steps": 8
+                  },
                   timeout=300
               )
 
+              print("Cloudflare HTTP durumu:", response.status_code)
+              content_type = response.headers.get("Content-Type", "")
+              print("Cloudflare içerik türü:", content_type)
+
               if response.status_code != 200:
                   raise Exception(
-                      "Cloudflare görsel hatası "
-                      + str(response.status_code) + ": " + response.text
+                      "Cloudflare HTTP hatası "
+                      + str(response.status_code)
+                      + ". Yanıt: " + response.text[:500]
                   )
 
-              data = response.json()
-              if not data.get("success"):
+              # Bazı modeller doğrudan resim baytları döndürebilir.
+              if content_type.lower().startswith("image/"):
+                  image_bytes = response.content
+              else:
+                  try:
+                      data = response.json()
+                  except ValueError:
+                      raise Exception(
+                          "Cloudflare JSON yerine farklı yanıt döndürdü. "
+                          "HTTP: " + str(response.status_code)
+                          + ", içerik türü: " + content_type
+                          + ", yanıt başlangıcı: "
+                          + response.text[:300]
+                      )
+
+                  if not data.get("success"):
+                      raise Exception(
+                          "Cloudflare model hatası: "
+                          + json.dumps(data, ensure_ascii=False)[:500]
+                      )
+
+                  result = data.get("result") or {}
+                  encoded = result.get("image")
+
+                  if not encoded:
+                      raise Exception(
+                          "Cloudflare yanıtında image alanı bulunamadı. "
+                          "Alanlar: " + str(list(result.keys()))
+                      )
+
+                  image_bytes = base64.b64decode(encoded)
+
+              try:
+                  image = Image.open(BytesIO(image_bytes)).convert("RGB")
+              except Exception as exc:
                   raise Exception(
-                      "Cloudflare model hatası: " + str(data)
+                      "Dönen veri görsel olarak açılamadı: " + str(exc)
                   )
-
-              result = data.get("result") or {}
-              encoded = result.get("image")
-
-              if not encoded:
-                  raise Exception(
-                      "Cloudflare yanıtında görsel verisi bulunamadı: "
-                      + str(list(result.keys()))
-                  )
-
-              image_bytes = base64.b64decode(encoded)
-              image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
               filename = "sahne_" + str(index).zfill(2) + ".jpg"
               image.save(filename, "JPEG", quality=95)
@@ -260,3 +275,4 @@ jobs:
         with:
           name: masal-video
           path: masal-video.mp4
+```
