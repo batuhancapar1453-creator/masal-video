@@ -1,3 +1,4 @@
+
 name: Masal Video Uret
 
 on:
@@ -13,10 +14,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: FFmpeg kontrol
-        run: |
-          ffmpeg -version
-
       - name: Python paketlerini kur
         run: |
           python3 -m pip install --upgrade pip
@@ -26,9 +23,8 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
-          AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           cat > video_olustur.py <<'PY'
           import os
@@ -36,13 +32,15 @@ jobs:
           import requests
           import subprocess
           import html
+          import base64
 
           from PIL import Image
           from io import BytesIO
 
           GEMINI_KEY = os.environ["GEMINI_API_KEY"]
           AZURE_KEY = os.environ["AZURE_SPEECH_KEY"]
-          HF_TOKEN = os.environ["HF_TOKEN"]
+          CF_TOKEN = os.environ["CLOUDFLARE_API_TOKEN"]
+          CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"]
 
           print("=== 1. MASAL OLUŞTURULUYOR ===")
 
@@ -53,18 +51,13 @@ jobs:
 
           prompt = """
           Türkçe çocuk YouTube kanalı için tamamen özgün bir masal yaz.
-
           Yaklaşık 4-5 dakika uzunluğunda olsun.
-
           Sevimli ve akılda kalıcı bir ana karakter olsun.
-          Eğlenceli bir macera olsun.
-          Küçük bir problem veya gizem olsun.
-          Sonunda problem güzel şekilde çözülsin.
+          Eğlenceli bir macera ve küçük bir gizem olsun.
+          Sonunda problem güzel şekilde çözülsün.
           Çocuklara uygun, sıcak ve güvenli bir dil kullan.
           Korku ve şiddet kullanma.
-
-          Önce etkileyici bir başlık yaz.
-          Ardından sadece masalı yaz.
+          Önce etkileyici bir başlık yaz, ardından masalı yaz.
           """
 
           response = requests.post(
@@ -74,15 +67,7 @@ jobs:
                   "Content-Type": "application/json"
               },
               json={
-                  "contents": [
-                      {
-                          "parts": [
-                              {
-                                  "text": prompt
-                              }
-                          ]
-                      }
-                  ],
+                  "contents": [{"parts": [{"text": prompt}]}],
                   "generationConfig": {
                       "temperature": 0.9,
                       "maxOutputTokens": 5000
@@ -94,66 +79,44 @@ jobs:
           if response.status_code != 200:
               raise Exception(
                   "Gemini hatası "
-                  + str(response.status_code)
-                  + ": "
-                  + response.text
+                  + str(response.status_code) + ": " + response.text
               )
 
-          data = response.json()
+          story = response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-          story = (
-              data["candidates"][0]
-              ["content"]["parts"][0]["text"]
-          )
+          with open("masal.txt", "w", encoding="utf-8") as f:
+              f.write(story)
 
-          print("Masal başarıyla oluşturuldu.")
+          print("Masal oluşturuldu.")
 
-          with open(
-              "masal.txt",
-              "w",
-              encoding="utf-8"
-          ) as file:
-              file.write(story)
-
-          print("=== 2. SES OLUŞTURULUYOR ===")
+          print("=== 2. SESLENDİRME ===")
 
           chunks = []
           remaining = story
 
           while remaining:
               length = min(2000, len(remaining))
-
               if length < len(remaining):
                   space = remaining.rfind(" ", 0, length)
-
                   if space > 500:
                       length = space
-
               chunk = remaining[:length].strip()
-
               if chunk:
                   chunks.append(chunk)
-
               remaining = remaining[length:].strip()
 
           audio_files = []
-
           azure_url = (
               "https://eastus.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
 
           for index, text in enumerate(chunks):
-
-              safe_text = html.escape(text)
-
               ssml = (
                   "<speak version='1.0' xml:lang='tr-TR'>"
-                  "<voice xml:lang='tr-TR' "
-                  "name='tr-TR-EmelNeural'>"
-                  + safe_text +
-                  "</voice>"
-                  "</speak>"
+                  "<voice xml:lang='tr-TR' name='tr-TR-EmelNeural'>"
+                  + html.escape(text) +
+                  "</voice></speak>"
               )
 
               response = requests.post(
@@ -162,10 +125,8 @@ jobs:
                       "Ocp-Apim-Subscription-Key": AZURE_KEY,
                       "X-Microsoft-OutputFormat":
                           "audio-16khz-128kbitrate-mono-mp3",
-                      "Content-Type":
-                          "application/ssml+xml",
-                      "User-Agent":
-                          "MasalOtomasyon"
+                      "Content-Type": "application/ssml+xml",
+                      "User-Agent": "MasalOtomasyon"
                   },
                   data=ssml.encode("utf-8"),
                   timeout=120
@@ -173,194 +134,123 @@ jobs:
 
               if response.status_code != 200:
                   raise Exception(
-                      "Azure Speech hatası "
-                      + str(response.status_code)
-                      + ": "
-                      + response.text
+                      "Azure hatası "
+                      + str(response.status_code) + ": " + response.text
                   )
 
-              filename = (
-                  "ses_"
-                  + str(index).zfill(2)
-                  + ".mp3"
-              )
-
-              with open(filename, "wb") as file:
-                  file.write(response.content)
+              filename = "ses_" + str(index).zfill(2) + ".mp3"
+              with open(filename, "wb") as f:
+                  f.write(response.content)
 
               audio_files.append(filename)
-
-              print(
-                  "Ses parçası "
-                  + str(index + 1)
-                  + "/"
-                  + str(len(chunks))
-                  + " oluşturuldu."
-              )
-
+              print("Ses parçası", index + 1, "/", len(chunks))
               time.sleep(2)
 
-          with open(
-              "concat.txt",
-              "w",
-              encoding="utf-8"
-          ) as file:
-
+          with open("concat.txt", "w", encoding="utf-8") as f:
               for filename in audio_files:
-                  file.write(
-                      "file '"
-                      + filename
-                      + "'\n"
-                  )
+                  f.write("file '" + filename + "'\n")
 
-          subprocess.run(
-              [
-                  "ffmpeg",
-                  "-y",
-                  "-f",
-                  "concat",
-                  "-safe",
-                  "0",
-                  "-i",
-                  "concat.txt",
-                  "-c",
-                  "copy",
-                  "ses.mp3"
-              ],
-              check=True
-          )
+          subprocess.run([
+              "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+              "-i", "concat.txt", "-c", "copy", "ses.mp3"
+          ], check=True)
 
-          print("Ses tamamlandı.")
-
-          print("=== 3. GÖRSELLER OLUŞTURULUYOR ===")
+          print("=== 3. CLOUDFLARE GÖRSELLERİ ===")
 
           image_url = (
-              "https://router.huggingface.co/"
-              "hf-inference/models/"
-              "stabilityai/stable-diffusion-3-medium-diffusers"
+              "https://api.cloudflare.com/client/v4/accounts/"
+              + CF_ACCOUNT
+              + "/ai/run/@cf/lykon/dreamshaper-8-lcm"
           )
 
           prompts = [
-              "cute friendly rabbit in a magical colorful forest, "
-              "children's storybook illustration, warm cheerful style, "
-              "safe for young children, landscape 16:9",
+              "Cute friendly rabbit in a magical colorful forest, "
+              "children's storybook illustration, warm cheerful colors, "
+              "landscape composition, no text",
 
-              "same cute friendly rabbit exploring a magical forest, "
-              "colorful flowers and trees, children's storybook art, "
-              "landscape 16:9",
+              "The same cute rabbit exploring a forest with colorful "
+              "flowers and tall trees, children's storybook illustration, "
+              "landscape composition, no text",
 
-              "same cute friendly rabbit discovering a mysterious "
-              "glowing path in a magical forest, children's book "
-              "illustration, landscape 16:9",
+              "The same cute rabbit discovering a glowing path in a "
+              "magical forest, friendly and cheerful children's illustration, "
+              "landscape composition, no text",
 
-              "same cute friendly rabbit having a fun adventure with "
-              "friendly forest animals, colorful children's storybook "
-              "illustration, landscape 16:9",
+              "The same cute rabbit meeting friendly forest animals, "
+              "warm colorful children's storybook art, landscape, no text",
 
-              "same cute friendly rabbit solving a gentle mystery in "
-              "a magical forest, warm cheerful children's book art, "
-              "landscape 16:9",
+              "The same cute rabbit solving a gentle mystery in a magical "
+              "forest, bright friendly children's illustration, no text",
 
-              "same cute friendly rabbit finding a beautiful magical "
-              "secret, colorful children's storybook illustration, "
-              "landscape 16:9",
+              "The same cute rabbit discovering a beautiful magical secret, "
+              "colorful storybook illustration, landscape, no text",
 
-              "same cute friendly rabbit celebrating with friends in "
-              "a magical forest, heartwarming children's book art, "
-              "landscape 16:9",
+              "The same cute rabbit celebrating with forest friends, "
+              "joyful children's storybook illustration, landscape, no text",
 
-              "same cute friendly rabbit watching a beautiful sunset "
-              "with friends, peaceful children's storybook "
-              "illustration, landscape 16:9"
+              "The same cute rabbit watching a beautiful sunset with friends, "
+              "peaceful warm children's storybook illustration, no text"
           ]
 
-          for index, prompt in enumerate(prompts):
-
+          for index, scene_prompt in enumerate(prompts):
               response = requests.post(
                   image_url,
                   headers={
-                      "Authorization":
-                          "Bearer " + HF_TOKEN,
-                      "Content-Type":
-                          "application/json"
+                      "Authorization": "Bearer " + CF_TOKEN,
+                      "Content-Type": "application/json"
                   },
-                  json={
-                      "inputs": prompt
-                  },
+                  json={"prompt": scene_prompt},
                   timeout=300
               )
 
               if response.status_code != 200:
                   raise Exception(
-                      "Hugging Face hatası "
-                      + str(response.status_code)
-                      + ": "
-                      + response.text
+                      "Cloudflare görsel hatası "
+                      + str(response.status_code) + ": " + response.text
                   )
 
-              filename = (
-                  "sahne_"
-                  + str(index).zfill(2)
-                  + ".jpg"
-              )
-
-              try:
-                  image = Image.open(
-                      BytesIO(response.content)
-                  )
-
-                  image = image.convert("RGB")
-
-                  image.save(
-                      filename,
-                      "JPEG",
-                      quality=95
-                  )
-
-              except Exception as e:
+              data = response.json()
+              if not data.get("success"):
                   raise Exception(
-                      "Görsel JPEG'e dönüştürülemedi: "
-                      + str(e)
+                      "Cloudflare model hatası: " + str(data)
                   )
 
-              print(
-                  "Görsel "
-                  + str(index + 1)
-                  + "/8 oluşturuldu."
-              )
+              result = data.get("result") or {}
+              encoded = result.get("image")
 
-              time.sleep(5)
+              if not encoded:
+                  raise Exception(
+                      "Cloudflare yanıtında görsel verisi bulunamadı: "
+                      + str(list(result.keys()))
+                  )
+
+              image_bytes = base64.b64decode(encoded)
+              image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+              filename = "sahne_" + str(index).zfill(2) + ".jpg"
+              image.save(filename, "JPEG", quality=95)
+
+              print("Görsel", index + 1, "/8 oluşturuldu.")
+              time.sleep(2)
 
           print("=== 4. VIDEO OLUŞTURULUYOR ===")
 
-          subprocess.run(
-              [
-                  "ffmpeg",
-                  "-y",
-                  "-framerate",
-                  "1/8",
-                  "-i",
-                  "sahne_%02d.jpg",
-                  "-i",
-                  "ses.mp3",
-                  "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=decrease,"
-                  "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
-                  "-c:v",
-                  "libx264",
-                  "-pix_fmt",
-                  "yuv420p",
-                  "-c:a",
-                  "aac",
-                  "-shortest",
-                  "masal-video.mp4"
-              ],
-              check=True
-          )
+          subprocess.run([
+              "ffmpeg", "-y",
+              "-framerate", "1/8",
+              "-i", "sahne_%02d.jpg",
+              "-i", "ses.mp3",
+              "-vf",
+              "scale=1280:720:force_original_aspect_ratio=decrease,"
+              "pad=1280:720:(ow-iw)/2:(oh-ih)/2",
+              "-c:v", "libx264",
+              "-pix_fmt", "yuv420p",
+              "-c:a", "aac",
+              "-shortest",
+              "masal-video.mp4"
+          ], check=True)
 
-          print("================================")
           print("VIDEO BAŞARIYLA OLUŞTURULDU!")
-          print("================================")
           PY
 
           python3 video_olustur.py
