@@ -6,7 +6,7 @@ on:
 jobs:
   masal-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
@@ -38,21 +38,28 @@ jobs:
           import sys
           import time
           import base64
-          import subprocess
           import html
+          import subprocess
           import requests
 
-          def require(name):
+          def secret(name):
               value = os.environ.get(name, "").strip()
               if not value:
-                  sys.exit(f"Missing GitHub secret: {name}")
+                  raise RuntimeError(
+                      f"{name} is missing from GitHub Actions secrets."
+                  )
               return value
 
-          GEMINI_KEY = require("GEMINI_API_KEY")
-          AZURE_KEY = require("AZURE_SPEECH_KEY")
-          CF_TOKEN = require("CLOUDFLARE_API_TOKEN")
-          CF_ACCOUNT = require("CLOUDFLARE_ACCOUNT_ID")
-          AZURE_REGION = os.environ.get("AZURE_REGION", "westeurope").strip()
+          GEMINI_KEY = secret("GEMINI_API_KEY")
+          AZURE_KEY = secret("AZURE_SPEECH_KEY")
+          AZURE_REGION = secret("AZURE_REGION")
+          CF_TOKEN = secret("CLOUDFLARE_API_TOKEN")
+          CF_ACCOUNT = secret("CLOUDFLARE_ACCOUNT_ID")
+
+          if any(c.isspace() for c in AZURE_REGION):
+              raise RuntimeError(
+                  "AZURE_REGION must be a region name without spaces."
+              )
 
           def run(command):
               result = subprocess.run(
@@ -60,25 +67,30 @@ jobs:
               )
               if result.returncode:
                   print(result.stderr[-3000:])
-                  raise RuntimeError("Command failed")
+                  raise RuntimeError("A video command failed.")
               return result
+
+          session = requests.Session()
 
           print("1/5 Generating Turkish story...")
 
           prompt = """
           Write an original Turkish bedtime story for children aged 4-7.
-          The main characters are a kind little rabbit and a friendly star.
-          Use simple Turkish, gentle humor, and a happy ending.
+          The characters are a kind little rabbit and a friendly star.
+          Use simple Turkish, gentle humor and a happy ending.
           Include a lesson about kindness and helping others.
-          Around 450-600 words. No violence or frightening scenes.
-          Return only the story text with a short title.
+          Aim for 450-600 words. Avoid violence and frightening scenes.
+          Return only the story, with a short title.
           """
 
-          response = requests.post(
+          gemini_url = (
               "https://generativelanguage.googleapis.com/v1beta/"
-              "models/gemini-3.8-flash:generateContent",
-              
-            params={"key": GEMINI_KEY},
+              "models/gemini-3.8-flash:generateContent"
+          )
+
+          response = session.post(
+              gemini_url,
+              params={"key": GEMINI_KEY},
               json={
                   "contents": [{"parts": [{"text": prompt}]}],
                   "generationConfig": {
@@ -90,13 +102,21 @@ jobs:
           )
 
           if not response.ok:
-              print("Gemini error:", response.status_code, response.text[:1500])
+              print("Gemini error:", response.status_code)
+              print(response.text[:2000])
               response.raise_for_status()
 
-          story = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+          story_data = response.json()
+          candidates = story_data.get("candidates", [])
+          if not candidates:
+              raise RuntimeError("Gemini returned no story.")
+
+          story = candidates[0]["content"]["parts"][0]["text"].strip()
 
           with open("masal.txt", "w", encoding="utf-8") as f:
               f.write(story)
+
+          print("Story saved.")
 
           print("2/5 Generating Turkish narration...")
 
@@ -112,24 +132,37 @@ jobs:
               "cognitiveservices/v1"
           )
 
-          audio = requests.post(
-              tts_url,
-              headers={
-                  "Ocp-Apim-Subscription-Key": AZURE_KEY,
-                  "Content-Type": "application/ssml+xml",
-                  "X-Microsoft-OutputFormat":
-                      "audio-24khz-48kbitrate-mono-mp3"
-              },
-              data=ssml.encode("utf-8"),
-              timeout=180
-          )
+          print("Using Azure region:", AZURE_REGION)
+
+          try:
+              audio = session.post(
+                  tts_url,
+                  headers={
+                      "Ocp-Apim-Subscription-Key": AZURE_KEY,
+                      "Content-Type": "application/ssml+xml",
+                      "X-Microsoft-OutputFormat":
+                          "audio-24khz-48kbitrate-mono-mp3"
+                  },
+                  data=ssml.encode("utf-8"),
+                  timeout=180
+              )
+          except requests.exceptions.RequestException as exc:
+              raise RuntimeError(
+                  "Could not connect to Azure Speech. Check AZURE_REGION."
+              ) from exc
 
           if not audio.ok:
-              print("Azure TTS error:", audio.status_code, audio.text[:1500])
+              print("Azure Speech error:", audio.status_code)
+              print(audio.text[:2000])
               audio.raise_for_status()
+
+          if not audio.content:
+              raise RuntimeError("Azure returned an empty audio file.")
 
           with open("narration.mp3", "wb") as f:
               f.write(audio.content)
+
+          print("Narration saved.")
 
           print("3/5 Generating illustrations...")
 
@@ -149,15 +182,15 @@ jobs:
               "Cute rabbit sleeping peacefully under a starry sky, cozy bedtime story illustration, no text"
           ]
 
-          headers = {
+          cf_headers = {
               "Authorization": f"Bearer {CF_TOKEN}",
               "Content-Type": "application/json"
           }
 
           def make_image(prompt, filename):
-              r = requests.post(
+              r = session.post(
                   image_url,
-                  headers=headers,
+                  headers=cf_headers,
                   json={
                       "prompt": prompt,
                       "width": 1024,
@@ -168,27 +201,33 @@ jobs:
               )
 
               if not r.ok:
-                  print("Cloudflare error:", r.status_code, r.text[:1500])
+                  print("Cloudflare error:", r.status_code)
+                  print(r.text[:2000])
                   r.raise_for_status()
 
               content_type = r.headers.get("content-type", "").lower()
 
-              if content_type.startswith("image/") or r.content.startswith(b"\x89PNG"):
+              if content_type.startswith("image/") or r.content.startswith(
+                  b"\x89PNG\r\n\x1a\n"
+              ):
                   image_bytes = r.content
               else:
                   try:
                       data = r.json()
-                  except Exception:
-                      print("Unexpected Cloudflare response:", content_type)
+                  except Exception as exc:
+                      print("Unexpected response type:", content_type)
                       print(r.text[:1000])
-                      raise RuntimeError("Could not read image response")
+                      raise RuntimeError(
+                          "Cloudflare returned an unreadable image response."
+                      ) from exc
 
-                  image_data = data.get("result", {}).get("image")
+                  result = data.get("result", {})
+                  image_data = result.get("image")
 
                   if not image_data:
-                      print("Image missing from Cloudflare response")
+                      print("No image in Cloudflare response.")
                       print(str(data)[:1500])
-                      raise RuntimeError("No image returned")
+                      raise RuntimeError("Cloudflare returned no image.")
 
                   if image_data.startswith("data:image"):
                       image_data = image_data.split(",", 1)[1]
@@ -196,17 +235,17 @@ jobs:
                   image_bytes = base64.b64decode(image_data)
 
               if not image_bytes:
-                  raise RuntimeError("Empty image received")
+                  raise RuntimeError("Received an empty image.")
 
               with open(filename, "wb") as f:
                   f.write(image_bytes)
 
           for i, prompt_text in enumerate(prompts, 1):
-              print(f"Generating image {i}/8...")
+              print(f"Generating illustration {i}/8...")
               make_image(prompt_text, f"scene_{i:02d}.png")
               time.sleep(1)
 
-          print("4/5 Creating video clips...")
+          print("4/5 Creating video scenes...")
 
           for i in range(1, 9):
               run([
@@ -228,7 +267,8 @@ jobs:
 
           run([
               "ffmpeg", "-y",
-              "-f", "concat", "-safe", "0",
+              "-f", "concat",
+              "-safe", "0",
               "-i", "clips.txt",
               "-c", "copy",
               "visuals.mp4"
@@ -238,11 +278,14 @@ jobs:
 
           run([
               "ffmpeg", "-y",
+              "-stream_loop", "-1",
               "-i", "visuals.mp4",
               "-i", "narration.mp3",
               "-map", "0:v:0",
               "-map", "1:a:0",
-              "-c:v", "copy",
+              "-c:v", "libx264",
+              "-preset", "veryfast",
+              "-pix_fmt", "yuv420p",
               "-c:a", "aac",
               "-b:a", "128k",
               "-shortest",
@@ -250,7 +293,7 @@ jobs:
               "masal-video.mp4"
           ])
 
-          print("SUCCESS: masal-video.mp4 created")
+          print("SUCCESS: masal-video.mp4 created.")
           PY
 
           python create_video.py
