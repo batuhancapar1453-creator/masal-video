@@ -41,6 +41,7 @@ jobs:
           import json
           import base64
           import subprocess
+          import shutil
           import requests
           from io import BytesIO
           from PIL import Image, ImageStat
@@ -48,7 +49,9 @@ jobs:
           def secret(name):
               value = os.environ.get(name, "").strip()
               if not value:
-                  raise RuntimeError(f"GitHub Secret eksik: {name}")
+                  raise RuntimeError(
+                      f"GitHub Secret eksik: {name}"
+                  )
               return value
 
           GEMINI_KEY = secret("GEMINI_API_KEY")
@@ -68,9 +71,10 @@ jobs:
                   ):
                       return response
                   if attempt < 5:
-                      wait = 10 * (2 ** attempt)
+                      wait = 5 * (2 ** attempt)
                       print(
-                          f"Geçici HTTP hatası {response.status_code}; "
+                          f"Geçici HTTP hatası "
+                          f"{response.status_code}; "
                           f"{wait} saniye bekleniyor."
                       )
                       time.sleep(wait)
@@ -82,15 +86,17 @@ jobs:
           print("1/5 Türkçe masal hazırlanıyor...")
 
           gemini_url = (
-              "https://generativelanguage.googleapis.com/v1beta/"
-              "models/gemini-3.8-flash:generateContent"
+              "https://generativelanguage.googleapis.com/"
+              "v1beta/models/gemini-3.8-flash:generateContent"
               f"?key={GEMINI_KEY}"
           )
 
           prompt = """
-          4-8 yaş çocukları için Türkçe, özgün ve huzurlu bir uyku masalı yaz.
+          4-8 yaş çocukları için Türkçe, özgün ve huzurlu
+          bir uyku masalı yaz.
           Yaklaşık 600-800 kelime olsun.
-          Başlığı olsun. Sıcak, güvenli, eğitici ve hayal gücü yüksek olsun.
+          Başlığı olsun.
+          Sıcak, güvenli, eğitici ve hayal gücü yüksek olsun.
           Şiddet veya korkutucu sahneler içermesin.
           Yalnızca masal metnini yaz.
           """
@@ -98,27 +104,54 @@ jobs:
           response = request_with_retry(
               "POST",
               gemini_url,
-              headers={"Content-Type": "application/json"},
-              json={"contents": [{"parts": [{"text": prompt}]}]}
+              headers={
+                  "Content-Type": "application/json"
+              },
+              json={
+                  "contents": [
+                      {
+                          "parts": [
+                              {"text": prompt}
+                          ]
+                      }
+                  ]
+              }
           )
-          response.raise_for_status()
+
+          if not response.ok:
+              raise RuntimeError(
+                  f"Gemini hatası {response.status_code}: "
+                  f"{response.text[:700]}"
+              )
+
           data = response.json()
 
           try:
-              story = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+              story = (
+                  data["candidates"][0]["content"]
+                  ["parts"][0]["text"].strip()
+              )
           except (KeyError, IndexError, TypeError):
               raise RuntimeError(
                   "Masal alınamadı: "
-                  + json.dumps(data, ensure_ascii=False)[:1000]
+                  + json.dumps(
+                      data, ensure_ascii=False
+                  )[:1000]
               )
 
           if len(story) < 500:
-              raise RuntimeError("Masal beklenenden kısa geldi.")
+              raise RuntimeError(
+                  "Masal beklenenden kısa geldi."
+              )
 
-          with open("masal.txt", "w", encoding="utf-8") as f:
+          with open(
+              "masal.txt", "w", encoding="utf-8"
+          ) as f:
               f.write(story)
 
-          print(f"Masal hazır: {len(story)} karakter.")
+          print(
+              f"Masal hazır: {len(story)} karakter."
+          )
 
           print("2/5 Masal seslendiriliyor...")
 
@@ -165,28 +198,40 @@ jobs:
               )
 
           if len(speech.content) < 1000:
-              raise RuntimeError("Azure ses dosyası boş veya çok küçük.")
+              raise RuntimeError(
+                  "Azure ses dosyası boş veya çok küçük."
+              )
 
           with open("narration.mp3", "wb") as f:
               f.write(speech.content)
 
           run([
-              "ffmpeg", "-v", "error", "-i", "narration.mp3",
+              "ffmpeg", "-v", "error",
+              "-i", "narration.mp3",
               "-f", "null", "-"
           ])
 
-          duration_text = subprocess.check_output([
-              "ffprobe", "-v", "error",
-              "-show_entries", "format=duration",
-              "-of", "default=noprint_wrappers=1:nokey=1",
-              "narration.mp3"
-          ], text=True).strip()
+          duration_text = subprocess.check_output(
+              [
+                  "ffprobe", "-v", "error",
+                  "-show_entries", "format=duration",
+                  "-of",
+                  "default=noprint_wrappers=1:nokey=1",
+                  "narration.mp3"
+              ],
+              text=True
+          ).strip()
 
           narration_duration = float(duration_text)
-          if narration_duration <= 1:
-              raise RuntimeError("Ses süresi geçersiz.")
 
-          print(f"Ses hazır: {narration_duration:.1f} saniye.")
+          if narration_duration <= 1:
+              raise RuntimeError(
+                  "Ses süresi geçersiz."
+              )
+
+          print(
+              f"Ses hazır: {narration_duration:.1f} saniye."
+          )
 
           print("3/5 Masal görselleri hazırlanıyor...")
 
@@ -199,20 +244,31 @@ jobs:
               "A cute little orange fox in a magical green forest, "
               "children's picture book watercolor illustration, "
               "warm gentle colors, full scene, no text",
+
               "A little orange fox meeting a friendly white rabbit "
-              "near colorful flowers, children's storybook watercolor, no text",
+              "near colorful flowers, children's storybook watercolor, "
+              "no text",
+
               "A sparkling blue river winding through a beautiful "
-              "peaceful enchanted forest, children's book illustration, no text",
+              "peaceful enchanted forest, children's book illustration, "
+              "no text",
+
               "A cute orange fox and white rabbit helping a tiny bird "
               "in a nest, charming watercolor picture book, no text",
+
               "Friendly woodland animals looking at glowing stars "
-              "in a deep blue evening sky, children's illustration, no text",
+              "in a deep blue evening sky, children's illustration, "
+              "no text",
+
               "A cozy little cottage surrounded by flowers and trees "
               "under a soft sunset, watercolor storybook art, no text",
+
               "A smiling little orange fox looking at a large glowing "
               "moon in the night sky, bedtime storybook, no text",
+
               "Peaceful forest animals sleeping under twinkling stars, "
-              "dreamy watercolor children's bedtime illustration, no text"
+              "dreamy watercolor children's bedtime illustration, "
+              "no text"
           ]
 
           image_files = []
@@ -223,8 +279,8 @@ jobs:
 
               for image_attempt in range(1, 5):
                   print(
-                      f"Görsel {i}/8, deneme "
-                      f"{image_attempt}/4..."
+                      f"Görsel {i}/8, "
+                      f"deneme {image_attempt}/4..."
                   )
 
                   try:
@@ -243,46 +299,67 @@ jobs:
 
                       if not img_response.ok:
                           raise RuntimeError(
-                              f"Cloudflare HTTP {img_response.status_code}: "
+                              f"Cloudflare HTTP "
+                              f"{img_response.status_code}: "
                               f"{img_response.text[:400]}"
                           )
 
-                      content_type = img_response.headers.get(
-                          "content-type", ""
-                      ).lower()
+                      content_type = (
+                          img_response.headers.get(
+                              "content-type", ""
+                          ).lower()
+                      )
 
                       if "image/" in content_type:
                           image_bytes = img_response.content
                       else:
                           result = img_response.json()
-                          image_data = result.get(
-                              "result", {}
-                          ).get("image")
+
+                          if result.get("success") is False:
+                              raise RuntimeError(
+                                  "Cloudflare başarısız yanıt verdi: "
+                                  + json.dumps(
+                                      result,
+                                      ensure_ascii=False
+                                  )[:500]
+                              )
+
+                          image_data = (
+                              result.get("result", {})
+                              .get("image")
+                          )
 
                           if not image_data:
                               raise RuntimeError(
-                                  "Cloudflare yanıtında resim bulunamadı: "
+                                  "Yanıtta görsel bulunamadı: "
                                   + json.dumps(
-                                      result, ensure_ascii=False
+                                      result,
+                                      ensure_ascii=False
                                   )[:400]
                               )
 
-                          image_bytes = base64.b64decode(image_data)
+                          image_bytes = base64.b64decode(
+                              image_data
+                          )
 
-                      # Önce orijinal resmi yükle.
-                      with Image.open(BytesIO(image_bytes)) as source:
+                      with Image.open(
+                          BytesIO(image_bytes)
+                      ) as source:
                           source.load()
-
-                          # Saydam resim varsa beyaz zeminle birleştir.
                           rgba = source.convert("RGBA")
+
                           background = Image.new(
-                              "RGBA", rgba.size, (255, 255, 255, 255)
+                              "RGBA",
+                              rgba.size,
+                              (255, 255, 255, 255)
                           )
                           background.alpha_composite(rgba)
                           img = background.convert("RGB")
 
                       if img.width < 100 or img.height < 100:
-                          raise RuntimeError("Görsel çözünürlüğü çok düşük.")
+                          raise RuntimeError(
+                              "Görsel çözünürlüğü çok düşük."
+                          )
 
                       stats = ImageStat.Stat(img)
                       brightness = sum(stats.mean) / 3
@@ -296,7 +373,8 @@ jobs:
 
                       if brightness < 3 or variation < 3:
                           raise RuntimeError(
-                              "Görsel tamamen siyah veya tek renkli."
+                              "Görsel tamamen siyah "
+                              "veya tek renkli."
                           )
 
                       img.save(filename, format="PNG")
@@ -304,26 +382,42 @@ jobs:
                       break
 
                   except Exception as exc:
-                      print(f"Görsel denemesi başarısız: {exc}")
+                      print(
+                          f"Görsel denemesi başarısız: {exc}"
+                      )
                       if image_attempt < 4:
                           time.sleep(3 * image_attempt)
 
               if not valid_image:
-                  raise RuntimeError(
-                      f"{filename} dört denemede de üretilemedi. "
-                      "İşlem durduruldu; siyah video oluşturulmayacak."
-                  )
+                  if image_files:
+                      fallback = image_files[-1]
+                      shutil.copyfile(fallback, filename)
+                      print(
+                          f"UYARI: {filename} üretilemedi. "
+                          f"{fallback} yedek görsel olarak "
+                          "kullanılıyor."
+                      )
+                  else:
+                      raise RuntimeError(
+                          "İlk görsel üretilemedi. "
+                          "Geçerli bir yedek görsel olmadığı "
+                          "için işlem durduruldu."
+                      )
 
               image_files.append(filename)
-              print(f"{filename} başarıyla kontrol edildi.")
+              print(
+                  f"{filename} hazır ve kontrol edildi."
+              )
 
-          print("Sekiz görselin tamamı hazır.")
+          print("Sekiz görsel hazır.")
 
           print("4/5 Video oluşturuluyor...")
 
           clips = []
 
-          for i, filename in enumerate(image_files, start=1):
+          for i, filename in enumerate(
+              image_files, start=1
+          ):
               clip = f"clip_{i:02d}.mp4"
 
               run([
@@ -333,7 +427,8 @@ jobs:
                   "-i", filename,
                   "-t", "7",
                   "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=decrease,"
+                  "scale=1280:720:"
+                  "force_original_aspect_ratio=decrease,"
                   "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
                   "setsar=1,format=yuv420p",
                   "-r", "24",
@@ -345,7 +440,9 @@ jobs:
 
               clips.append(clip)
 
-          with open("clips.txt", "w", encoding="utf-8") as f:
+          with open(
+              "clips.txt", "w", encoding="utf-8"
+          ) as f:
               for clip in clips:
                   f.write(f"file '{clip}'\n")
 
@@ -361,7 +458,6 @@ jobs:
               "visuals.mp4"
           ])
 
-          # Görselleri ses bitene kadar döndür ve anlatımı ekle.
           run([
               "ffmpeg", "-y",
               "-stream_loop", "-1",
@@ -370,7 +466,8 @@ jobs:
               "-map", "0:v:0",
               "-map", "1:a:0",
               "-t", str(narration_duration),
-              "-vf", "scale=1280:720,setsar=1,format=yuv420p",
+              "-vf",
+              "scale=1280:720,setsar=1,format=yuv420p",
               "-c:v", "libx264",
               "-preset", "ultrafast",
               "-c:a", "aac",
@@ -384,27 +481,51 @@ jobs:
 
           print("Son video kontrol ediliyor...")
 
-          probe = subprocess.check_output([
-              "ffprobe", "-v", "error",
-              "-show_entries", "stream=codec_type,width,height",
-              "-of", "json",
-              "masal-video.mp4"
-          ], text=True)
+          probe = subprocess.check_output(
+              [
+                  "ffprobe", "-v", "error",
+                  "-show_entries",
+                  "stream=codec_type,width,height",
+                  "-of", "json",
+                  "masal-video.mp4"
+              ],
+              text=True
+          )
 
-          streams = json.loads(probe).get("streams", [])
-          stream_types = {s.get("codec_type") for s in streams}
+          streams = json.loads(probe).get(
+              "streams", []
+          )
+          stream_types = {
+              s.get("codec_type") for s in streams
+          }
 
           if "video" not in stream_types:
-              raise RuntimeError("Videoda görüntü akışı bulunamadı.")
+              raise RuntimeError(
+                  "Videoda görüntü akışı bulunamadı."
+              )
+
           if "audio" not in stream_types:
-              raise RuntimeError("Videoda ses akışı bulunamadı.")
+              raise RuntimeError(
+                  "Videoda ses akışı bulunamadı."
+              )
 
           size = os.path.getsize("masal-video.mp4")
+
           if size < 100000:
-              raise RuntimeError("Video dosyası beklenenden küçük.")
+              raise RuntimeError(
+                  "Video dosyası beklenenden küçük."
+              )
+
+          run([
+              "ffmpeg", "-v", "error",
+              "-i", "masal-video.mp4",
+              "-f", "null", "-"
+          ])
 
           print("5/5 Video başarıyla oluşturuldu!")
-          print(f"Dosya boyutu: {size / 1024 / 1024:.2f} MB")
+          print(
+              f"Dosya boyutu: {size / 1024 / 1024:.2f} MB"
+          )
           print("Görüntü ve ses akışları doğrulandı.")
           PY
 
