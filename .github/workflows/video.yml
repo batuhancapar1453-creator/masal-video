@@ -1,11 +1,12 @@
 name: Masal Video Uret
+
 on:
   workflow_dispatch:
 
 jobs:
   masal-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
@@ -40,7 +41,6 @@ jobs:
           import json
           import base64
           import subprocess
-          import shutil
           import requests
           from io import BytesIO
           from PIL import Image, ImageStat
@@ -49,7 +49,7 @@ jobs:
               value = os.environ.get(name, "").strip()
               if not value:
                   raise RuntimeError(
-                      f"GitHub Secret eksik: {name}"
+                      f"{name} is missing from GitHub Actions secrets."
                   )
               return value
 
@@ -59,107 +59,90 @@ jobs:
           CF_TOKEN = secret("CLOUDFLARE_API_TOKEN")
           CF_ACCOUNT = secret("CLOUDFLARE_ACCOUNT_ID")
 
+          GEMINI_URL = (
+              "https://generativelanguage.googleapis.com/v1beta/"
+              "models/gemini-3.8-flash:generateContent"
+              f"?key={GEMINI_KEY}"
+          )
+
           def request_with_retry(method, url, **kwargs):
-              response = None
+              last_response = None
+
               for attempt in range(6):
                   response = requests.request(
                       method, url, timeout=180, **kwargs
                   )
+                  last_response = response
+
                   if response.status_code not in (
                       429, 500, 502, 503, 504
                   ):
                       return response
+
                   if attempt < 5:
-                      wait = 5 * (2 ** attempt)
+                      wait_seconds = 10 * (2 ** attempt)
                       print(
-                          f"Geçici HTTP hatası "
-                          f"{response.status_code}; "
-                          f"{wait} saniye bekleniyor."
+                          f"Temporary error {response.status_code}. "
+                          f"Waiting {wait_seconds} seconds; "
+                          f"attempt {attempt + 2}/6."
                       )
-                      time.sleep(wait)
-              return response
+                      time.sleep(wait_seconds)
+
+              return last_response
 
           def run(command):
               subprocess.run(command, check=True)
 
           print("1/5 Türkçe masal hazırlanıyor...")
 
-          gemini_url = (
-              "https://generativelanguage.googleapis.com/"
-              "v1beta/models/gemini-3.8-flash:generateContent"
-              f"?key={GEMINI_KEY}"
-          )
-
           prompt = """
-          4-8 yaş çocukları için Türkçe, özgün ve huzurlu
-          bir uyku masalı yaz.
+          Türkçe, 4-8 yaş çocukları için özgün bir uyku masalı yaz.
           Yaklaşık 600-800 kelime olsun.
-          Başlığı olsun.
           Sıcak, güvenli, eğitici ve hayal gücü yüksek olsun.
-          Şiddet veya korkutucu sahneler içermesin.
-          Yalnızca masal metnini yaz.
+          Korkutucu veya şiddet içeren sahneler olmasın.
+          Ana karakterleri ve mekânları hikâye boyunca tutarlı tut.
+          Başlıkla başla. Yalnızca masalı yaz.
           """
 
           response = request_with_retry(
               "POST",
-              gemini_url,
-              headers={
-                  "Content-Type": "application/json"
-              },
+              GEMINI_URL,
+              headers={"Content-Type": "application/json"},
               json={
-                  "contents": [
-                      {
-                          "parts": [
-                              {"text": prompt}
-                          ]
-                      }
-                  ]
+                  "contents": [{
+                      "parts": [{"text": prompt}]
+                  }],
+                  "generationConfig": {
+                      "temperature": 0.85,
+                      "maxOutputTokens": 5000
+                  }
               }
           )
-
-          if not response.ok:
-              raise RuntimeError(
-                  f"Gemini hatası {response.status_code}: "
-                  f"{response.text[:700]}"
-              )
+          response.raise_for_status()
 
           data = response.json()
 
           try:
-              story = (
-                  data["candidates"][0]["content"]
-                  ["parts"][0]["text"].strip()
-              )
+              story = data["candidates"][0]["content"]["parts"][0]["text"]
           except (KeyError, IndexError, TypeError):
               raise RuntimeError(
-                  "Masal alınamadı: "
-                  + json.dumps(
-                      data, ensure_ascii=False
-                  )[:1000]
+                  "Gemini returned no story: "
+                  + json.dumps(data, ensure_ascii=False)[:1500]
               )
 
-          if len(story) < 500:
-              raise RuntimeError(
-                  "Masal beklenenden kısa geldi."
-              )
-
-          with open(
-              "masal.txt", "w", encoding="utf-8"
-          ) as f:
+          with open("masal.txt", "w", encoding="utf-8") as f:
               f.write(story)
 
-          print(
-              f"Masal hazır: {len(story)} karakter."
-          )
+          print("Masal oluşturuldu.")
 
-          print("2/5 Masal seslendiriliyor...")
+          print("2/5 Azure ile seslendiriliyor...")
 
           speech_url = (
               f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
 
-          escaped = (
+          escaped_story = (
               story.replace("&", "&amp;")
               .replace("<", "&lt;")
               .replace(">", "&gt;")
@@ -167,17 +150,17 @@ jobs:
 
           ssml = f"""
           <speak version="1.0"
-            xmlns="http://www.w3.org/2001/10/synthesis"
-            xml:lang="tr-TR">
+              xmlns="http://www.w3.org/2001/10/synthesis"
+              xml:lang="tr-TR">
             <voice name="tr-TR-EmelNeural">
               <prosody rate="-5%" pitch="+2%">
-                {escaped}
+                {escaped_story}
               </prosody>
             </voice>
           </speak>
           """
 
-          speech = request_with_retry(
+          speech_response = request_with_retry(
               "POST",
               speech_url,
               headers={
@@ -190,49 +173,18 @@ jobs:
               data=ssml.encode("utf-8")
           )
 
-          if not speech.ok:
+          if not speech_response.ok:
               raise RuntimeError(
-                  f"Azure ses hatası {speech.status_code}: "
-                  f"{speech.text[:800]}"
-              )
-
-          if len(speech.content) < 1000:
-              raise RuntimeError(
-                  "Azure ses dosyası boş veya çok küçük."
+                  f"Azure Speech error {speech_response.status_code}: "
+                  f"{speech_response.text[:1000]}"
               )
 
           with open("narration.mp3", "wb") as f:
-              f.write(speech.content)
+              f.write(speech_response.content)
 
-          run([
-              "ffmpeg", "-v", "error",
-              "-i", "narration.mp3",
-              "-f", "null", "-"
-          ])
+          print("Seslendirme oluşturuldu.")
 
-          duration_text = subprocess.check_output(
-              [
-                  "ffprobe", "-v", "error",
-                  "-show_entries", "format=duration",
-                  "-of",
-                  "default=noprint_wrappers=1:nokey=1",
-                  "narration.mp3"
-              ],
-              text=True
-          ).strip()
-
-          narration_duration = float(duration_text)
-
-          if narration_duration <= 1:
-              raise RuntimeError(
-                  "Ses süresi geçersiz."
-              )
-
-          print(
-              f"Ses hazır: {narration_duration:.1f} saniye."
-          )
-
-          print("3/5 Masal görselleri hazırlanıyor...")
+          print("3/5 Daha kaliteli çizimler oluşturuluyor...")
 
           cf_url = (
               "https://api.cloudflare.com/client/v4/accounts/"
@@ -240,221 +192,185 @@ jobs:
           )
 
           prompts = [
-              "A cute little orange fox in a magical green forest, "
-              "children's picture book watercolor illustration, "
-              "warm gentle colors, full scene, no text",
+              "Cute little orange fox in a magical green forest at sunrise, "
+              "professional children's storybook illustration, beautiful "
+              "polished digital painting, clear recognizable character, "
+              "expressive face, detailed fur, clean outlines, warm natural "
+              "colors, cinematic lighting, carefully composed full scene, "
+              "no text, no border",
 
-              "A little orange fox meeting a friendly white rabbit "
-              "near colorful flowers, children's storybook watercolor, "
-              "no text",
+              "A cute little orange fox meeting a friendly brown rabbit "
+              "beside colorful wildflowers, professional children's picture "
+              "book illustration, recognizable animals, expressive faces, "
+              "detailed forest plants, clean shapes, warm natural colors, "
+              "polished digital painting, no text, no border",
 
-              "A sparkling blue river winding through a beautiful "
-              "peaceful enchanted forest, children's book illustration, "
-              "no text",
+              "A sparkling blue river flowing through a peaceful enchanted "
+              "forest, little orange fox and friendly rabbit near the bank, "
+              "professional children's storybook illustration, detailed "
+              "trees and flowers, clear composition, rich natural colors, "
+              "soft cinematic sunlight, no text, no border",
 
-              "A cute orange fox and white rabbit helping a tiny bird "
-              "in a nest, charming watercolor picture book, no text",
+              "A little orange fox and a friendly rabbit helping a tiny "
+              "yellow bird near its nest, heartwarming children's storybook "
+              "illustration, clear recognizable characters, detailed "
+              "feathers and fur, clean outlines, expressive faces, "
+              "beautiful natural colors, no text, no border",
 
-              "Friendly woodland animals looking at glowing stars "
-              "in a deep blue evening sky, children's illustration, "
-              "no text",
+              "Friendly forest animals gathered beneath a magical starry "
+              "sky, little orange fox and rabbit in the foreground, "
+              "professional bedtime storybook illustration, detailed "
+              "characters, glowing stars, deep blue night sky, warm gentle "
+              "lighting, polished digital painting, no text, no border",
 
-              "A cozy little cottage surrounded by flowers and trees "
-              "under a soft sunset, watercolor storybook art, no text",
+              "A cozy little cottage surrounded by colorful flowers and "
+              "mushrooms in a magical forest, little orange fox and rabbit "
+              "standing outside, beautiful children's picture book art, "
+              "clear detailed architecture, clean shapes, warm inviting "
+              "colors, cinematic lighting, no text, no border",
 
-              "A smiling little orange fox looking at a large glowing "
-              "moon in the night sky, bedtime storybook, no text",
+              "A smiling little orange fox looking up at a beautiful full "
+              "moon through forest branches, charming children's bedtime "
+              "storybook illustration, clear expressive face, detailed fur, "
+              "soft blue moonlight, warm highlights, clean outlines, "
+              "polished digital painting, no text, no border",
 
-              "Peaceful forest animals sleeping under twinkling stars, "
-              "dreamy watercolor children's bedtime illustration, "
-              "no text"
+              "Little orange fox, friendly rabbit and forest animals sleeping "
+              "peacefully beneath a starry sky, beautiful children's bedtime "
+              "storybook illustration, clear recognizable animals, cozy "
+              "dreamy forest, gentle moonlight, detailed clean shapes, "
+              "high quality digital painting, no text, no border"
           ]
 
           image_files = []
+          previous_valid_image = None
 
           for i, image_prompt in enumerate(prompts, start=1):
-              filename = f"image_{i:02d}.png"
-              valid_image = False
+              print(f"Çizim {i}/{len(prompts)} hazırlanıyor...")
 
-              for image_attempt in range(1, 5):
-                  print(
-                      f"Görsel {i}/8, "
-                      f"deneme {image_attempt}/4..."
+              try:
+                  image_response = request_with_retry(
+                      "POST",
+                      cf_url,
+                      headers={
+                          "Authorization": f"Bearer {CF_TOKEN}",
+                          "Content-Type": "application/json"
+                      },
+                      json={
+                          "prompt": (
+                              image_prompt
+                              + ", sharp focus, detailed children's "
+                              "storybook illustration, clear recognizable "
+                              "characters, balanced composition, high quality"
+                          ),
+                          "negative_prompt": (
+                              "blurry, abstract, muddy colors, color blobs, "
+                              "unrecognizable objects, distorted animals, "
+                              "extra limbs, deformed faces, messy composition, "
+                              "noise, low quality, black border, white border, "
+                              "frame, text, logo, watermark"
+                          ),
+                          "width": 1024,
+                          "height": 1024,
+                          "num_steps": 20,
+                          "guidance": 1.5
+                      }
                   )
 
-                  try:
-                      img_response = request_with_retry(
-                          "POST",
-                          cf_url,
-                          headers={
-                              "Authorization": f"Bearer {CF_TOKEN}",
-                              "Content-Type": "application/json"
-                          },
-                          json={
-                              "prompt": (
-                                  image_prompt
-                                  + ", clear recognizable characters, detailed "
-                                  "children's storybook illustration, sharp "
-                                  "focus, clean outlines, well-defined objects, "
-                                  "balanced composition, high quality"
-                              ),
-                              "negative_prompt": (
-                                  "blurry, abstract, muddy colors, color blobs, "
-                                  "distorted objects, deformed animals, messy "
-                                  "shapes, low quality, noise, text, watermark"
-                              ),
-                              "width": 1024,
-                              "height": 1024,
-                              "num_steps": 20,
-                              "guidance": 7.5
-                          }
+                  if not image_response.ok:
+                      raise RuntimeError(
+                          f"Cloudflare image error "
+                          f"{image_response.status_code}: "
+                          f"{image_response.text[:500]}"
                       )
 
-                      if not img_response.ok:
+                  content_type = image_response.headers.get(
+                      "content-type", ""
+                  )
+
+                  if "image/" in content_type:
+                      image_bytes = image_response.content
+                  else:
+                      result = image_response.json()
+                      image_data = result.get("result", {}).get("image")
+
+                      if not image_data:
                           raise RuntimeError(
-                              f"Cloudflare HTTP "
-                              f"{img_response.status_code}: "
-                              f"{img_response.text[:400]}"
+                              "Cloudflare did not return image data: "
+                              + json.dumps(
+                                  result, ensure_ascii=False
+                              )[:500]
                           )
 
-                      content_type = (
-                          img_response.headers.get(
-                              "content-type", ""
-                          ).lower()
+                      image_bytes = base64.b64decode(image_data)
+
+                  image = Image.open(BytesIO(image_bytes)).convert("RGB")
+
+                  if image.width < 512 or image.height < 512:
+                      raise RuntimeError(
+                          f"Image resolution too small: {image.size}"
                       )
 
-                      if "image/" in content_type:
-                          image_bytes = img_response.content
-                      else:
-                          result = img_response.json()
-
-                          if result.get("success") is False:
-                              raise RuntimeError(
-                                  "Cloudflare başarısız yanıt verdi: "
-                                  + json.dumps(
-                                      result,
-                                      ensure_ascii=False
-                                  )[:500]
-                              )
-
-                          image_data = (
-                              result.get("result", {})
-                              .get("image")
-                          )
-
-                          if not image_data:
-                              raise RuntimeError(
-                                  "Yanıtta görsel bulunamadı: "
-                                  + json.dumps(
-                                      result,
-                                      ensure_ascii=False
-                                  )[:400]
-                              )
-
-                          image_bytes = base64.b64decode(
-                              image_data
-                          )
-
-                      with Image.open(
-                          BytesIO(image_bytes)
-                      ) as source:
-                          source.load()
-                          rgba = source.convert("RGBA")
-                          background = Image.new(
-                              "RGBA",
-                              rgba.size,
-                              (255, 255, 255, 255)
-                          )
-                          background.alpha_composite(rgba)
-                          img = background.convert("RGB")
-
-                      if img.width < 100 or img.height < 100:
-                          raise RuntimeError(
-                              "Görsel çözünürlüğü çok düşük."
-                          )
-
-                      stats = ImageStat.Stat(img)
-                      brightness = sum(stats.mean) / 3
-                      variation = sum(stats.stddev) / 3
-
-                      print(
-                          f"Resim: {img.width}x{img.height}; "
-                          f"parlaklık={brightness:.1f}; "
-                          f"çeşitlilik={variation:.1f}"
+                  if ImageStat.Stat(image).stddev[0] < 8:
+                      raise RuntimeError(
+                          "Image appears nearly blank or lacks detail."
                       )
 
-                      if brightness < 3 or variation < 3:
-                          raise RuntimeError(
-                              "Görsel tamamen siyah "
-                              "veya tek renkli."
-                          )
+                  filename = f"image_{i:02d}.png"
+                  image.save(filename, format="PNG", optimize=True)
+                  image_files.append(filename)
+                  previous_valid_image = filename
 
-                      img.save(filename, format="PNG")
-                      valid_image = True
-                      break
+              except Exception as error:
+                  print(f"Çizim {i} üretilemedi: {error}")
 
-                  except Exception as exc:
-                      print(
-                          f"Görsel denemesi başarısız: {exc}"
-                      )
-                      if image_attempt < 4:
-                          time.sleep(3 * image_attempt)
-
-              if not valid_image:
-                  if image_files:
-                      fallback = image_files[-1]
-                      shutil.copyfile(fallback, filename)
-                      print(
-                          f"UYARI: {filename} üretilemedi. "
-                          f"{fallback} yedek görsel olarak "
-                          "kullanılıyor."
-                      )
+                  if previous_valid_image:
+                      import shutil
+                      filename = f"image_{i:02d}.png"
+                      shutil.copyfile(previous_valid_image, filename)
+                      image_files.append(filename)
+                      print("Önceki geçerli çizim kullanıldı.")
                   else:
                       raise RuntimeError(
-                          "İlk görsel üretilemedi. "
-                          "Geçerli bir yedek görsel olmadığı "
-                          "için işlem durduruldu."
-                      )
+                          "İlk çizim üretilemedi; video oluşturulamıyor."
+                      ) from error
 
-              image_files.append(filename)
-              print(
-                  f"{filename} hazır ve kontrol edildi."
-              )
+          print("Çizimler hazır.")
 
-          print("Sekiz görsel hazır.")
-
-          print("4/5 Video oluşturuluyor...")
+          print("4/5 Video hazırlanıyor...")
 
           clips = []
 
-          for i, filename in enumerate(
-              image_files, start=1
-          ):
+          for i, filename in enumerate(image_files, start=1):
               clip = f"clip_{i:02d}.mp4"
 
               run([
                   "ffmpeg", "-y",
                   "-loop", "1",
-                  "-framerate", "24",
                   "-i", filename,
+                  "-f", "lavfi",
+                  "-i",
+                  "anullsrc=channel_layout=stereo:sample_rate=48000",
                   "-t", "7",
                   "-vf",
-                  "scale=1280:720:"
-                  "force_original_aspect_ratio=decrease,"
-                  "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
+                  "scale=1280:720:force_original_aspect_ratio=increase,"
+                  "crop=1280:720,"
                   "setsar=1,format=yuv420p",
                   "-r", "24",
                   "-c:v", "libx264",
-                  "-preset", "ultrafast",
-                  "-an",
+                  "-preset", "medium",
+                  "-crf", "18",
+                  "-c:a", "aac",
+                  "-b:a", "192k",
+                  "-ar", "48000",
+                  "-ac", "2",
+                  "-shortest",
                   clip
               ])
 
               clips.append(clip)
 
-          with open(
-              "clips.txt", "w", encoding="utf-8"
-          ) as f:
+          with open("clips.txt", "w", encoding="utf-8") as f:
               for clip in clips:
                   f.write(f"file '{clip}'\n")
 
@@ -463,71 +379,61 @@ jobs:
               "-f", "concat",
               "-safe", "0",
               "-i", "clips.txt",
-              "-c:v", "libx264",
-              "-preset", "ultrafast",
-              "-pix_fmt", "yuv420p",
-              "-an",
+              "-c", "copy",
               "visuals.mp4"
           ])
+
+          duration_result = subprocess.run([
+              "ffprobe", "-v", "error",
+              "-show_entries", "format=duration",
+              "-of", "default=noprint_wrappers=1:nokey=1",
+              "narration.mp3"
+          ], capture_output=True, text=True, check=True)
+
+          narration_duration = float(duration_result.stdout.strip())
 
           run([
               "ffmpeg", "-y",
               "-stream_loop", "-1",
               "-i", "visuals.mp4",
               "-i", "narration.mp3",
-              "-map", "0:v:0",
-              "-map", "1:a:0",
               "-t", str(narration_duration),
               "-vf",
-              "scale=1280:720,setsar=1,format=yuv420p",
+              "scale=1280:720:force_original_aspect_ratio=increase,"
+              "crop=1280:720,setsar=1,format=yuv420p",
+              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
               "-c:v", "libx264",
-              "-preset", "ultrafast",
+              "-preset", "medium",
+              "-crf", "18",
               "-c:a", "aac",
-              "-b:a", "128k",
-              "-ar", "44100",
+              "-b:a", "192k",
+              "-ar", "48000",
               "-ac", "2",
               "-shortest",
               "-movflags", "+faststart",
               "masal-video.mp4"
           ])
 
-          print("Son video kontrol ediliyor...")
+          probe = subprocess.check_output([
+              "ffprobe", "-v", "error",
+              "-show_entries", "stream=codec_type,width,height",
+              "-of", "json",
+              "masal-video.mp4"
+          ], text=True)
 
-          probe = subprocess.check_output(
-              [
-                  "ffprobe", "-v", "error",
-                  "-show_entries",
-                  "stream=codec_type,width,height",
-                  "-of", "json",
-                  "masal-video.mp4"
-              ],
-              text=True
-          )
-
-          streams = json.loads(probe).get(
-              "streams", []
-          )
-
-          stream_types = {
-              s.get("codec_type") for s in streams
-          }
+          streams = json.loads(probe).get("streams", [])
+          stream_types = {s.get("codec_type") for s in streams}
 
           if "video" not in stream_types:
-              raise RuntimeError(
-                  "Videoda görüntü akışı bulunamadı."
-              )
+              raise RuntimeError("Videoda görüntü akışı bulunamadı.")
 
           if "audio" not in stream_types:
-              raise RuntimeError(
-                  "Videoda ses akışı bulunamadı."
-              )
+              raise RuntimeError("Videoda ses akışı bulunamadı.")
 
           size = os.path.getsize("masal-video.mp4")
 
           if size < 100000:
-              raise RuntimeError(
-                  "Video dosyası beklenenden küçük."
-              )
+              raise RuntimeError("Video dosyası beklenenden küçük.")
 
           run([
               "ffmpeg", "-v", "error",
@@ -536,9 +442,7 @@ jobs:
           ])
 
           print("5/5 Video başarıyla oluşturuldu!")
-          print(
-              f"Dosya boyutu: {size / 1024 / 1024:.2f} MB"
-          )
+          print(f"Dosya boyutu: {size / 1024 / 1024:.2f} MB")
           print("Görüntü ve ses akışları doğrulandı.")
           PY
 
