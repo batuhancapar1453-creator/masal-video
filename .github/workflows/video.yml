@@ -3,6 +3,9 @@ name: Masal Video Uret
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   masal-video:
     runs-on: ubuntu-latest
@@ -25,7 +28,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow
+          pip install requests
 
       - name: Generate Turkish story video
         env:
@@ -37,423 +40,430 @@ jobs:
         run: |
           cat > create_video.py <<'PY'
           import os
+          import sys
           import time
           import json
           import base64
           import subprocess
           import requests
-          from io import BytesIO
-          from PIL import Image, ImageStat
 
-          def secret(name):
-              value = os.environ.get(name, "").strip()
-              if not value:
+          GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+          AZURE_KEY = os.getenv("AZURE_SPEECH_KEY", "").strip()
+          AZURE_REGION = os.getenv("AZURE_REGION", "").strip()
+          CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
+          CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
+
+          OUT = "output"
+          os.makedirs(OUT, exist_ok=True)
+
+          session = requests.Session()
+          session.headers.update({"User-Agent": "MasalVideoGenerator/1.0"})
+
+          def require_secrets():
+              missing = []
+              for name, value in [
+                  ("GEMINI_API_KEY", GEMINI_KEY),
+                  ("AZURE_SPEECH_KEY", AZURE_KEY),
+                  ("AZURE_REGION", AZURE_REGION),
+                  ("CLOUDFLARE_API_TOKEN", CF_TOKEN),
+                  ("CLOUDFLARE_ACCOUNT_ID", CF_ACCOUNT),
+              ]:
+                  if not value:
+                      missing.append(name)
+              if missing:
                   raise RuntimeError(
-                      f"{name} is missing from GitHub Actions secrets."
+                      "GitHub Secrets eksik: " + ", ".join(missing)
                   )
-              return value
-
-          GEMINI_KEY = secret("GEMINI_API_KEY")
-          AZURE_KEY = secret("AZURE_SPEECH_KEY")
-          AZURE_REGION = secret("AZURE_REGION")
-          CF_TOKEN = secret("CLOUDFLARE_API_TOKEN")
-          CF_ACCOUNT = secret("CLOUDFLARE_ACCOUNT_ID")
-
-          GEMINI_URL = (
-              "https://generativelanguage.googleapis.com/v1beta/"
-              "models/gemini-3.8-flash:generateContent"
-              f"?key={GEMINI_KEY}"
-          )
 
           def request_with_retry(method, url, **kwargs):
-              last_response = None
-
-              for attempt in range(6):
-                  response = requests.request(
-                      method, url, timeout=180, **kwargs
-                  )
-                  last_response = response
-
-                  if response.status_code not in (
-                      429, 500, 502, 503, 504
-                  ):
-                      return response
-
-                  if attempt < 5:
-                      wait_seconds = 10 * (2 ** attempt)
-                      print(
-                          f"Temporary error {response.status_code}. "
-                          f"Waiting {wait_seconds} seconds; "
-                          f"attempt {attempt + 2}/6."
+              last_error = None
+              for attempt in range(5):
+                  try:
+                      response = session.request(
+                          method, url, timeout=(20, 180), **kwargs
                       )
-                      time.sleep(wait_seconds)
+                      if response.status_code in (429, 500, 502, 503, 504):
+                          last_error = RuntimeError(
+                              f"HTTP {response.status_code}: "
+                              f"{response.text[:500]}"
+                          )
+                          time.sleep(min(5 * (attempt + 1), 25))
+                          continue
+                      response.raise_for_status()
+                      return response
+                  except (requests.RequestException, RuntimeError) as exc:
+                      last_error = exc
+                      if attempt < 4:
+                          time.sleep(min(3 * (attempt + 1), 15))
+              raise RuntimeError(f"İstek başarısız: {last_error}")
 
-              return last_response
-
-          def run(command):
+          def run_cmd(command):
+              print("Çalıştırılıyor:", " ".join(command), flush=True)
               subprocess.run(command, check=True)
 
-          print("1/5 Türkçe masal hazırlanıyor...")
+          def create_story():
+              print("1/5: Türkçe masal hazırlanıyor...", flush=True)
 
-          prompt = """
-          Türkçe, 4-8 yaş çocukları için özgün bir uyku masalı yaz.
-          Yaklaşık 600-800 kelime olsun.
-          Sıcak, güvenli, eğitici ve hayal gücü yüksek olsun.
-          Korkutucu veya şiddet içeren sahneler olmasın.
-          Ana karakterleri ve mekânları hikâye boyunca tutarlı tut.
-          Başlıkla başla. Yalnızca masalı yaz.
-          """
-
-          response = request_with_retry(
-              "POST",
-              GEMINI_URL,
-              headers={"Content-Type": "application/json"},
-              json={
-                  "contents": [{
-                      "parts": [{"text": prompt}]
-                  }],
-                  "generationConfig": {
-                      "temperature": 0.85,
-                      "maxOutputTokens": 5000
-                  }
-              }
-          )
-          response.raise_for_status()
-
-          data = response.json()
-
-          try:
-              story = data["candidates"][0]["content"]["parts"][0]["text"]
-          except (KeyError, IndexError, TypeError):
-              raise RuntimeError(
-                  "Gemini returned no story: "
-                  + json.dumps(data, ensure_ascii=False)[:1500]
+              url = (
+                  "https://generativelanguage.googleapis.com/"
+                  "v1beta/models/gemini-2.5-flash:generateContent"
               )
 
-          with open("masal.txt", "w", encoding="utf-8") as f:
-              f.write(story)
+              prompt = """
+              4-8 yaş çocukları için Türkçe, özgün ve sıcak bir masal yaz.
+              600-800 kelime olsun.
+              Nazik, güvenli, hayal gücünü geliştiren bir hikâye anlat.
+              Korkutucu şiddet, tehlikeli davranış talimatları ve uygunsuz
+              içerik kullanma.
+              Başlangıç, gelişme ve mutlu bir son olsun.
+              Sadece masal metnini döndür; başlık ekleyebilirsin.
+              """
 
-          print("Masal oluşturuldu.")
-
-          print("2/5 Azure ile seslendiriliyor...")
-
-          speech_url = (
-              f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
-              "cognitiveservices/v1"
-          )
-
-          escaped_story = (
-              story.replace("&", "&amp;")
-              .replace("<", "&lt;")
-              .replace(">", "&gt;")
-          )
-
-          ssml = f"""
-          <speak version="1.0"
-              xmlns="http://www.w3.org/2001/10/synthesis"
-              xml:lang="tr-TR">
-            <voice name="tr-TR-EmelNeural">
-              <prosody rate="-5%" pitch="+2%">
-                {escaped_story}
-              </prosody>
-            </voice>
-          </speak>
-          """
-
-          speech_response = request_with_retry(
-              "POST",
-              speech_url,
-              headers={
-                  "Ocp-Apim-Subscription-Key": AZURE_KEY,
-                  "Content-Type": "application/ssml+xml",
-                  "X-Microsoft-OutputFormat":
-                      "audio-24khz-48kbitrate-mono-mp3",
-                  "User-Agent": "MasalVideoGenerator"
-              },
-              data=ssml.encode("utf-8")
-          )
-
-          if not speech_response.ok:
-              raise RuntimeError(
-                  f"Azure Speech error {speech_response.status_code}: "
-                  f"{speech_response.text[:1000]}"
-              )
-
-          with open("narration.mp3", "wb") as f:
-              f.write(speech_response.content)
-
-          print("Seslendirme oluşturuldu.")
-
-          print("3/5 Daha kaliteli çizimler oluşturuluyor...")
-
-          cf_url = (
-              "https://api.cloudflare.com/client/v4/accounts/"
-              f"{CF_ACCOUNT}/ai/run/@cf/lykon/dreamshaper-8-lcm"
-          )
-
-          prompts = [
-              "Cute little orange fox in a magical green forest at sunrise, "
-              "professional children's storybook illustration, beautiful "
-              "polished digital painting, clear recognizable character, "
-              "expressive face, detailed fur, clean outlines, warm natural "
-              "colors, cinematic lighting, carefully composed full scene, "
-              "no text, no border",
-
-              "A cute little orange fox meeting a friendly brown rabbit "
-              "beside colorful wildflowers, professional children's picture "
-              "book illustration, recognizable animals, expressive faces, "
-              "detailed forest plants, clean shapes, warm natural colors, "
-              "polished digital painting, no text, no border",
-
-              "A sparkling blue river flowing through a peaceful enchanted "
-              "forest, little orange fox and friendly rabbit near the bank, "
-              "professional children's storybook illustration, detailed "
-              "trees and flowers, clear composition, rich natural colors, "
-              "soft cinematic sunlight, no text, no border",
-
-              "A little orange fox and a friendly rabbit helping a tiny "
-              "yellow bird near its nest, heartwarming children's storybook "
-              "illustration, clear recognizable characters, detailed "
-              "feathers and fur, clean outlines, expressive faces, "
-              "beautiful natural colors, no text, no border",
-
-              "Friendly forest animals gathered beneath a magical starry "
-              "sky, little orange fox and rabbit in the foreground, "
-              "professional bedtime storybook illustration, detailed "
-              "characters, glowing stars, deep blue night sky, warm gentle "
-              "lighting, polished digital painting, no text, no border",
-
-              "A cozy little cottage surrounded by colorful flowers and "
-              "mushrooms in a magical forest, little orange fox and rabbit "
-              "standing outside, beautiful children's picture book art, "
-              "clear detailed architecture, clean shapes, warm inviting "
-              "colors, cinematic lighting, no text, no border",
-
-              "A smiling little orange fox looking up at a beautiful full "
-              "moon through forest branches, charming children's bedtime "
-              "storybook illustration, clear expressive face, detailed fur, "
-              "soft blue moonlight, warm highlights, clean outlines, "
-              "polished digital painting, no text, no border",
-
-              "Little orange fox, friendly rabbit and forest animals sleeping "
-              "peacefully beneath a starry sky, beautiful children's bedtime "
-              "storybook illustration, clear recognizable animals, cozy "
-              "dreamy forest, gentle moonlight, detailed clean shapes, "
-              "high quality digital painting, no text, no border"
-          ]
-
-          image_files = []
-          previous_valid_image = None
-
-          for i, image_prompt in enumerate(prompts, start=1):
-              print(f"Çizim {i}/{len(prompts)} hazırlanıyor...")
-
-              try:
-                  image_response = request_with_retry(
-                      "POST",
-                      cf_url,
-                      headers={
-                          "Authorization": f"Bearer {CF_TOKEN}",
-                          "Content-Type": "application/json"
-                      },
-                      json={
-                          "prompt": (
-                              image_prompt
-                              + ", sharp focus, detailed children's "
-                              "storybook illustration, clear recognizable "
-                              "characters, balanced composition, high quality"
-                          ),
-                          "negative_prompt": (
-                              "blurry, abstract, muddy colors, color blobs, "
-                              "unrecognizable objects, distorted animals, "
-                              "extra limbs, deformed faces, messy composition, "
-                              "noise, low quality, black border, white border, "
-                              "frame, text, logo, watermark"
-                          ),
-                          "width": 1024,
-                          "height": 1024,
-                          "num_steps": 20,
-                          "guidance": 1.5
+              response = request_with_retry(
+                  "POST",
+                  url,
+                  params={"key": GEMINI_KEY},
+                  json={
+                      "contents": [
+                          {"parts": [{"text": prompt}]}
+                      ],
+                      "generationConfig": {
+                          "temperature": 0.8,
+                          "maxOutputTokens": 5000
                       }
+                  }
+              )
+
+              data = response.json()
+              try:
+                  story = data["candidates"][0]["content"]["parts"][0]["text"]
+              except (KeyError, IndexError, TypeError):
+                  raise RuntimeError(
+                      "Gemini masal metni döndürmedi: "
+                      + json.dumps(data, ensure_ascii=False)[:1000]
                   )
 
-                  if not image_response.ok:
+              story = story.strip()
+              if len(story) < 300:
+                  raise RuntimeError("Oluşan masal çok kısa.")
+
+              with open("masal.txt", "w", encoding="utf-8") as f:
+                  f.write(story + "\n")
+
+              print(f"Masal hazır: {len(story)} karakter", flush=True)
+              return story
+
+          def create_speech(story):
+              print("2/5: Türkçe seslendiriliyor...", flush=True)
+
+              endpoint = (
+                  f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
+                  "cognitiveservices/v1"
+              )
+
+              # SSML özel karakterlerini güvenli biçimde kaçır.
+              import xml.sax.saxutils as saxutils
+              escaped_story = saxutils.escape(story)
+
+              ssml = f"""
+              <speak version="1.0"
+                xmlns="http://www.w3.org/2001/10/synthesis"
+                xml:lang="tr-TR">
+                <voice name="tr-TR-EmelNeural">
+                  <prosody rate="-5%" pitch="+2%">
+                    {escaped_story}
+                  </prosody>
+                </voice>
+              </speak>
+              """
+
+              response = request_with_retry(
+                  "POST",
+                  endpoint,
+                  headers={
+                      "Ocp-Apim-Subscription-Key": AZURE_KEY,
+                      "Content-Type": "application/ssml+xml",
+                      "X-Microsoft-OutputFormat":
+                          "audio-24khz-48kbitrate-mono-mp3"
+                  },
+                  data=ssml.encode("utf-8")
+              )
+
+              audio = response.content
+              if len(audio) < 1000:
+                  raise RuntimeError("Azure geçerli ses dosyası döndürmedi.")
+
+              audio_path = os.path.join(OUT, "narration.mp3")
+              with open(audio_path, "wb") as f:
+                  f.write(audio)
+
+              # Sesin gerçekten çözülebildiğini doğrula.
+              run_cmd([
+                  "ffprobe", "-v", "error",
+                  "-show_entries", "stream=codec_type,duration",
+                  "-of", "json", audio_path
+              ])
+
+              probe = subprocess.run(
+                  [
+                      "ffprobe", "-v", "error",
+                      "-show_entries", "stream=codec_type",
+                      "-of", "json", audio_path
+                  ],
+                  check=True, capture_output=True, text=True
+              )
+              streams = json.loads(probe.stdout).get("streams", [])
+              if not any(s.get("codec_type") == "audio" for s in streams):
+                  raise RuntimeError("Ses dosyasında ses akışı bulunamadı.")
+
+              print(f"Ses hazır: {len(audio)} bayt", flush=True)
+              return audio_path
+
+          def cloudflare_image(prompt, output_path):
+              url = (
+                  "https://api.cloudflare.com/client/v4/accounts/"
+                  f"{CF_ACCOUNT}/ai/run/@cf/lykon/dreamshaper-8-lcm"
+              )
+
+              response = request_with_retry(
+                  "POST",
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {CF_TOKEN}",
+                      "Content-Type": "application/json"
+                  },
+                  json={
+                      "prompt": prompt,
+                      "num_steps": 4
+                  }
+              )
+
+              content_type = response.headers.get("content-type", "").lower()
+
+              if "image/" in content_type:
+                  image_bytes = response.content
+              else:
+                  try:
+                      data = response.json()
+                  except ValueError:
                       raise RuntimeError(
-                          f"Cloudflare image error "
-                          f"{image_response.status_code}: "
-                          f"{image_response.text[:500]}"
+                          "Cloudflare görsel yanıtı okunamadı: "
+                          + response.text[:500]
                       )
 
-                  content_type = image_response.headers.get(
-                      "content-type", ""
+                  result = data.get("result") or {}
+                  image_data = result.get("image")
+
+                  if not image_data:
+                      raise RuntimeError(
+                          "Cloudflare görsel üretmedi: "
+                          + json.dumps(data, ensure_ascii=False)[:1000]
+                      )
+
+                  image_bytes = base64.b64decode(image_data)
+
+              if len(image_bytes) < 1000:
+                  raise RuntimeError("Üretilen görsel boş veya çok küçük.")
+
+              with open(output_path, "wb") as f:
+                  f.write(image_bytes)
+
+              # FFmpeg'in kullanacağı görselin geçerli olduğunu kontrol et.
+              run_cmd([
+                  "ffmpeg", "-y", "-v", "error",
+                  "-i", output_path,
+                  "-frames:v", "1",
+                  os.path.join(OUT, "validated.png")
+              ])
+              os.replace(
+                  os.path.join(OUT, "validated.png"),
+                  output_path
+              )
+
+          def create_images():
+              print("3/5: Masal görselleri hazırlanıyor...", flush=True)
+
+              prompts = [
+                  "A cute little fox in a magical green forest, "
+                  "children's storybook illustration, warm soft colors, "
+                  "friendly characters, no text, landscape 16:9",
+
+                  "A small fox meeting a kind rabbit near colorful flowers, "
+                  "children's storybook illustration, soft light, "
+                  "gentle atmosphere, no text, landscape 16:9",
+
+                  "A sparkling blue stream flowing through a beautiful "
+                  "enchanted forest, cute animals, storybook illustration, "
+                  "warm colors, no text, landscape 16:9",
+
+                  "A little fox and rabbit helping a tiny bird, "
+                  "wholesome children's picture book, magical forest, "
+                  "no text, landscape 16:9",
+
+                  "A cozy little cottage among trees under golden sunlight, "
+                  "storybook illustration for young children, "
+                  "soft colors, no text, landscape 16:9",
+
+                  "Friendly forest animals sharing berries together, "
+                  "cute children's storybook art, peaceful and colorful, "
+                  "no text, landscape 16:9",
+
+                  "A beautiful starry sky above a peaceful enchanted forest, "
+                  "dreamy children's book illustration, no text, "
+                  "landscape 16:9",
+
+                  "A happy little fox and friends watching the sunrise, "
+                  "warm magical children's storybook illustration, "
+                  "no text, landscape 16:9"
+              ]
+
+              paths = []
+              for index, prompt in enumerate(prompts, start=1):
+                  path = os.path.join(OUT, f"image_{index:02d}.png")
+                  print(
+                      f"Görsel {index}/{len(prompts)} üretiliyor...",
+                      flush=True
                   )
+                  cloudflare_image(prompt, path)
+                  paths.append(path)
 
-                  if "image/" in content_type:
-                      image_bytes = image_response.content
-                  else:
-                      result = image_response.json()
-                      image_data = result.get("result", {}).get("image")
+              return paths
 
-                      if not image_data:
-                          raise RuntimeError(
-                              "Cloudflare did not return image data: "
-                              + json.dumps(
-                                  result, ensure_ascii=False
-                              )[:500]
-                          )
+          def create_visual_clips(image_paths):
+              print("4/5: Görsel klipler hazırlanıyor...", flush=True)
+              clips = []
 
-                      image_bytes = base64.b64decode(image_data)
+              for index, image_path in enumerate(image_paths, start=1):
+                  clip_path = os.path.join(OUT, f"clip_{index:02d}.mp4")
 
-                  image = Image.open(BytesIO(image_bytes)).convert("RGB")
+                  run_cmd([
+                      "ffmpeg", "-y", "-v", "error",
+                      "-loop", "1",
+                      "-framerate", "24",
+                      "-i", image_path,
+                      "-t", "7",
+                      "-vf",
+                      "scale=1280:720:force_original_aspect_ratio=decrease,"
+                      "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
+                      "setsar=1,format=yuv420p",
+                      "-r", "24",
+                      "-c:v", "libx264",
+                      "-preset", "ultrafast",
+                      "-pix_fmt", "yuv420p",
+                      "-an",
+                      clip_path
+                  ])
+                  clips.append(clip_path)
 
-                  if image.width < 512 or image.height < 512:
-                      raise RuntimeError(
-                          f"Image resolution too small: {image.size}"
+              concat_file = os.path.join(OUT, "clips.txt")
+              with open(concat_file, "w", encoding="utf-8") as f:
+                  for path in clips:
+                      f.write(
+                          "file '" + os.path.abspath(path).replace("'", "'\\''")
+                          + "'\n"
                       )
 
-                  if ImageStat.Stat(image).stddev[0] < 8:
-                      raise RuntimeError(
-                          "Image appears nearly blank or lacks detail."
-                      )
+              visuals = os.path.join(OUT, "visuals.mp4")
+              run_cmd([
+                  "ffmpeg", "-y", "-v", "error",
+                  "-f", "concat", "-safe", "0",
+                  "-i", concat_file,
+                  "-c", "copy",
+                  visuals
+              ])
 
-                  filename = f"image_{i:02d}.png"
-                  image.save(filename, format="PNG", optimize=True)
-                  image_files.append(filename)
-                  previous_valid_image = filename
+              return visuals
 
-              except Exception as error:
-                  print(f"Çizim {i} üretilemedi: {error}")
+          def create_final_video(visuals, narration):
+              print("5/5: Sesli video birleştiriliyor...", flush=True)
+              final_path = "masal-video.mp4"
 
-                  if previous_valid_image:
-                      import shutil
-                      filename = f"image_{i:02d}.png"
-                      shutil.copyfile(previous_valid_image, filename)
-                      image_files.append(filename)
-                      print("Önceki geçerli çizim kullanıldı.")
-                  else:
-                      raise RuntimeError(
-                          "İlk çizim üretilemedi; video oluşturulamıyor."
-                      ) from error
-
-          print("Çizimler hazır.")
-
-          print("4/5 Video hazırlanıyor...")
-
-          clips = []
-
-          for i, filename in enumerate(image_files, start=1):
-              clip = f"clip_{i:02d}.mp4"
-
-              run([
-                  "ffmpeg", "-y",
-                  "-loop", "1",
-                  "-i", filename,
-                  "-f", "lavfi",
-                  "-i",
-                  "anullsrc=channel_layout=stereo:sample_rate=48000",
-                  "-t", "7",
+              # Görselleri ses süresi boyunca döndür; ses akışını koru.
+              run_cmd([
+                  "ffmpeg", "-y", "-v", "error",
+                  "-stream_loop", "-1",
+                  "-i", visuals,
+                  "-i", narration,
+                  "-map", "0:v:0",
+                  "-map", "1:a:0",
                   "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=increase,"
-                  "crop=1280:720,"
+                  "scale=1280:720:force_original_aspect_ratio=decrease,"
+                  "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
                   "setsar=1,format=yuv420p",
-                  "-r", "24",
                   "-c:v", "libx264",
-                  "-preset", "medium",
-                  "-crf", "18",
+                  "-preset", "ultrafast",
+                  "-crf", "23",
+                  "-r", "24",
                   "-c:a", "aac",
-                  "-b:a", "192k",
+                  "-b:a", "128k",
                   "-ar", "48000",
                   "-ac", "2",
                   "-shortest",
-                  clip
+                  "-movflags", "+faststart",
+                  final_path
               ])
 
-              clips.append(clip)
+              if not os.path.exists(final_path):
+                  raise RuntimeError("MP4 dosyası oluşturulamadı.")
 
-          with open("clips.txt", "w", encoding="utf-8") as f:
-              for clip in clips:
-                  f.write(f"file '{clip}'\n")
+              if os.path.getsize(final_path) < 100000:
+                  raise RuntimeError("MP4 dosyası beklenenden küçük.")
 
-          run([
-              "ffmpeg", "-y",
-              "-f", "concat",
-              "-safe", "0",
-              "-i", "clips.txt",
-              "-c", "copy",
-              "visuals.mp4"
-          ])
+              probe = subprocess.run(
+                  [
+                      "ffprobe", "-v", "error",
+                      "-show_entries", "stream=codec_type,codec_name",
+                      "-of", "json", final_path
+                  ],
+                  check=True, capture_output=True, text=True
+              )
+              streams = json.loads(probe.stdout).get("streams", [])
+              types = {s.get("codec_type") for s in streams}
 
-          duration_result = subprocess.run([
-              "ffprobe", "-v", "error",
-              "-show_entries", "format=duration",
-              "-of", "default=noprint_wrappers=1:nokey=1",
-              "narration.mp3"
-          ], capture_output=True, text=True, check=True)
+              if "video" not in types:
+                  raise RuntimeError("Son videoda görüntü akışı yok.")
+              if "audio" not in types:
+                  raise RuntimeError("Son videoda ses akışı yok.")
 
-          narration_duration = float(duration_result.stdout.strip())
+              # Dosyanın kod çözülebildiğini kontrol et.
+              run_cmd([
+                  "ffmpeg", "-v", "error",
+                  "-i", final_path,
+                  "-f", "null", "-"
+              ])
 
-          run([
-              "ffmpeg", "-y",
-              "-stream_loop", "-1",
-              "-i", "visuals.mp4",
-              "-i", "narration.mp3",
-              "-t", str(narration_duration),
-              "-vf",
-              "scale=1280:720:force_original_aspect_ratio=increase,"
-              "crop=1280:720,setsar=1,format=yuv420p",
-              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-              "-c:v", "libx264",
-              "-preset", "medium",
-              "-crf", "18",
-              "-c:a", "aac",
-              "-b:a", "192k",
-              "-ar", "48000",
-              "-ac", "2",
-              "-shortest",
-              "-movflags", "+faststart",
-              "masal-video.mp4"
-          ])
+              print(
+                  f"Video tamamlandı: {final_path} "
+                  f"({os.path.getsize(final_path)} bayt)",
+                  flush=True
+              )
 
-          probe = subprocess.check_output([
-              "ffprobe", "-v", "error",
-              "-show_entries", "stream=codec_type,width,height",
-              "-of", "json",
-              "masal-video.mp4"
-          ], text=True)
+          def main():
+              require_secrets()
+              story = create_story()
+              narration = create_speech(story)
+              images = create_images()
+              visuals = create_visual_clips(images)
+              create_final_video(visuals, narration)
 
-          streams = json.loads(probe).get("streams", [])
-          stream_types = {s.get("codec_type") for s in streams}
-
-          if "video" not in stream_types:
-              raise RuntimeError("Videoda görüntü akışı bulunamadı.")
-
-          if "audio" not in stream_types:
-              raise RuntimeError("Videoda ses akışı bulunamadı.")
-
-          size = os.path.getsize("masal-video.mp4")
-
-          if size < 100000:
-              raise RuntimeError("Video dosyası beklenenden küçük.")
-
-          run([
-              "ffmpeg", "-v", "error",
-              "-i", "masal-video.mp4",
-              "-f", "null", "-"
-          ])
-
-          print("5/5 Video başarıyla oluşturuldu!")
-          print(f"Dosya boyutu: {size / 1024 / 1024:.2f} MB")
-          print("Görüntü ve ses akışları doğrulandı.")
+          if __name__ == "__main__":
+              try:
+                  main()
+              except Exception as exc:
+                  print(f"\nHATA: {exc}", file=sys.stderr, flush=True)
+                  raise
           PY
 
-          python create_video.py
+          python -u create_video.py
 
-      - name: Upload video and story
+      - name: Upload finished video and story
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: masal-video
           path: |
             masal-video.mp4
             masal.txt
-          if-no-files-found: error
+            output/narration.mp3
+          if-no-files-found: warn
           retention-days: 7
