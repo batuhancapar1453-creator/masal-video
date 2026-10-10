@@ -58,6 +58,7 @@ jobs:
           CF_ACCOUNT = secret("CLOUDFLARE_ACCOUNT_ID")
 
           def request_with_retry(method, url, **kwargs):
+              response = None
               for attempt in range(6):
                   response = requests.request(
                       method, url, timeout=180, **kwargs
@@ -69,8 +70,8 @@ jobs:
                   if attempt < 5:
                       wait = 10 * (2 ** attempt)
                       print(
-                          f"Geçici sunucu hatası "
-                          f"{response.status_code}; {wait} saniye bekleniyor."
+                          f"Geçici HTTP hatası {response.status_code}; "
+                          f"{wait} saniye bekleniyor."
                       )
                       time.sleep(wait)
               return response
@@ -107,8 +108,8 @@ jobs:
               story = data["candidates"][0]["content"]["parts"][0]["text"].strip()
           except (KeyError, IndexError, TypeError):
               raise RuntimeError(
-                  "Masal alınamadı: " +
-                  json.dumps(data, ensure_ascii=False)[:1000]
+                  "Masal alınamadı: "
+                  + json.dumps(data, ensure_ascii=False)[:1000]
               )
 
           if len(story) < 500:
@@ -185,7 +186,7 @@ jobs:
           if narration_duration <= 1:
               raise RuntimeError("Ses süresi geçersiz.")
 
-          print(f"Ses hazır. Süre: {narration_duration:.1f} saniye.")
+          print(f"Ses hazır: {narration_duration:.1f} saniye.")
 
           print("3/5 Masal görselleri hazırlanıyor...")
 
@@ -217,84 +218,108 @@ jobs:
           image_files = []
 
           for i, image_prompt in enumerate(prompts, start=1):
-              print(f"Görsel {i}/{len(prompts)} oluşturuluyor...")
-
-              img_response = request_with_retry(
-                  "POST",
-                  cf_url,
-                  headers={
-                      "Authorization": f"Bearer {CF_TOKEN}",
-                      "Content-Type": "application/json"
-                  },
-                  json={"prompt": image_prompt, "num_steps": 4}
-              )
-
-              if not img_response.ok:
-                  raise RuntimeError(
-                      f"Cloudflare görsel hatası "
-                      f"{img_response.status_code}: "
-                      f"{img_response.text[:800]}"
-                  )
-
-              content_type = img_response.headers.get(
-                  "content-type", ""
-              ).lower()
-
-              if "image/" in content_type:
-                  image_bytes = img_response.content
-              else:
-                  try:
-                      result = img_response.json()
-                  except ValueError:
-                      raise RuntimeError(
-                          "Cloudflare görsel yanıtı okunamadı: "
-                          + img_response.text[:500]
-                      )
-
-                  image_data = result.get("result", {}).get("image")
-
-                  if not image_data:
-                      raise RuntimeError(
-                          "Cloudflare görsel verisi döndürmedi: "
-                          + json.dumps(result, ensure_ascii=False)[:800]
-                      )
-
-                  image_bytes = base64.b64decode(image_data)
-
               filename = f"image_{i:02d}.png"
+              valid_image = False
 
-              try:
-                  img = Image.open(BytesIO(image_bytes)).convert("RGB")
-                  img.load()
-              except Exception as exc:
-                  raise RuntimeError(
-                      f"{filename} geçerli bir resim değil: {exc}"
+              for image_attempt in range(1, 5):
+                  print(
+                      f"Görsel {i}/8, deneme "
+                      f"{image_attempt}/4..."
                   )
 
-              if img.width < 100 or img.height < 100:
-                  raise RuntimeError(f"{filename} çözünürlüğü çok düşük.")
+                  try:
+                      img_response = request_with_retry(
+                          "POST",
+                          cf_url,
+                          headers={
+                              "Authorization": f"Bearer {CF_TOKEN}",
+                              "Content-Type": "application/json"
+                          },
+                          json={
+                              "prompt": image_prompt,
+                              "num_steps": 4
+                          }
+                      )
 
-              stats = ImageStat.Stat(img)
-              mean_brightness = sum(stats.mean) / 3
-              std_brightness = sum(stats.stddev) / 3
+                      if not img_response.ok:
+                          raise RuntimeError(
+                              f"Cloudflare HTTP {img_response.status_code}: "
+                              f"{img_response.text[:400]}"
+                          )
 
-              print(
-                  f"{filename}: {img.width}x{img.height}, "
-                  f"parlaklık={mean_brightness:.1f}, "
-                  f"çeşitlilik={std_brightness:.1f}"
-              )
+                      content_type = img_response.headers.get(
+                          "content-type", ""
+                      ).lower()
 
-              if std_brightness < 3 or mean_brightness < 2:
+                      if "image/" in content_type:
+                          image_bytes = img_response.content
+                      else:
+                          result = img_response.json()
+                          image_data = result.get(
+                              "result", {}
+                          ).get("image")
+
+                          if not image_data:
+                              raise RuntimeError(
+                                  "Cloudflare yanıtında resim bulunamadı: "
+                                  + json.dumps(
+                                      result, ensure_ascii=False
+                                  )[:400]
+                              )
+
+                          image_bytes = base64.b64decode(image_data)
+
+                      # Önce orijinal resmi yükle.
+                      with Image.open(BytesIO(image_bytes)) as source:
+                          source.load()
+
+                          # Saydam resim varsa beyaz zeminle birleştir.
+                          rgba = source.convert("RGBA")
+                          background = Image.new(
+                              "RGBA", rgba.size, (255, 255, 255, 255)
+                          )
+                          background.alpha_composite(rgba)
+                          img = background.convert("RGB")
+
+                      if img.width < 100 or img.height < 100:
+                          raise RuntimeError("Görsel çözünürlüğü çok düşük.")
+
+                      stats = ImageStat.Stat(img)
+                      brightness = sum(stats.mean) / 3
+                      variation = sum(stats.stddev) / 3
+
+                      print(
+                          f"Resim: {img.width}x{img.height}; "
+                          f"parlaklık={brightness:.1f}; "
+                          f"çeşitlilik={variation:.1f}"
+                      )
+
+                      if brightness < 3 or variation < 3:
+                          raise RuntimeError(
+                              "Görsel tamamen siyah veya tek renkli."
+                          )
+
+                      img.save(filename, format="PNG")
+                      valid_image = True
+                      break
+
+                  except Exception as exc:
+                      print(f"Görsel denemesi başarısız: {exc}")
+                      if image_attempt < 4:
+                          time.sleep(3 * image_attempt)
+
+              if not valid_image:
                   raise RuntimeError(
-                      f"{filename} tamamen siyah veya boş görünüyor."
+                      f"{filename} dört denemede de üretilemedi. "
+                      "İşlem durduruldu; siyah video oluşturulmayacak."
                   )
 
-              img.save(filename, format="PNG")
               image_files.append(filename)
+              print(f"{filename} başarıyla kontrol edildi.")
 
-          print("Görseller kontrol edildi.")
+          print("Sekiz görselin tamamı hazır.")
 
-          print("4/5 Video hazırlanıyor...")
+          print("4/5 Video oluşturuluyor...")
 
           clips = []
 
@@ -315,7 +340,6 @@ jobs:
                   "-c:v", "libx264",
                   "-preset", "ultrafast",
                   "-an",
-                  "-movflags", "+faststart",
                   clip
               ])
 
@@ -337,7 +361,7 @@ jobs:
               "visuals.mp4"
           ])
 
-          # Görüntüleri sesin sonuna kadar döndür ve gerçek anlatımı ekle.
+          # Görselleri ses bitene kadar döndür ve anlatımı ekle.
           run([
               "ffmpeg", "-y",
               "-stream_loop", "-1",
@@ -358,7 +382,8 @@ jobs:
               "masal-video.mp4"
           ])
 
-          # Son dosyada hem görüntü hem ses olduğunu doğrula.
+          print("Son video kontrol ediliyor...")
+
           probe = subprocess.check_output([
               "ffprobe", "-v", "error",
               "-show_entries", "stream=codec_type,width,height",
@@ -370,15 +395,15 @@ jobs:
           stream_types = {s.get("codec_type") for s in streams}
 
           if "video" not in stream_types:
-              raise RuntimeError("Son videoda görüntü akışı bulunamadı.")
+              raise RuntimeError("Videoda görüntü akışı bulunamadı.")
           if "audio" not in stream_types:
-              raise RuntimeError("Son videoda ses akışı bulunamadı.")
+              raise RuntimeError("Videoda ses akışı bulunamadı.")
 
           size = os.path.getsize("masal-video.mp4")
           if size < 100000:
-              raise RuntimeError("Son video dosyası beklenenden küçük.")
+              raise RuntimeError("Video dosyası beklenenden küçük.")
 
-          print("5/5 Video başarıyla oluşturuldu.")
+          print("5/5 Video başarıyla oluşturuldu!")
           print(f"Dosya boyutu: {size / 1024 / 1024:.2f} MB")
           print("Görüntü ve ses akışları doğrulandı.")
           PY
