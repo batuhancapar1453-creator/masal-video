@@ -1,11 +1,10 @@
-
-name: Masal Video Uret
+name: Kisa Animasyon Video Uret
 
 on:
   workflow_dispatch:
 
 jobs:
-  masal-video:
+  animation-video:
     runs-on: ubuntu-latest
     timeout-minutes: 40
 
@@ -26,9 +25,9 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow pyyaml
+          pip install requests pillow
 
-      - name: Generate Turkish story video
+      - name: Generate short cartoon animation
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
@@ -36,12 +35,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NIFTYVID_WORKER_URL: https://nifty-vid.batuhancapar1453.workers.dev
+          ANIMATION_RUN_NUMBER: ${{ github.run_number }}
         run: |
           cat > create_video.py <<'PY'
           import os
           import json
           import time
-          import shutil
           import subprocess
           import requests
           from PIL import Image
@@ -52,6 +51,10 @@ jobs:
           AZURE_REGION = os.environ["AZURE_REGION"]
           CF_TOKEN = os.environ["CLOUDFLARE_API_TOKEN"]
           CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          RUN_NUMBER = os.environ.get(
+              "ANIMATION_RUN_NUMBER", str(int(time.time()))
+          )
+
           NIFTYVID_WORKER_URL = os.environ.get(
               "NIFTYVID_WORKER_URL",
               "https://nifty-vid.batuhancapar1453.workers.dev"
@@ -125,7 +128,7 @@ jobs:
               }
 
               print(
-                  f"Sahne {scene_number}: NiftyVid hareketli klip deneniyor..."
+                  f"Sahne {scene_number}: hareketli klip oluşturuluyor..."
               )
 
               with open(image_path, "rb") as image_file:
@@ -157,7 +160,8 @@ jobs:
                               detail = response.text[:500]
 
                           raise RuntimeError(
-                              f"NiftyVid HTTP {response.status_code}: {detail}"
+                              f"NiftyVid HTTP {response.status_code}: "
+                              f"{detail}"
                           )
 
                       event_name = "message"
@@ -178,7 +182,7 @@ jobs:
 
                                   if event_name == "error":
                                       raise RuntimeError(
-                                          "NiftyVid üretim hatası: "
+                                          "Animasyon üretim hatası: "
                                           + event_data[:500]
                                       )
 
@@ -196,8 +200,7 @@ jobs:
 
                                       if not video_url:
                                           raise RuntimeError(
-                                              "NiftyVid tamamlandı ama "
-                                              "video bağlantısı dönmedi."
+                                              "Video bağlantısı dönmedi."
                                           )
 
                                       break
@@ -213,7 +216,7 @@ jobs:
 
               if not video_url:
                   raise RuntimeError(
-                      "NiftyVid akışı video tamamlanmadan kapandı."
+                      "Animasyon tamamlanmadan bağlantı kapandı."
                   )
 
               temp_path = output_path + ".download.mp4"
@@ -230,8 +233,6 @@ jobs:
                           if chunk:
                               video_file.write(chunk)
 
-              # Görüntüyü 16:9 ekrana yay.
-              # Kenar boşluğu eklemek yerine ölçekle ve kırp.
               run([
                   "ffmpeg", "-y",
                   "-i", temp_path,
@@ -250,142 +251,75 @@ jobs:
               os.remove(temp_path)
 
               if os.path.getsize(output_path) < 20000:
-                  raise RuntimeError(
-                      "NiftyVid klibi beklenenden küçük."
-                  )
+                  raise RuntimeError("Animasyon klibi çok küçük.")
 
-          print("1/5 Türkçe masal hazırlanıyor...")
+          print("1/5 Yeni çizgi film konusu hazırlanıyor...")
 
-          story_prompt = """
-          4-8 yaş arası çocuklar için Türkçe, özgün ve sıcak bir masal yaz.
-          Masal 600-800 kelime uzunluğunda olsun.
-          Başlangıcı, gelişmesi ve mutlu bir sonu olsun.
-          Dostluk, iyilik, cesaret veya paylaşma gibi olumlu bir mesaj içersin.
-          Korkutucu, şiddet içeren veya uygunsuz içerik kullanma.
+          animation_prompt = f"""
+          BU ÇALIŞTIRMANIN NUMARASI: {RUN_NUMBER}
 
-          Masalın TEK bir ana kahramanı olsun. Ana kahramanın kim olduğunu,
-          ne istediğini, başına gelen sorunu ve bu sorunu nasıl çözdüğünü
-          açıkça anlat. Ana kahramanın arkadaşları olabilir ama hikâye
-          boyunca merkezde aynı ana kahraman kalmalı.
+          4-8 yaş çocukları için kısa, eğlenceli ve görsel açıdan etkileyici
+          bir çizgi film animasyonu üret. Bu bir uzun masal değildir.
 
-          Olaylar mantıklı ve kronolojik sırayla ilerlesin. Her bölümde
-          görselleştirilebilecek somut bir olay yaşansın. Ana karakter
-          rastgele değişmesin. Masalda olmayan yeni maceralar ekleme.
+          HER ÇALIŞTIRMADA YENİ KONU:
+          Bu çalıştırmada kendin yepyeni bir konu, ana karakter ve amaç seç.
+          Önceki çalıştırmalardaki konuyu tekrar etme. Arı ve polen örneğini
+          her seferinde kullanma; o yalnızca sıralı olay anlatımına örnektir.
+          Küçük bir kaplumbağa, sevimli bir penguen, minik bir robot,
+          uğur böceği, tilki, kedi veya bambaşka çocuk dostu bir karakter
+          seçebilirsin. Her çalıştırmada farklı bir fikir geliştirmeye çalış.
 
-          Yalnızca masal metnini ver; başlık dışında açıklama ekleme.
-          """
+          Tek ana karakter ve kolay anlaşılır tek bir hedef olsun.
+          Karakterin görünüşü bütün sahnelerde aynı kalmalı.
+          Yardımcı karakterler yalnızca olay örgüsünde gerçekten gerekiyorsa
+          yer alsın.
 
-          story_response = request_with_retry(
-              "POST",
-              GEMINI_URL,
-              json={
-                  "contents": [
-                      {
-                          "parts": [
-                              {"text": story_prompt}
-                          ]
-                      }
-                  ],
-                  "generationConfig": {
-                      "temperature": 0.8,
-                      "maxOutputTokens": 5000
-                  }
-              }
-          )
+          OLAYLAR SIRAYLA İLERLEMELİ:
+          Örneğin karakter bir yere gider, bir şey yapar, bir sorunla
+          karşılaşır, çözüm bulur ve amacına ulaşır. Bu yalnızca genel
+          bir yapı örneğidir; her seferinde yeni bir olay örgüsü kur.
+          Her sahne önceki sahnenin devamı olmalı.
+          Birbirinden bağımsız rastgele görüntüler üretme.
+          Görüntüde olan olay o sahnenin anlatımıyla uyuşmalı.
 
-          story_data = story_response.json()
+          GÖRSEL TARZ:
+          Kaliteli 3D çocuk çizgi filmi, canlı ama dengeli renkler,
+          sevimli yüz ifadeleri, net hareketler, güzel ışıklandırma,
+          tutarlı karakter tasarımı ve sinematik kamera açıları kullan.
+          Korku, şiddet, tehlikeli davranış, yazı, altyazı ve logo olmasın.
+          Görüntüler yatay 16:9 kadraj için hazırlansın.
 
-          try:
-              story = story_data["candidates"][0]["content"]["parts"][0]["text"]
-          except (KeyError, IndexError, TypeError):
-              raise RuntimeError(
-                  "Gemini masal metnini oluşturamadı: "
-                  + json.dumps(story_data, ensure_ascii=False)[:2000]
-              )
+          SÜRE:
+          Tam 8 kısa sahne hazırla.
+          Her sahne yaklaşık 3,5 saniyelik hareketli klibe uygun olsun.
+          Seslendirme kısa ve sade Türkçe olsun, 130 kelimeyi geçmesin.
+          Nihai video 3 dakikayı aşmamalı.
+          Anlatım, sahnelerde gerçekleşen olayları doğru sırayla açıklamalı.
 
-          story = story.strip()
+          Her sahne için:
+          - story_beat: sahnede gerçekten gerçekleşen olay
+          - visual_prompt: o olayın görselini tarif eden ayrıntılı İngilizce istem
+          - motion_prompt: görselde karakterin yapacağı somut hareketi anlatan
+            İngilizce istem. Hareket başlangıcı, yönü ve çevre hareketi açık olsun.
+          - Her sahnede aynı ana karakterin tasarımını koru.
 
-          if len(story) < 500:
-              raise RuntimeError(
-                  f"Masal metni çok kısa oluşturuldu: {len(story)} karakter."
-              )
+          Yalnızca geçerli JSON döndür. Markdown veya başka açıklama yazma.
 
-          with open("masal.txt", "w", encoding="utf-8") as f:
-              f.write(story)
-
-          print(f"Masal oluşturuldu: {len(story)} karakter.")
-
-          print("Masala özel karakter ve sahne planı hazırlanıyor...")
-
-          scene_plan_prompt = f"""
-          Aşağıdaki Türkçe çocuk masalını incele ve yalnızca bu masalda
-          gerçekten anlatılan olaylardan oluşan tam 8 sahnelik bir çizgi
-          film planı üret.
-
-          EN ÖNEMLİ KURALLAR:
-
-          1. Masalın ana kahramanını belirle ve "main_character" alanında
-             adını ve türünü açıkça yaz. Hikâyenin her sahnesinde ana
-             kahraman bulunmalı. Örneğin kahraman tavşansa her sahnede
-             aynı tavşan olmalı.
-
-          2. Ana kahramanın arkadaşları yalnızca masalda varsa görünebilir.
-             Arkadaşlar ana kahramana o sahnede yardım etmeli veya masaldaki
-             olaya katılmalı; kendi başlarına bağımsız olay başlatmamalı.
-
-          3. Her sahne masaldaki belirli bir cümle veya olayın görsel
-             karşılığı olmalı. Masalda olmayan olay, hayvan, nesne, mekân
-             veya macera ekleme.
-
-          4. Her sahne için "story_excerpt" alanına, masaldan o sahneyi
-             destekleyen kısa ve gerçek bir cümleyi aynen alıntıla.
-             Uygun bir cümle yoksa o sahneyi uydurma; masaldaki olayları
-             8 sahneye böl.
-
-          5. 8 sahne baştan sona kronolojik ilerlemeli. Her sahne bir
-             önceki sahnenin devamı olmalı; birbirinden bağımsız klipler
-             üretme.
-
-          6. Ana kahramanın görünüşünü sabitle: tür, tüy/saç rengi,
-             göz, kıyafet, boy ve ayırt edici ayrıntılar tüm sahnelerde
-             aynı kalmalı.
-
-          7. Her görselde o anda anlatılan eylem açıkça görülsün.
-             Sadece genel manzara, rastgele hayvan portresi veya konu
-             dışı dekor kullanma.
-
-          8. motion_prompt yalnızca o sahne görselindeki karakterlere
-             küçük, doğal hareketler eklesin. Yeni karakter, yeni olay
-             veya mekân değişimi istemesin.
-
-          Stil: yüksek kaliteli, sevimli 3D aile animasyon filmi,
-          sinematik ışık, aynı karakter tasarımı, yatay 16:9 kadraj,
-          önemli karakterler tamamen görünür, yazı/altyazı/logo/filigran yok.
-
-          Yalnızca geçerli JSON döndür; markdown çiti veya açıklama yazma.
-
-          Şema:
+          JSON şeması:
           {{
-            "style": "sabit görsel stil tarifi",
-            "main_character": "ana kahramanın adı ve türü",
-            "character_bible": "ana kahramanın ve varsa masaldaki arkadaşlarının sabit görünüşleri",
+            "title": "kısa çizgi film başlığı",
+            "narration": "kısa Türkçe seslendirme",
+            "style": "bütün sahnelerde korunacak çizgi film stili",
+            "character_bible": "ana karakterin değişmeyecek görünüşü",
             "scenes": [
               {{
                 "scene": 1,
-                "story_excerpt": "masaldan aynen alınmış kısa cümle",
-                "story_beat": "bu cümlede gerçekleşen somut olay",
-                "visual_prompt": "İngilizce ayrıntılı görsel talimatı; ana kahraman ve somut eylem görünür",
-                "motion_prompt": "İngilizce, yalnızca bu sahnedeki eyleme uygun küçük hareket talimatı"
+                "story_beat": "bu sahnede gerçekleşen olay",
+                "visual_prompt": "İngilizce görsel istemi",
+                "motion_prompt": "İngilizce hareket istemi"
               }}
             ]
           }}
-
-          Tam 8 sahne üret. visual_prompt içinde sabit karakter tarifini
-          tekrar et. Her sahnede ana kahraman görünür ve masaldaki somut
-          eylemi yapıyor olsun. Görseli masaldaki cümleyle çeliştirme.
-
-          MASAL:
-          {story}
           """
 
           plan_response = request_with_retry(
@@ -395,12 +329,12 @@ jobs:
                   "contents": [
                       {
                           "parts": [
-                              {"text": scene_plan_prompt}
+                              {"text": animation_prompt}
                           ]
                       }
                   ],
                   "generationConfig": {
-                      "temperature": 0.35,
+                      "temperature": 0.85,
                       "maxOutputTokens": 6000,
                       "responseMimeType": "application/json"
                   }
@@ -421,27 +355,34 @@ jobs:
 
               scene_plan = json.loads(plan_text)
               scenes = scene_plan["scenes"]
-              character_bible = scene_plan.get("character_bible", "")
-              style_bible = scene_plan.get("style", "")
+              character_bible = str(
+                  scene_plan.get("character_bible", "")
+              ).strip()
+              style_bible = str(scene_plan.get("style", "")).strip()
+              narration = str(scene_plan.get("narration", "")).strip()
 
               if len(scenes) != 8:
                   raise ValueError(
-                      f"8 sahne yerine {len(scenes)} sahne döndü"
+                      f"8 sahne yerine {len(scenes)} sahne döndü."
+                  )
+
+              if not narration or len(narration.split()) > 130:
+                  raise ValueError(
+                      "Seslendirme boş veya 130 kelimeden uzun."
+                  )
+
+              if not character_bible or not style_bible:
+                  raise ValueError(
+                      "Karakter görünüşü veya görsel stili eksik."
                   )
 
               for index, scene in enumerate(scenes, start=1):
                   scene["visual_prompt"] = str(
                       scene.get("visual_prompt", "")
                   ).strip()
-
                   scene["motion_prompt"] = str(
                       scene.get("motion_prompt", "")
                   ).strip()
-
-                  scene["story_excerpt"] = str(
-                      scene.get("story_excerpt", "")
-                  ).strip()
-
                   scene["story_beat"] = str(
                       scene.get("story_beat", "")
                   ).strip()
@@ -449,20 +390,22 @@ jobs:
                   if (
                       not scene["visual_prompt"]
                       or not scene["motion_prompt"]
-                      or not scene["story_excerpt"]
                       or not scene["story_beat"]
                   ):
                       raise ValueError(
-                          f"{index}. sahnede olay, masal cümlesi "
-                          "veya istem eksik"
+                          f"{index}. sahnenin olay, görsel veya hareket "
+                          "bilgisi eksik."
                       )
 
           except Exception as e:
               raise RuntimeError(
-                  "Masala özel sahne planı oluşturulamadı: "
+                  "Çizgi film planı oluşturulamadı: "
                   + str(e) + " | Yanıt: "
                   + json.dumps(plan_data, ensure_ascii=False)[:1800]
               ) from e
+
+          with open("animasyon-metni.txt", "w", encoding="utf-8") as f:
+              f.write(narration)
 
           with open("sahne-plani.json", "w", encoding="utf-8") as f:
               json.dump(
@@ -474,33 +417,32 @@ jobs:
 
           for index, scene in enumerate(scenes, start=1):
               scene["visual_prompt"] = (
-                  f"Main character throughout the whole film: "
-                  f"{scene_plan.get('main_character', 'the same main character')}. "
-                  f"Consistent character design: {character_bible}. "
-                  f"Story style: {style_bible}. "
-                  f"Exact story event: {scene['story_beat']}. "
-                  f"Story sentence: {scene['story_excerpt']}. "
-                  f"Visual must depict this event and nothing unrelated: "
+                  f"{style_bible}. "
+                  f"Consistent main character design: {character_bible}. "
+                  f"Exact chronological action for shot {index}: "
+                  f"{scene['story_beat']}. "
                   f"{scene['visual_prompt']}. "
-                  "The same main character must be clearly visible in this scene. "
-                  "Wide 16:9 cinematic composition, characters fully visible "
-                  "inside safe frame, no text, no captions, no logo, no watermark."
+                  "One continuous children's cartoon. Keep the same character, "
+                  "face, proportions, colors and style. Show only the action "
+                  "described for this scene. Wide 16:9 composition, full "
+                  "character visible, expressive face, beautiful lighting, "
+                  "no text, no captions, no logo, no watermark."
               )
 
           print(
-              "Masala uygun 8 sahne planlandı; "
-              "ana karakter ve olaylar sabitlendi."
+              f"Yeni çizgi film konusu: "
+              f"{scene_plan.get('title', 'Kısa animasyon')}"
           )
 
-          print("2/5 Azure ile seslendirme oluşturuluyor...")
+          print("2/5 Türkçe seslendirme oluşturuluyor...")
 
           speech_url = (
               f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
 
-          escaped_story = (
-              story.replace("&", "&amp;")
+          escaped_narration = (
+              narration.replace("&", "&amp;")
               .replace("<", "&lt;")
               .replace(">", "&gt;")
           )
@@ -509,7 +451,7 @@ jobs:
           xmlns="http://www.w3.org/2001/10/synthesis"
           xml:lang="tr-TR">
           <voice name="tr-TR-EmelNeural">
-          <prosody rate="-5%" pitch="+2%">{escaped_story}</prosody>
+          <prosody rate="-5%" pitch="+2%">{escaped_narration}</prosody>
           </voice>
           </speak>"""
 
@@ -520,7 +462,7 @@ jobs:
                   "Content-Type": "application/ssml+xml",
                   "X-Microsoft-OutputFormat":
                       "audio-24khz-48kbitrate-mono-mp3",
-                  "User-Agent": "MasalVideoGenerator"
+                  "User-Agent": "ShortAnimationGenerator"
               },
               data=ssml.encode("utf-8"),
               timeout=300
@@ -542,33 +484,33 @@ jobs:
               f.write(speech_response.content)
 
           print(
-              "Seslendirme oluşturuldu: "
+              "Seslendirme hazır: "
               f"{len(speech_response.content) / 1024:.1f} KB"
           )
 
-          print("3/5 Masala özel görseller oluşturuluyor...")
+          print("3/5 Sahnelere özel görseller oluşturuluyor...")
 
           image_prompts = [
               scene["visual_prompt"] for scene in scenes
+          ]
+
+          motion_prompts = [
+              scene["motion_prompt"] for scene in scenes
           ]
 
           os.makedirs("images", exist_ok=True)
           valid_images = []
 
           for i, prompt in enumerate(image_prompts, start=1):
-              print(f"Görsel {i}/{len(image_prompts)} hazırlanıyor...")
+              print(f"Görsel {i}/{len(image_prompts)} oluşturuluyor...")
 
               payload = {
                   "prompt": prompt,
                   "negative_prompt": (
-                      "blurry, low quality, low resolution, distorted, "
-                      "deformed, ugly, extra limbs, bad anatomy, "
-                      "text, letters, watermark, logo, noise, artifacts, "
-                      "different character design, inconsistent costume, "
-                      "cropped head, cropped feet, black bars, borders, "
-                      "letterboxing, blank margins, unrelated scene, "
-                      "unrelated animals, different protagonist, "
-                      "wrong action, scene unrelated to the story"
+                      "blurry, low quality, distorted, deformed, extra limbs, "
+                      "bad anatomy, text, letters, watermark, logo, noise, "
+                      "different character design, inconsistent colors, "
+                      "cropped head, cropped feet, black bars, borders"
                   ),
                   "width": 1024,
                   "height": 576,
@@ -609,14 +551,6 @@ jobs:
                           f"{image.width}x{image.height}"
                       )
 
-                  image_std = image.getchannel("R").getextrema()
-
-                  if image_std[1] - image_std[0] < 8:
-                      raise RuntimeError(
-                          "Görsel kalite kontrolünden geçemedi."
-                      )
-
-                  # Kaynak görseli de 16:9 kadraja dönüştür.
                   target_ratio = 16 / 9
                   image_ratio = image.width / image.height
 
@@ -645,24 +579,18 @@ jobs:
               except Exception as e:
                   print(f"Görsel {i} oluşturulamadı: {e}")
 
-                  # Başka sahnenin görselini kopyalama.
-                  # Yanlış görsel üretmek yerine işlemi durdur.
                   raise RuntimeError(
                       f"{i}. sahnenin görseli üretilemedi. "
-                      "Başka sahnenin görseli kopyalanmayacak; "
-                      "anlatım-görüntü uyuşmazlığını önlemek için "
+                      "Başka bir sahnenin görselini kullanmamak için "
                       "işlem durduruldu."
                   ) from e
 
           if len(valid_images) != len(image_prompts):
-              raise RuntimeError("Görsellerin tamamı oluşturulamadı.")
+              raise RuntimeError("Bütün sahne görselleri oluşturulamadı.")
 
-          print("4/5 Masala uygun görüntü klipleri oluşturuluyor...")
+          print("4/5 Sahne sahne hareketli klipler oluşturuluyor...")
 
           clip_paths = []
-          motion_prompts = [
-              scene["motion_prompt"] for scene in scenes
-          ]
 
           for i, image_path in enumerate(valid_images, start=1):
               clip_path = f"clip_{i:02d}.mp4"
@@ -677,45 +605,18 @@ jobs:
                   )
 
                   print(
-                      f"Hareketli klip {i}/{len(valid_images)} oluşturuldu."
+                      f"Hareketli sahne {i}/{len(valid_images)} hazır."
                   )
 
               except Exception as animation_error:
-                  print(
-                      f"NiftyVid sahne {i} için başarısız oldu: "
+                  raise RuntimeError(
+                      f"{i}. sahnenin gerçek animasyonu üretilemedi. "
+                      "Durağan görseli animasyonmuş gibi sunmamak için "
+                      "işlem durduruldu. NiftyVid hatası: "
                       f"{animation_error}"
-                  )
-                  print(
-                      "Aynı sahne görseliyle sabit görüntü yöntemi "
-                      "kullanılarak devam ediliyor."
-                  )
-
-                  run([
-                      "ffmpeg", "-y",
-                      "-loop", "1",
-                      "-framerate", "25",
-                      "-i", image_path,
-                      "-f", "lavfi",
-                      "-i",
-                      "anullsrc=channel_layout=stereo:sample_rate=48000",
-                      "-t", "7",
-                      "-vf",
-                      "scale=1280:720:force_original_aspect_ratio=increase,"
-                      "crop=1280:720,setsar=1,format=yuv420p",
-                      "-c:v", "libx264",
-                      "-preset", "medium",
-                      "-crf", "18",
-                      "-c:a", "aac",
-                      "-b:a", "192k",
-                      "-ar", "48000",
-                      "-ac", "2",
-                      "-shortest",
-                      "-movflags", "+faststart",
-                      clip_path
-                  ])
+                  ) from animation_error
 
               clip_paths.append(clip_path)
-              print(f"Klip {i}/{len(valid_images)} hazır.")
 
           with open("concat_list.txt", "w", encoding="utf-8") as f:
               for clip_path in clip_paths:
@@ -730,9 +631,9 @@ jobs:
               "visuals.mp4"
           ])
 
-          print("Görüntü klipleri birleştirildi.")
+          print("Hareketli sahneler birleştirildi.")
 
-          print("5/5 Ses ve görüntü birleştiriliyor...")
+          print("5/5 Görüntü ve ses birleştiriliyor...")
 
           duration_result = subprocess.run([
               "ffprobe", "-v", "error",
@@ -742,6 +643,12 @@ jobs:
           ], capture_output=True, text=True, check=True)
 
           narration_duration = float(duration_result.stdout.strip())
+
+          if narration_duration > 180:
+              raise RuntimeError(
+                  f"Seslendirme {narration_duration:.1f} saniye. "
+                  "3 dakika sınırını aşıyor."
+              )
 
           run([
               "ffmpeg", "-y",
@@ -764,14 +671,14 @@ jobs:
               "-ac", "2",
               "-shortest",
               "-movflags", "+faststart",
-              "masal-video.mp4"
+              "animasyon-video.mp4"
           ])
 
           probe = subprocess.check_output([
               "ffprobe", "-v", "error",
               "-show_entries", "stream=codec_type,width,height",
               "-of", "json",
-              "masal-video.mp4"
+              "animasyon-video.mp4"
           ], text=True)
 
           streams = json.loads(probe).get("streams", [])
@@ -783,31 +690,32 @@ jobs:
           if "audio" not in stream_types:
               raise RuntimeError("Videoda ses akışı bulunamadı.")
 
-          size = os.path.getsize("masal-video.mp4")
+          size = os.path.getsize("animasyon-video.mp4")
 
           if size < 100000:
               raise RuntimeError("Video dosyası beklenenden küçük.")
 
           run([
               "ffmpeg", "-v", "error",
-              "-i", "masal-video.mp4",
+              "-i", "animasyon-video.mp4",
               "-f", "null", "-"
           ])
 
-          print("5/5 Video başarıyla oluşturuldu!")
+          print("Animasyon başarıyla oluşturuldu!")
+          print(f"Konu: {scene_plan.get('title', 'Kısa animasyon')}")
           print(f"Dosya boyutu: {size / 1024 / 1024:.2f} MB")
           print("Görüntü ve ses akışları doğrulandı.")
           PY
 
           python create_video.py
 
-      - name: Upload video and story
+      - name: Upload animation files
         uses: actions/upload-artifact@v4
         with:
-          name: masal-video
+          name: kisa-cizgi-film
           path: |
-            masal-video.mp4
-            masal.txt
+            animasyon-video.mp4
+            animasyon-metni.txt
             sahne-plani.json
           if-no-files-found: error
           retention-days: 7
