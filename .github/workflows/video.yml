@@ -1,3 +1,4 @@
+
 name: Sessiz Cizgi Film Uret
 
 on:
@@ -25,7 +26,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow
+          pip install requests pillow pyyaml
 
       - name: Generate silent cartoon animation
         env:
@@ -66,53 +67,142 @@ jobs:
               f"{CF_ACCOUNT}/ai/run/{CF_MODEL}"
           )
 
+          HF_SPACE_URL = (
+              "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space"
+          )
+
           def run(cmd):
               subprocess.run(cmd, check=True)
 
           def request_with_retry(method, url, **kwargs):
-              for attempt in range(5):
-                  response = requests.request(
-                      method, url, timeout=180, **kwargs
-                  )
+              last_error = None
 
-                  if response.status_code not in (
-                      429, 500, 502, 503, 504
-                  ):
-                      response.raise_for_status()
-                      return response
+              for attempt in range(5):
+                  try:
+                      response = requests.request(
+                          method, url, timeout=180, **kwargs
+                      )
+
+                      if response.status_code not in (
+                          429, 500, 502, 503, 504
+                      ):
+                          response.raise_for_status()
+                          return response
+
+                      last_error = (
+                          f"HTTP {response.status_code}: "
+                          f"{response.text[:1200]}"
+                      )
+
+                  except requests.RequestException as exc:
+                      last_error = str(exc)
 
                   if attempt == 4:
-                      response.raise_for_status()
+                      raise RuntimeError(
+                          f"İstek 5 denemede başarısız: {last_error}"
+                      )
 
                   wait_time = 5 * (attempt + 1)
                   print(
-                      f"İstek başarısız: {response.status_code}. "
+                      f"İstek başarısız: {last_error}. "
                       f"{wait_time} saniye sonra tekrar denenecek."
                   )
                   time.sleep(wait_time)
 
               raise RuntimeError("İstek tekrar denemeleri başarısız.")
 
-          def extract_niftyvid_url(file_data):
-              if isinstance(file_data, str):
-                  if file_data.startswith("http"):
-                      return file_data
-                  return (
-                      "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/"
-                      "gradio_api/file=" + file_data
-                  )
+          def extract_niftyvid_url(value):
+              """İç içe Gradio/Worker yanıtlarından video URL'sini bulur."""
+              if isinstance(value, str):
+                  value = value.strip()
 
-              if isinstance(file_data, dict):
-                  if file_data.get("url"):
-                      return file_data["url"]
+                  if value.startswith(("https://", "http://")):
+                      return value
 
-                  if file_data.get("path"):
+                  if value.startswith("gradio_api/file="):
+                      return f"{HF_SPACE_URL}/{value}"
+
+                  if value.startswith("/gradio_api/file="):
+                      return f"{HF_SPACE_URL}{value}"
+
+                  if value.startswith("/tmp/") or value.startswith("tmp/"):
                       return (
-                          "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/"
-                          "gradio_api/file=" + file_data["path"]
+                          f"{HF_SPACE_URL}/gradio_api/file="
+                          + value.lstrip("/")
                       )
 
+                  try:
+                      parsed = json.loads(value)
+                      if parsed != value:
+                          return extract_niftyvid_url(parsed)
+                  except (json.JSONDecodeError, TypeError):
+                      pass
+
+                  return None
+
+              if isinstance(value, dict):
+                  for key in (
+                      "url", "video_url", "path", "video",
+                      "output", "data", "file", "name"
+                  ):
+                      if key in value:
+                          found = extract_niftyvid_url(value[key])
+                          if found:
+                              return found
+
+                  for nested in value.values():
+                      found = extract_niftyvid_url(nested)
+                      if found:
+                          return found
+
+              if isinstance(value, (list, tuple)):
+                  for nested in value:
+                      found = extract_niftyvid_url(nested)
+                      if found:
+                          return found
+
               return None
+
+          def parse_sse(response):
+              """SSE akışını event adı ve JSON içeriğiyle birlikte okur."""
+              events = []
+              event_name = "message"
+              data_lines = []
+
+              def save_event():
+                  nonlocal event_name, data_lines
+
+                  if data_lines:
+                      raw_data = "\n".join(data_lines).strip()
+
+                      try:
+                          payload = json.loads(raw_data)
+                      except json.JSONDecodeError:
+                          payload = raw_data
+
+                      events.append((event_name, payload, raw_data))
+
+                  event_name = "message"
+                  data_lines = []
+
+              for raw_line in response.iter_lines(decode_unicode=True):
+                  if raw_line is None:
+                      continue
+
+                  if isinstance(raw_line, bytes):
+                      line = raw_line.decode("utf-8", errors="replace").strip()
+                  else:
+                      line = raw_line.strip()
+
+                  if not line:
+                      save_event()
+                  elif line.startswith("event:"):
+                      event_name = line.split(":", 1)[1].strip()
+                  elif line.startswith("data:"):
+                      data_lines.append(line.split(":", 1)[1].strip())
+
+              save_event()
+              return events
 
           def generate_animated_clip(
               image_path, output_path, motion_prompt, scene_number
@@ -120,191 +210,218 @@ jobs:
               params = {
                   "prompt": motion_prompt,
                   "duration_seconds": 3.5,
-                  "steps": 6
+                  "steps": 6,
               }
 
-              print(
-                  f"Sahne {scene_number}: hareketli klip oluşturuluyor..."
-              )
+              last_error = None
 
-              with open(image_path, "rb") as image_file:
-                  with requests.post(
-                      f"{NIFTYVID_WORKER_URL}/generate",
-                      files={
-                          "image": (
-                              os.path.basename(image_path),
-                              image_file,
-                              "image/png"
-                          )
-                      },
-                      data={
-                          "params": json.dumps(
-                              params, ensure_ascii=False
-                          )
-                      },
-                      headers={"Accept": "text/event-stream"},
-                      stream=True,
-                      timeout=(30, 600)
-                  ) as response:
+              # Ücretsiz animasyon servisi geçici hata verirse aynı sahneyi dene.
+              for attempt in range(1, 4):
+                  temp_path = output_path + ".download.mp4"
 
-                      if not response.ok:
+                  try:
+                      print(
+                          f"Sahne {scene_number}: NiftyVid "
+                          f"denemesi {attempt}/3..."
+                      )
+
+                      with open(image_path, "rb") as image_file:
+                          with requests.post(
+                              f"{NIFTYVID_WORKER_URL}/generate",
+                              files={
+                                  "image": (
+                                      os.path.basename(image_path),
+                                      image_file,
+                                      "image/png"
+                                  )
+                              },
+                              data={
+                                  "params": json.dumps(
+                                      params, ensure_ascii=False
+                                  )
+                              },
+                              headers={"Accept": "text/event-stream"},
+                              stream=True,
+                              timeout=(30, 600),
+                          ) as response:
+
+                              if not response.ok:
+                                  body = response.text[:2500]
+                                  raise RuntimeError(
+                                      f"Worker HTTP {response.status_code}: "
+                                      f"{body}"
+                                  )
+
+                              events = parse_sse(response)
+
+                      if not events:
                           raise RuntimeError(
-                              f"NiftyVid HTTP {response.status_code}: "
-                              f"{response.text[:500]}"
+                              "Worker boş SSE yanıtı döndürdü."
                           )
 
-                      event_name = "message"
-                      data_lines = []
+                      # Hata olaylarını gerçek mesajıyla raporla.
+                      for name, payload, raw_data in events:
+                          if name.lower() in ("error", "failed"):
+                              raise RuntimeError(
+                                  f"SSE event={name}; "
+                                  f"data={raw_data[:2500]}"
+                              )
+
+                          if (
+                              payload is None
+                              and name.lower() in ("complete", "completed")
+                          ):
+                              raise RuntimeError(
+                                  "Worker tamamlanma olayı null döndürdü. "
+                                  f"Olaylar: {str(events)[-2500:]}"
+                              )
+
                       video_url = None
 
-                      for raw_line in response.iter_lines(
-                          decode_unicode=True
+                      # Son olaylardan başlayarak tüm iç içe alanları kontrol et.
+                      for name, payload, raw_data in reversed(events):
+                          video_url = extract_niftyvid_url(payload)
+                          if video_url:
+                              break
+
+                      if not video_url:
+                          diagnostics = "\n".join(
+                              f"event={name}, data={raw_data[:1000]}"
+                              for name, payload, raw_data in events
+                          )
+
+                          raise RuntimeError(
+                              "SSE içinde video URL'si bulunamadı. "
+                              "Worker yanıtı: "
+                              f"{diagnostics[-3500:]}"
+                          )
+
+                      print(
+                          f"Sahne {scene_number}: video adresi alındı; "
+                          "dosya indiriliyor."
+                      )
+
+                      with requests.get(
+                          video_url,
+                          stream=True,
+                          timeout=(30, 180)
+                      ) as video_response:
+
+                          if not video_response.ok:
+                              raise RuntimeError(
+                                  f"Video indirme HTTP "
+                                  f"{video_response.status_code}: "
+                                  f"{video_response.text[:1200]}"
+                              )
+
+                          with open(temp_path, "wb") as video_file:
+                              for chunk in video_response.iter_content(
+                                  chunk_size=1024 * 1024
+                              ):
+                                  if chunk:
+                                      video_file.write(chunk)
+
+                      if (
+                          not os.path.exists(temp_path)
+                          or os.path.getsize(temp_path) < 10000
                       ):
-                          if raw_line is None:
-                              continue
+                          raise RuntimeError(
+                              "İndirilen video dosyası boş veya çok küçük."
+                          )
 
-                          line = raw_line.strip()
+                      # Her sahneyi aynı çözünürlükte, sessiz MP4 yap.
+                      run([
+                          "ffmpeg", "-y",
+                          "-i", temp_path,
+                          "-t", "3.5",
+                          "-vf",
+                          "scale=1280:720:force_original_aspect_ratio=increase,"
+                          "crop=1280:720,setsar=1,format=yuv420p",
+                          "-an",
+                          "-c:v", "libx264",
+                          "-preset", "medium",
+                          "-crf", "18",
+                          "-movflags", "+faststart",
+                          output_path
+                      ])
 
-                          if not line:
-                              if data_lines:
-                                  event_data = "\n".join(data_lines)
+                      os.remove(temp_path)
 
-                                  if event_name == "error":
-                                      raise RuntimeError(
-                                          "NiftyVid hatası: "
-                                          + event_data[:500]
-                                      )
+                      if os.path.getsize(output_path) < 20000:
+                          raise RuntimeError(
+                              "Oluşturulan klip beklenenden küçük."
+                          )
 
-                                  if event_name == "complete":
-                                      payload = json.loads(event_data)
+                      print(f"Sahne {scene_number}: klip hazır.")
+                      return
 
-                                      if isinstance(payload, dict):
-                                          file_data = (
-                                              payload.get("video")
-                                              or payload.get("output")
-                                              or payload.get("data")
-                                          )
-                                      elif isinstance(payload, list) and payload:
-                                          file_data = payload[0]
-                                      else:
-                                          file_data = None
+                  except Exception as exc:
+                      last_error = exc
+                      print(
+                          f"Sahne {scene_number}, deneme {attempt}/3 "
+                          f"başarısız: {exc}"
+                      )
 
-                                      video_url = extract_niftyvid_url(
-                                          file_data
-                                      )
+                      if os.path.exists(temp_path):
+                          try:
+                              os.remove(temp_path)
+                          except OSError:
+                              pass
 
-                                      if not video_url:
-                                          raise RuntimeError(
-                                              "Video bağlantısı dönmedi: "
-                                              + event_data[:500]
-                                          )
-                                      break
+                      if attempt < 3:
+                          wait_seconds = 8 * attempt
+                          print(
+                              f"{wait_seconds} saniye sonra "
+                              "aynı sahne yeniden denenecek."
+                          )
+                          time.sleep(wait_seconds)
 
-                              event_name = "message"
-                              data_lines = []
-
-                          elif line.startswith("event:"):
-                              event_name = line[6:].strip()
-
-                          elif line.startswith("data:"):
-                              data_lines.append(line[5:].strip())
-
-              if not video_url:
-                  raise RuntimeError(
-                      "Animasyon servisi video tamamlanmadan kapandı."
-                  )
-
-              temp_path = output_path + ".download.mp4"
-
-              with requests.get(
-                  video_url, stream=True, timeout=(30, 180)
-              ) as video_response:
-                  video_response.raise_for_status()
-
-                  with open(temp_path, "wb") as video_file:
-                      for chunk in video_response.iter_content(
-                          chunk_size=1024 * 1024
-                      ):
-                          if chunk:
-                              video_file.write(chunk)
-
-              run([
-                  "ffmpeg", "-y",
-                  "-i", temp_path,
-                  "-t", "3.5",
-                  "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=increase,"
-                  "crop=1280:720,setsar=1,format=yuv420p",
-                  "-an",
-                  "-c:v", "libx264",
-                  "-preset", "medium",
-                  "-crf", "18",
-                  "-movflags", "+faststart",
-                  output_path
-              ])
-
-              os.remove(temp_path)
-
-              if os.path.getsize(output_path) < 20000:
-                  raise RuntimeError("Animasyon klibi çok küçük.")
+              raise RuntimeError(
+                  f"NiftyVid 3 denemede de sahne {scene_number} "
+                  f"klibini üretemedi: {last_error}"
+              ) from last_error
 
           print("1/3 Yeni çizgi film konusu hazırlanıyor...")
 
           animation_prompt = f"""
-          Üretim numarası: {RUN_NUMBER}
+          4-8 yaş çocukları için kısa, neşeli, tamamen görsel anlatımlı
+          bir çizgi film tasarla. Çıktı sessiz olacak: konuşma, anlatıcı,
+          müzik veya ses efekti ekleme. Toplam video 3 dakikayı geçmesin.
+          Tam 8 sahne üret; her sahne 3.5 saniyelik hareketli klip olacak.
 
-          4-8 yaş çocukları için sessiz, müziksiz, konuşmasız bir çizgi film
-          animasyonu üret. Masal anlatımı veya slayt gösterisi üretme.
+          Her çalıştırmada yeni ve farklı bir konu seç. Önceden kullanılan
+          örnekleri kopyalama; arı ve polen konusunu kullanma.
+          Çalıştırma numarası: {RUN_NUMBER}. Bu numarayı konu seçimini
+          çeşitlendirmek için kullan; numarayı hikâyede gösterme.
 
-          HER ÇALIŞTIRMADA FARKLI KONU:
-          Her çalıştırmada yepyeni bir konu, ana karakter ve amaç seç.
-          Aynı konuyu sürekli tekrarlama. Minik bir dinozor, sevimli bir robot,
-          penguen, kedi, uzaylı veya yepyeni bir karakter seçebilirsin.
-          Örnekleri aynen tekrarlamak zorunda değilsin; yeni bir olay örgüsü kur.
+          Bir ana karakter, tek ve anlaşılır bir amaç, küçük bir sorun ve
+          mutlu bir çözüm olsun. Her sahne öncekinin devamı olsun.
+          Rastgele veya ilgisiz görüntüler ekleme. Karakterin yüzü, rengi,
+          boyutu, kıyafetleri ve ayırt edici özellikleri aynı kalsın.
 
-          PROFESYONEL ÇİZGİ FİLM GÖRÜNÜMÜ:
-          Fotoğraf veya gerçekçi hayvan görüntüsü istemiyorum. Büyük stüdyo
-          yapımı çocuk animasyonları gibi stilize 3D karakterler kullan:
-          büyük ve ifadeli gözler, yuvarlak yumuşak şekiller, temiz siluetler,
-          sevimli ve abartılı yüz ifadeleri, kaliteli materyaller, canlı renkler,
-          güzel sinematik ışık ve profesyonel animasyon filmi estetiği.
-          Gerçek bir hayvan fotoğrafı gibi değil, tasarlanmış çizgi film
-          karakteri gibi görünmeli.
+          Görsel stil: yüksek kaliteli, sevimli, stilize 3D aile çizgi filmi;
+          büyük ve ifadeli gözler, belirgin siluet, sevimli oranlar,
+          sinematik aydınlatma, canlı renkler ve temiz kompozisyon.
+          Fotogerçekçi insan veya fotoğraf görünümü isteme.
 
-          KARAKTER DEVAMLILIĞI:
-          Tek ana karakter belirle. Yüzü, gözleri, rengi, kıyafeti, boyutu,
-          oranları ve aksesuarları bütün sahnelerde aynı kalsın.
-          Her sahnede aynı karakter tasarımını ayrıntılı biçimde koru.
-          Yardımcı karakterleri yalnızca hikâyede gerçekten gerekiyorsa ekle.
+          Korku, şiddet, tehlikeli davranış, yazı, altyazı, logo ve filigran yok.
+          Her sahnede tek belirgin eylem ve sonraki sahneye doğal geçiş olsun.
+          Her motion_prompt tek bir görselden üretilebilecek doğal hareketleri
+          anlatsın; karakter dönüşümü veya yeni karakter eklenmesini istemesin.
 
-          OLAYLAR SIRAYLA İLERLEMELİ:
-          Tam 8 sahne üret. Karakterin açık ve basit bir hedefi olsun.
-          Her sahne önceki sahnenin doğrudan devamı olsun.
-          Karakterin nerede olduğu, ne yaptığı ve sonra ne yapacağı tutarlı olsun.
-          Rastgele, bağımsız veya konu dışı klip ekleme.
-          Her sahnede bir belirgin eylem ve gözle görülebilir hareket bulunsun.
-          Hareket istemi karakterin hareketini, yönünü, yüz ifadesini ve
-          gerekiyorsa kamera hareketini açıkça anlatsın.
+          Yalnızca geçerli JSON döndür. Markdown çiti veya açıklama yazma.
 
-          Ses, konuşma, anlatım, altyazı ve müzik yok.
-          Görüntüde yazı, logo veya filigran yok.
-          Yatay 16:9 kadraj kullan; karakterin başı ve gövdesi kadrajda kalsın.
-          Her sahne yaklaşık 3,5 saniyelik bir klibe uygun olsun.
-          Sekiz sahne toplamda yaklaşık 28 saniye sürsün.
-
-          Yalnızca geçerli JSON döndür. Markdown veya açıklama yazma.
-
-          JSON şeması:
+          Şema:
           {{
-            "title": "kısa çizgi film başlığı",
-            "style": "tüm sahnelerde sabit stilize 3D çizgi film stili",
+            "title": "kısa başlık",
+            "style": "tüm sahnelerde sabit görsel stil",
             "character_bible": "ana karakterin değişmeyecek görünüşü",
             "scenes": [
               {{
                 "scene": 1,
-                "story_beat": "bu sahnede gerçekleşen somut olay",
-                "visual_prompt": "İngilizce ayrıntılı çizgi film görsel istemi",
-                "motion_prompt": "İngilizce somut karakter hareketi istemi"
+                "story_beat": "bu sahnede olan somut olay",
+                "visual_prompt": "İngilizce ayrıntılı görsel istemi",
+                "motion_prompt": "İngilizce doğal hareket istemi"
               }}
             ]
           }}
@@ -315,14 +432,10 @@ jobs:
               GEMINI_URL,
               json={
                   "contents": [
-                      {
-                          "parts": [
-                              {"text": animation_prompt}
-                          ]
-                      }
+                      {"parts": [{"text": animation_prompt}]}
                   ],
                   "generationConfig": {
-                      "temperature": 0.85,
+                      "temperature": 0.8,
                       "maxOutputTokens": 6000,
                       "responseMimeType": "application/json"
                   }
@@ -343,12 +456,8 @@ jobs:
 
               scene_plan = json.loads(plan_text)
               scenes = scene_plan["scenes"]
-              character_bible = str(
-                  scene_plan.get("character_bible", "")
-              ).strip()
-              style_bible = str(
-                  scene_plan.get("style", "")
-              ).strip()
+              character_bible = scene_plan.get("character_bible", "").strip()
+              style_bible = scene_plan.get("style", "").strip()
 
               if len(scenes) != 8:
                   raise ValueError(
@@ -357,43 +466,40 @@ jobs:
 
               if not character_bible or not style_bible:
                   raise ValueError(
-                      "Karakter görünüşü veya çizgi film stili eksik."
+                      "Karakter veya çizgi film stili eksik."
                   )
 
               for index, scene in enumerate(scenes, start=1):
                   scene["visual_prompt"] = str(
                       scene.get("visual_prompt", "")
                   ).strip()
+
                   scene["motion_prompt"] = str(
                       scene.get("motion_prompt", "")
                   ).strip()
+
                   scene["story_beat"] = str(
                       scene.get("story_beat", "")
                   ).strip()
 
-                  if (
-                      not scene["visual_prompt"]
-                      or not scene["motion_prompt"]
-                      or not scene["story_beat"]
-                  ):
+                  if not all((
+                      scene["visual_prompt"],
+                      scene["motion_prompt"],
+                      scene["story_beat"]
+                  )):
                       raise ValueError(
-                          f"{index}. sahnenin olay/görsel/hareket istemi eksik."
+                          f"{index}. sahnenin istemlerinden biri eksik."
                       )
 
-          except Exception as e:
+          except Exception as exc:
               raise RuntimeError(
-                  "Çizgi film sahne planı oluşturulamadı: "
-                  + str(e) + " | Yanıt: "
-                  + json.dumps(plan_data, ensure_ascii=False)[:1800]
-              ) from e
+                  "Sahne planı oluşturulamadı: "
+                  f"{exc}; Gemini yanıtı: "
+                  f"{json.dumps(plan_data, ensure_ascii=False)[:2000]}"
+              ) from exc
 
           with open("sahne-plani.json", "w", encoding="utf-8") as f:
-              json.dump(
-                  scene_plan,
-                  f,
-                  ensure_ascii=False,
-                  indent=2
-              )
+              json.dump(scene_plan, f, ensure_ascii=False, indent=2)
 
           for index, scene in enumerate(scenes, start=1):
               scene["visual_prompt"] = (
@@ -401,39 +507,35 @@ jobs:
                   f"Consistent main character design: {character_bible}. "
                   f"Exact chronological action for shot {index}: "
                   f"{scene['story_beat']}. {scene['visual_prompt']}. "
-                  "Stylized high-quality 3D children's cartoon character, "
-                  "large expressive eyes, rounded appealing shapes, polished "
-                  "materials, cinematic lighting, bright colors. Not a photo, "
-                  "not photorealistic. Keep the exact same character face, "
-                  "colors, proportions and clothing. Show only this scene's "
-                  "action. Wide 16:9 composition, full character visible, "
+                  "High-quality stylized 3D animated family cartoon, "
+                  "appealing character shapes, expressive large eyes, "
+                  "cinematic lighting, vibrant colors. Keep the exact same "
+                  "character design, proportions, face and colors. "
+                  "Wide 16:9 composition, full character visible, "
                   "no text, no captions, no logo, no watermark."
               )
 
           print(
-              f"Yeni çizgi film: {scene_plan.get('title', 'Kısa animasyon')}"
+              f"'{scene_plan.get('title', 'Kısa çizgi film')}' "
+              "için 8 sahne planlandı."
           )
 
-          print("2/3 Çizgi film sahnelerinin görselleri oluşturuluyor...")
-
-          image_prompts = [
-              scene["visual_prompt"] for scene in scenes
-          ]
+          print("2/3 Çizgi film sahneleri için görseller oluşturuluyor...")
 
           os.makedirs("images", exist_ok=True)
           valid_images = []
 
-          for i, prompt in enumerate(image_prompts, start=1):
-              print(f"Görsel {i}/8 oluşturuluyor...")
+          for i, scene in enumerate(scenes, start=1):
+              print(f"Görsel {i}/8 hazırlanıyor...")
 
               payload = {
-                  "prompt": prompt,
+                  "prompt": scene["visual_prompt"],
                   "negative_prompt": (
-                      "photograph, photorealistic, real animal photo, "
+                      "photorealistic, realistic photo, live action, "
                       "blurry, low quality, distorted, deformed, extra limbs, "
-                      "bad anatomy, text, letters, watermark, logo, noise, "
-                      "inconsistent character, different face, different "
-                      "costume, cropped head, cropped body, black bars, borders"
+                      "bad anatomy, text, letters, watermark, logo, "
+                      "different character, inconsistent costume, "
+                      "cropped head, cropped feet, black bars, borders"
                   ),
                   "width": 1024,
                   "height": 576,
@@ -441,85 +543,78 @@ jobs:
                   "guidance": 1.5
               }
 
+              image_response = request_with_retry(
+                  "POST",
+                  CF_URL,
+                  headers={
+                      "Authorization": f"Bearer {CF_TOKEN}",
+                      "Content-Type": "application/json"
+                  },
+                  json=payload
+              )
+
               try:
-                  image_response = request_with_retry(
-                      "POST",
-                      CF_URL,
-                      headers={
-                          "Authorization": f"Bearer {CF_TOKEN}",
-                          "Content-Type": "application/json"
-                      },
-                      json=payload
+                  image = Image.open(
+                      BytesIO(image_response.content)
+                  ).convert("RGB")
+              except Exception as exc:
+                  raise RuntimeError(
+                      f"Cloudflare {i}. sahne için geçerli görsel "
+                      f"döndürmedi: {image_response.text[:1200]}"
+                  ) from exc
+
+              if image.width < 512 or image.height < 288:
+                  raise RuntimeError(
+                      f"{i}. görselin çözünürlüğü çok düşük: "
+                      f"{image.width}x{image.height}"
                   )
 
-                  try:
-                      image = Image.open(
-                          BytesIO(image_response.content)
-                      ).convert("RGB")
-                  except Exception:
-                      raise RuntimeError(
-                          "Cloudflare geçerli görsel döndürmedi: "
-                          + image_response.text[:800]
-                      )
+              # 16:9 oranını kırparak koru.
+              target_ratio = 16 / 9
+              image_ratio = image.width / image.height
 
-                  if image.width < 512 or image.height < 288:
-                      raise RuntimeError("Görsel çözünürlüğü çok düşük.")
+              if image_ratio > target_ratio:
+                  new_width = int(image.height * target_ratio)
+                  left = (image.width - new_width) // 2
+                  image = image.crop(
+                      (left, 0, left + new_width, image.height)
+                  )
+              elif image_ratio < target_ratio:
+                  new_height = int(image.width / target_ratio)
+                  top = (image.height - new_height) // 2
+                  image = image.crop(
+                      (0, top, image.width, top + new_height)
+                  )
 
-                  target_ratio = 16 / 9
-                  image_ratio = image.width / image.height
-
-                  if image_ratio > target_ratio:
-                      new_width = int(image.height * target_ratio)
-                      left = (image.width - new_width) // 2
-                      image = image.crop(
-                          (left, 0, left + new_width, image.height)
-                      )
-                  elif image_ratio < target_ratio:
-                      new_height = int(image.width / target_ratio)
-                      top = (image.height - new_height) // 2
-                      image = image.crop(
-                          (0, top, image.width, top + new_height)
-                      )
-
-                  image_path = f"images/scene_{i:02d}.png"
-                  image.save(image_path, format="PNG")
-                  valid_images.append(image_path)
-                  print(f"Görsel {i} kaydedildi.")
-
-              except Exception as e:
-                  raise RuntimeError(
-                      f"{i}. sahnenin görseli oluşturulamadı. "
-                      "Başka bir sahnenin görseli kullanılmayacak. "
-                      + str(e)
-                  ) from e
+              image_path = f"images/scene_{i:02d}.png"
+              image.save(image_path, format="PNG")
+              valid_images.append(image_path)
+              print(f"Görsel {i} kaydedildi.")
 
           if len(valid_images) != 8:
-              raise RuntimeError("Sekiz sahnenin tüm görselleri oluşmadı.")
+              raise RuntimeError("8 görselin tamamı oluşturulamadı.")
 
           print("3/3 Her sahne için gerçek hareketli klip oluşturuluyor...")
-
-          motion_prompts = [
-              scene["motion_prompt"] for scene in scenes
-          ]
 
           clip_paths = []
 
           for i, image_path in enumerate(valid_images, start=1):
               clip_path = f"clip_{i:02d}.mp4"
+              motion_prompt = scenes[i - 1]["motion_prompt"]
 
               try:
                   generate_animated_clip(
                       image_path,
                       clip_path,
-                      motion_prompts[i - 1],
+                      motion_prompt,
                       i
                   )
-              except Exception as e:
+              except Exception as exc:
                   raise RuntimeError(
-                      f"{i}. sahnenin animasyon klibi üretilemedi. "
-                      "Sabit görüntüyü animasyon diye kullanmamak için "
-                      "işlem durduruldu. NiftyVid hatası: " + str(e)
-                  ) from e
+                      f"{i}. sahnenin animasyon klibi oluşturulamadı. "
+                      "Sabit görseli animasyonmuş gibi kullanmamak için "
+                      f"işlem durduruldu. Ayrıntı: {exc}"
+                  ) from exc
 
               clip_paths.append(clip_path)
 
@@ -535,8 +630,6 @@ jobs:
               "-c", "copy",
               "visuals.mp4"
           ])
-
-          print("Sekiz klip birleştiriliyor; ses eklenmeyecek.")
 
           run([
               "ffmpeg", "-y",
