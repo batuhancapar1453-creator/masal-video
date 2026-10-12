@@ -1,3 +1,4 @@
+
 name: Masal Video Uret
 
 on:
@@ -25,7 +26,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow
+          pip install requests pillow pyyaml
 
       - name: Generate Turkish story video
         env:
@@ -261,9 +262,16 @@ jobs:
           Başlangıcı, gelişmesi ve mutlu bir sonu olsun.
           Dostluk, iyilik, cesaret veya paylaşma gibi olumlu bir mesaj içersin.
           Korkutucu, şiddet içeren veya uygunsuz içerik kullanma.
-          Ana karakterleri, amaçlarını ve karşılaştıkları sorunu açıkça anlat.
-          Olaylar mantıklı bir sırayla ilerlesin.
-          Her sahnede gösterilebilecek somut olaylar bulunsun.
+
+          Masalın TEK bir ana kahramanı olsun. Ana kahramanın kim olduğunu,
+          ne istediğini, başına gelen sorunu ve bu sorunu nasıl çözdüğünü
+          açıkça anlat. Ana kahramanın arkadaşları olabilir ama hikâye
+          boyunca merkezde aynı ana kahraman kalmalı.
+
+          Olaylar mantıklı ve kronolojik sırayla ilerlesin. Her bölümde
+          görselleştirilebilecek somut bir olay yaşansın. Ana karakter
+          rastgele değişmesin. Masalda olmayan yeni maceralar ekleme.
+
           Yalnızca masal metnini ver; başlık dışında açıklama ekleme.
           """
 
@@ -310,44 +318,71 @@ jobs:
           print("Masala özel karakter ve sahne planı hazırlanıyor...")
 
           scene_plan_prompt = f"""
-          Aşağıdaki Türkçe çocuk masalını analiz et ve onun için tam 8 sahnelik
-          bir animasyon filmi planı üret. Sahne olayları masalda gerçekten
-          yaşanmalı; masalda olmayan karakter, yer veya olay ekleme.
+          Aşağıdaki Türkçe çocuk masalını incele ve yalnızca bu masalda
+          gerçekten anlatılan olaylardan oluşan tam 8 sahnelik bir çizgi
+          film planı üret.
 
-          Önce karakterlerin sabit görünüşünü belirle. Her sahnede aynı
-          karakterlerin aynı tüy/saç rengi, kıyafet, yaş ve ayırt edici
-          özelliklerle görünmesini sağla. Her görselde karakter görünüşlerini
-          tekrar tarif et.
+          EN ÖNEMLİ KURALLAR:
 
-          Stil: yüksek kaliteli, sevimli 3D aile animasyon filmi, sinematik
-          ışık, tutarlı karakter tasarımı, temiz kompozisyon.
+          1. Masalın ana kahramanını belirle ve "main_character" alanında
+             adını ve türünü açıkça yaz. Hikâyenin her sahnesinde ana
+             kahraman bulunmalı. Örneğin kahraman tavşansa her sahnede
+             aynı tavşan olmalı.
 
-          Görseller yatay 16:9 kadraj için tasarlansın. Önemli karakterler
-          ortadaki güvenli alanda kalsın; baş ve ayaklar kesilmesin.
+          2. Ana kahramanın arkadaşları yalnızca masalda varsa görünebilir.
+             Arkadaşlar ana kahramana o sahnede yardım etmeli veya masaldaki
+             olaya katılmalı; kendi başlarına bağımsız olay başlatmamalı.
+
+          3. Her sahne masaldaki belirli bir cümle veya olayın görsel
+             karşılığı olmalı. Masalda olmayan olay, hayvan, nesne, mekân
+             veya macera ekleme.
+
+          4. Her sahne için "story_excerpt" alanına, masaldan o sahneyi
+             destekleyen kısa ve gerçek bir cümleyi aynen alıntıla.
+             Uygun bir cümle yoksa o sahneyi uydurma; masaldaki olayları
+             8 sahneye böl.
+
+          5. 8 sahne baştan sona kronolojik ilerlemeli. Her sahne bir
+             önceki sahnenin devamı olmalı; birbirinden bağımsız klipler
+             üretme.
+
+          6. Ana kahramanın görünüşünü sabitle: tür, tüy/saç rengi,
+             göz, kıyafet, boy ve ayırt edici ayrıntılar tüm sahnelerde
+             aynı kalmalı.
+
+          7. Her görselde o anda anlatılan eylem açıkça görülsün.
+             Sadece genel manzara, rastgele hayvan portresi veya konu
+             dışı dekor kullanma.
+
+          8. motion_prompt yalnızca o sahne görselindeki karakterlere
+             küçük, doğal hareketler eklesin. Yeni karakter, yeni olay
+             veya mekân değişimi istemesin.
+
+          Stil: yüksek kaliteli, sevimli 3D aile animasyon filmi,
+          sinematik ışık, aynı karakter tasarımı, yatay 16:9 kadraj,
+          önemli karakterler tamamen görünür, yazı/altyazı/logo/filigran yok.
 
           Yalnızca geçerli JSON döndür; markdown çiti veya açıklama yazma.
 
           Şema:
           {{
             "style": "sabit görsel stil tarifi",
-            "character_bible": "ana karakterlerin görünüşünü sabitleyen ayrıntılı tarif",
+            "main_character": "ana kahramanın adı ve türü",
+            "character_bible": "ana kahramanın ve varsa masaldaki arkadaşlarının sabit görünüşleri",
             "scenes": [
               {{
                 "scene": 1,
-                "story_beat": "masaldaki olay",
-                "visual_prompt": "İngilizce ayrıntılı görsel üretim talimatı",
-                "motion_prompt": "İngilizce, aynı görseldeki karakterleri koruyan hareket talimatı"
+                "story_excerpt": "masaldan aynen alınmış kısa cümle",
+                "story_beat": "bu cümlede gerçekleşen somut olay",
+                "visual_prompt": "İngilizce ayrıntılı görsel talimatı; ana kahraman ve somut eylem görünür",
+                "motion_prompt": "İngilizce, yalnızca bu sahnedeki eyleme uygun küçük hareket talimatı"
               }}
             ]
           }}
 
-          Tam 8 sahne üret. Sahne sırası masalın başlangıcından sonuna ilerlesin.
-          Her sahnede yalnızca masaldaki o bölüme uygun olaylar gösterilsin.
-          visual_prompt içinde character_bible ile çelişme. Görselde yazı,
-          altyazı, logo veya filigran olmasın.
-
-          motion_prompt küçük ve doğal hareketleri tarif etsin; karakter
-          dönüşümü, yeni karakter eklenmesi veya sahne değişimi istemesin.
+          Tam 8 sahne üret. visual_prompt içinde sabit karakter tarifini
+          tekrar et. Her sahnede ana kahraman görünür ve masaldaki somut
+          eylemi yapıyor olsun. Görseli masaldaki cümleyle çeliştirme.
 
           MASAL:
           {story}
@@ -403,9 +438,23 @@ jobs:
                       scene.get("motion_prompt", "")
                   ).strip()
 
-                  if not scene["visual_prompt"] or not scene["motion_prompt"]:
+                  scene["story_excerpt"] = str(
+                      scene.get("story_excerpt", "")
+                  ).strip()
+
+                  scene["story_beat"] = str(
+                      scene.get("story_beat", "")
+                  ).strip()
+
+                  if (
+                      not scene["visual_prompt"]
+                      or not scene["motion_prompt"]
+                      or not scene["story_excerpt"]
+                      or not scene["story_beat"]
+                  ):
                       raise ValueError(
-                          f"{index}. sahnenin istemi eksik"
+                          f"{index}. sahnede olay, masal cümlesi "
+                          "veya istem eksik"
                       )
 
           except Exception as e:
@@ -425,14 +474,23 @@ jobs:
 
           for index, scene in enumerate(scenes, start=1):
               scene["visual_prompt"] = (
-                  f"{style_bible}. "
+                  f"Main character throughout the whole film: "
+                  f"{scene_plan.get('main_character', 'the same main character')}. "
                   f"Consistent character design: {character_bible}. "
-                  f"Story moment {index}: {scene['visual_prompt']}. "
+                  f"Story style: {style_bible}. "
+                  f"Exact story event: {scene['story_beat']}. "
+                  f"Story sentence: {scene['story_excerpt']}. "
+                  f"Visual must depict this event and nothing unrelated: "
+                  f"{scene['visual_prompt']}. "
+                  "The same main character must be clearly visible in this scene. "
                   "Wide 16:9 cinematic composition, characters fully visible "
                   "inside safe frame, no text, no captions, no logo, no watermark."
               )
 
-          print("Masala uygun 8 sahne planlandı; karakter tarifleri sabitlendi.")
+          print(
+              "Masala uygun 8 sahne planlandı; "
+              "ana karakter ve olaylar sabitlendi."
+          )
 
           print("2/5 Azure ile seslendirme oluşturuluyor...")
 
@@ -508,7 +566,9 @@ jobs:
                       "text, letters, watermark, logo, noise, artifacts, "
                       "different character design, inconsistent costume, "
                       "cropped head, cropped feet, black bars, borders, "
-                      "letterboxing, blank margins"
+                      "letterboxing, blank margins, unrelated scene, "
+                      "unrelated animals, different protagonist, "
+                      "wrong action, scene unrelated to the story"
                   ),
                   "width": 1024,
                   "height": 576,
@@ -585,18 +645,14 @@ jobs:
               except Exception as e:
                   print(f"Görsel {i} oluşturulamadı: {e}")
 
-                  if valid_images:
-                      fallback_path = f"images/scene_{i:02d}.png"
-                      shutil.copy2(valid_images[-1], fallback_path)
-                      valid_images.append(fallback_path)
-
-                      print(
-                          f"Önceki başarılı görsel {i}. görsel için kullanıldı."
-                      )
-                  else:
-                      raise RuntimeError(
-                          "İlk görsel oluşturulamadığı için işlem durduruldu."
-                      ) from e
+                  # Başka sahnenin görselini kopyalama.
+                  # Yanlış görsel üretmek yerine işlemi durdur.
+                  raise RuntimeError(
+                      f"{i}. sahnenin görseli üretilemedi. "
+                      "Başka sahnenin görseli kopyalanmayacak; "
+                      "anlatım-görüntü uyuşmazlığını önlemek için "
+                      "işlem durduruldu."
+                  ) from e
 
           if len(valid_images) != len(image_prompts):
               raise RuntimeError("Görsellerin tamamı oluşturulamadı.")
@@ -630,7 +686,8 @@ jobs:
                       f"{animation_error}"
                   )
                   print(
-                      "Mevcut sabit görselli yöntemle devam ediliyor."
+                      "Aynı sahne görseliyle sabit görüntü yöntemi "
+                      "kullanılarak devam ediliyor."
                   )
 
                   run([
