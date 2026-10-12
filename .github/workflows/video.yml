@@ -34,6 +34,7 @@ jobs:
           AZURE_REGION: ${{ secrets.AZURE_REGION }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NIFTYVID_WORKER_URL: https://nifty-vid.batuhancapar1453.workers.dev
         run: |
           cat > create_video.py <<'PY'
           import os
@@ -50,6 +51,9 @@ jobs:
           AZURE_REGION = os.environ["AZURE_REGION"]
           CF_TOKEN = os.environ["CLOUDFLARE_API_TOKEN"]
           CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+          NIFTYVID_WORKER_URL = os.environ.get(
+              "NIFTYVID_WORKER_URL", "https://nifty-vid.batuhancapar1453.workers.dev"
+          ).rstrip("/")
 
           GEMINI_URL = (
               "https://generativelanguage.googleapis.com/v1beta/"
@@ -88,6 +92,91 @@ jobs:
                   time.sleep(wait_time)
 
               raise RuntimeError("İstek tekrar denemeleri başarısız.")
+
+          def extract_niftyvid_url(file_data):
+              """NiftyVid Gradio SSE sonucundan video URL'sini çıkarır."""
+              if isinstance(file_data, str):
+                  return "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/gradio_api/file=" + file_data
+              if isinstance(file_data, dict):
+                  if file_data.get("url"):
+                      return file_data["url"]
+                  if file_data.get("path"):
+                      return "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/gradio_api/file=" + file_data["path"]
+              return None
+
+          def generate_animated_clip(image_path, output_path, motion_prompt, scene_number):
+              """Var olan görseli NiftyVid ile canlandırır; başarısızsa çağıran geri düşer."""
+              params = {
+                  "prompt": motion_prompt,
+                  "duration_seconds": 3.5,
+                  "steps": 6,
+              }
+              print(f"Sahne {scene_number}: NiftyVid hareketli klip deneniyor...")
+              with open(image_path, "rb") as image_file:
+                  response = requests.post(
+                      f"{NIFTYVID_WORKER_URL}/generate",
+                      files={"image": (os.path.basename(image_path), image_file, "image/png")},
+                      data={"params": json.dumps(params, ensure_ascii=False)},
+                      headers={"Accept": "text/event-stream"},
+                      stream=True,
+                      timeout=(30, 600),
+                  )
+                  if not response.ok:
+                      try:
+                          detail = response.json().get("error", response.text[:500])
+                      except Exception:
+                          detail = response.text[:500]
+                      raise RuntimeError(f"NiftyVid HTTP {response.status_code}: {detail}")
+
+                  event_name = "message"
+                  data_lines = []
+                  video_url = None
+                  for raw_line in response.iter_lines(decode_unicode=True):
+                      if raw_line is None:
+                          continue
+                      line = raw_line.strip()
+                      if not line:
+                          if data_lines:
+                              event_data = "\n".join(data_lines)
+                              if event_name == "error":
+                                  raise RuntimeError(f"NiftyVid üretim hatası: {event_data[:500]}")
+                              if event_name == "complete":
+                                  payload = json.loads(event_data)
+                                  first = payload[0] if isinstance(payload, list) and payload else None
+                                  video_url = extract_niftyvid_url(first)
+                                  if not video_url:
+                                      raise RuntimeError("NiftyVid tamamlandı ama video bağlantısı dönmedi.")
+                                  break
+                          event_name = "message"
+                          data_lines = []
+                      elif line.startswith("event:"):
+                          event_name = line[6:].strip()
+                      elif line.startswith("data:"):
+                          data_lines.append(line[5:].strip())
+
+              if not video_url:
+                  raise RuntimeError("NiftyVid akışı video tamamlanmadan kapandı.")
+
+              video_response = requests.get(video_url, stream=True, timeout=(30, 180))
+              video_response.raise_for_status()
+              temp_path = output_path + ".download.mp4"
+              with open(temp_path, "wb") as video_file:
+                  for chunk in video_response.iter_content(chunk_size=1024 * 1024):
+                      if chunk:
+                          video_file.write(chunk)
+              video_response.close()
+
+              # Klipleri ortak 720p/H.264 biçimine getirir; son birleştirme ve anlatım sesi aynı kalır.
+              run([
+                  "ffmpeg", "-y", "-i", temp_path,
+                  "-t", "3.5",
+                  "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p",
+                  "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                  "-movflags", "+faststart", output_path
+              ])
+              os.remove(temp_path)
+              if os.path.getsize(output_path) < 20000:
+                  raise RuntimeError("NiftyVid klibi beklenenden küçük.")
 
           print("1/5 Türkçe masal hazırlanıyor...")
 
@@ -141,8 +230,7 @@ jobs:
           print(f"Masal oluşturuldu: {len(story)} karakter.")
 
           print("2/5 Azure ile seslendirme oluşturuluyor...")
-
-          speech_url = (
+                    speech_url = (
               f"https://{AZURE_REGION}.tts.speech.microsoft.com/"
               "cognitiveservices/v1"
           )
@@ -322,36 +410,53 @@ jobs:
 
           clip_paths = []
 
+          motion_prompts = [
+              "A cute little rabbit gently looks around, blinks, breathes, and makes a small natural hop; subtle camera movement, preserve the original character and composition, smooth child-friendly animation, no morphing, no new characters, no text.",
+              "A cute rabbit takes a few small hops along the forest path; flowers and leaves sway softly in a breeze, preserve the original design, smooth natural motion, no morphing, no text.",
+              "A friendly fox and a little rabbit look at each other, blink and gently move their heads as if greeting; subtle body movement, preserve both characters and the original composition, no morphing, no text.",
+              "A little rabbit and friendly fox slowly explore beside a sparkling stream; gentle steps and subtle water movement, preserve the original characters and scene, no morphing, no text.",
+              "A little rabbit carefully helps a tiny bird near a tree; the bird flutters its wings gently, preserve the original characters and composition, smooth child-friendly motion, no morphing, no text.",
+              "A cheerful rabbit and friendly fox gently share berries and smile; subtle hand and head movement, preserve the original characters, no morphing, no text.",
+              "Woodland animals gently move and look at each other in a friendly gathering; small natural motions only, preserve all original characters, no morphing, no text.",
+              "A little rabbit and friendly fox peacefully look toward the glowing sunset; gentle breeze moves leaves and fur, subtle cinematic camera drift, preserve original characters, no morphing, no text.",
+          ]
+
           for i, image_path in enumerate(valid_images, start=1):
               clip_path = f"clip_{i:02d}.mp4"
+              motion_prompt = motion_prompts[min(i - 1, len(motion_prompts) - 1)]
 
-              run([
-                  "ffmpeg", "-y",
-                  "-loop", "1",
-                  "-framerate", "25",
-                  "-i", image_path,
-                  "-f", "lavfi",
-                  "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                  "-t", "7",
-                  "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=increase,"
-                  "crop=1280:720,setsar=1,format=yuv420p",
-                  "-c:v", "libx264",
-                  "-preset", "medium",
-                  "-crf", "18",
-                  "-c:a", "aac",
-                  "-b:a", "192k",
-                  "-ar", "48000",
-                  "-ac", "2",
-                  "-shortest",
-                  "-movflags", "+faststart",
-                  clip_path
-              ])
+              try:
+                  generate_animated_clip(image_path, clip_path, motion_prompt, i)
+                  print(f"Hareketli klip {i}/{len(valid_images)} oluşturuldu.")
+              except Exception as animation_error:
+                  print(f"NiftyVid sahne {i} için başarısız oldu: {animation_error}")
+                  print("Mevcut sabit görselli yöntemle devam ediliyor.")
+                  run([
+                      "ffmpeg", "-y",
+                      "-loop", "1",
+                      "-framerate", "25",
+                      "-i", image_path,
+                      "-f", "lavfi",
+                      "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                      "-t", "7",
+                      "-vf",
+                      "scale=1280:720:force_original_aspect_ratio=increase,"
+                      "crop=1280:720,setsar=1,format=yuv420p",
+                      "-c:v", "libx264",
+                      "-preset", "medium",
+                      "-crf", "18",
+                      "-c:a", "aac",
+                      "-b:a", "192k",
+                      "-ar", "48000",
+                      "-ac", "2",
+                      "-shortest",
+                      "-movflags", "+faststart",
+                      clip_path
+                  ])
 
               clip_paths.append(clip_path)
-              print(f"Klip {i}/{len(valid_images)} oluşturuldu.")
-
-          with open("concat_list.txt", "w", encoding="utf-8") as f:
+              print(f"Klip {i}/{len(valid_images)} hazır.")
+                        with open("concat_list.txt", "w", encoding="utf-8") as f:
               for clip_path in clip_paths:
                   f.write(f"file '{clip_path}'\n")
 
