@@ -76,6 +76,7 @@ jobs:
                   response = requests.request(
                       method, url, timeout=180, **kwargs
                   )
+
                   if response.status_code not in (
                       429, 500, 502, 503, 504
                   ):
@@ -104,6 +105,7 @@ jobs:
               if isinstance(file_data, dict):
                   if file_data.get("url"):
                       return file_data["url"]
+
                   if file_data.get("path"):
                       return (
                           "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/"
@@ -144,6 +146,7 @@ jobs:
                       stream=True,
                       timeout=(30, 600),
                   ) as response:
+
                       if not response.ok:
                           try:
                               detail = response.json().get(
@@ -180,12 +183,14 @@ jobs:
 
                                   if event_name == "complete":
                                       payload = json.loads(event_data)
+
                                       first = (
                                           payload[0]
                                           if isinstance(payload, list)
                                           and payload
                                           else None
                                       )
+
                                       video_url = extract_niftyvid_url(first)
 
                                       if not video_url:
@@ -193,6 +198,7 @@ jobs:
                                               "NiftyVid tamamlandı ama "
                                               "video bağlantısı dönmedi."
                                           )
+
                                       break
 
                               event_name = "message"
@@ -223,14 +229,15 @@ jobs:
                           if chunk:
                               video_file.write(chunk)
 
+              # Görüntüyü 16:9 ekrana yay.
+              # Kenar boşluğu eklemek yerine ölçekle ve kırp.
               run([
                   "ffmpeg", "-y",
                   "-i", temp_path,
                   "-t", "3.5",
                   "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=decrease,"
-                  "pad=1280:720:(ow-iw)/2:(oh-ih)/2,"
-                  "setsar=1,format=yuv420p",
+                  "scale=1280:720:force_original_aspect_ratio=increase,"
+                  "crop=1280:720,setsar=1,format=yuv420p",
                   "-an",
                   "-c:v", "libx264",
                   "-preset", "medium",
@@ -254,6 +261,9 @@ jobs:
           Başlangıcı, gelişmesi ve mutlu bir sonu olsun.
           Dostluk, iyilik, cesaret veya paylaşma gibi olumlu bir mesaj içersin.
           Korkutucu, şiddet içeren veya uygunsuz içerik kullanma.
+          Ana karakterleri, amaçlarını ve karşılaştıkları sorunu açıkça anlat.
+          Olaylar mantıklı bir sırayla ilerlesin.
+          Her sahnede gösterilebilecek somut olaylar bulunsun.
           Yalnızca masal metnini ver; başlık dışında açıklama ekleme.
           """
 
@@ -296,6 +306,133 @@ jobs:
               f.write(story)
 
           print(f"Masal oluşturuldu: {len(story)} karakter.")
+
+          print("Masala özel karakter ve sahne planı hazırlanıyor...")
+
+          scene_plan_prompt = f"""
+          Aşağıdaki Türkçe çocuk masalını analiz et ve onun için tam 8 sahnelik
+          bir animasyon filmi planı üret. Sahne olayları masalda gerçekten
+          yaşanmalı; masalda olmayan karakter, yer veya olay ekleme.
+
+          Önce karakterlerin sabit görünüşünü belirle. Her sahnede aynı
+          karakterlerin aynı tüy/saç rengi, kıyafet, yaş ve ayırt edici
+          özelliklerle görünmesini sağla. Her görselde karakter görünüşlerini
+          tekrar tarif et.
+
+          Stil: yüksek kaliteli, sevimli 3D aile animasyon filmi, sinematik
+          ışık, tutarlı karakter tasarımı, temiz kompozisyon.
+
+          Görseller yatay 16:9 kadraj için tasarlansın. Önemli karakterler
+          ortadaki güvenli alanda kalsın; baş ve ayaklar kesilmesin.
+
+          Yalnızca geçerli JSON döndür; markdown çiti veya açıklama yazma.
+
+          Şema:
+          {{
+            "style": "sabit görsel stil tarifi",
+            "character_bible": "ana karakterlerin görünüşünü sabitleyen ayrıntılı tarif",
+            "scenes": [
+              {{
+                "scene": 1,
+                "story_beat": "masaldaki olay",
+                "visual_prompt": "İngilizce ayrıntılı görsel üretim talimatı",
+                "motion_prompt": "İngilizce, aynı görseldeki karakterleri koruyan hareket talimatı"
+              }}
+            ]
+          }}
+
+          Tam 8 sahne üret. Sahne sırası masalın başlangıcından sonuna ilerlesin.
+          Her sahnede yalnızca masaldaki o bölüme uygun olaylar gösterilsin.
+          visual_prompt içinde character_bible ile çelişme. Görselde yazı,
+          altyazı, logo veya filigran olmasın.
+
+          motion_prompt küçük ve doğal hareketleri tarif etsin; karakter
+          dönüşümü, yeni karakter eklenmesi veya sahne değişimi istemesin.
+
+          MASAL:
+          {story}
+          """
+
+          plan_response = request_with_retry(
+              "POST",
+              GEMINI_URL,
+              json={
+                  "contents": [
+                      {
+                          "parts": [
+                              {"text": scene_plan_prompt}
+                          ]
+                      }
+                  ],
+                  "generationConfig": {
+                      "temperature": 0.35,
+                      "maxOutputTokens": 6000,
+                      "responseMimeType": "application/json"
+                  }
+              }
+          )
+
+          plan_data = plan_response.json()
+
+          try:
+              plan_text = (
+                  plan_data["candidates"][0]["content"]["parts"][0]["text"]
+                  .strip()
+              )
+
+              if plan_text.startswith("```"):
+                  plan_text = plan_text.split("\n", 1)[1]
+                  plan_text = plan_text.rsplit("```", 1)[0].strip()
+
+              scene_plan = json.loads(plan_text)
+              scenes = scene_plan["scenes"]
+              character_bible = scene_plan.get("character_bible", "")
+              style_bible = scene_plan.get("style", "")
+
+              if len(scenes) != 8:
+                  raise ValueError(
+                      f"8 sahne yerine {len(scenes)} sahne döndü"
+                  )
+
+              for index, scene in enumerate(scenes, start=1):
+                  scene["visual_prompt"] = str(
+                      scene.get("visual_prompt", "")
+                  ).strip()
+
+                  scene["motion_prompt"] = str(
+                      scene.get("motion_prompt", "")
+                  ).strip()
+
+                  if not scene["visual_prompt"] or not scene["motion_prompt"]:
+                      raise ValueError(
+                          f"{index}. sahnenin istemi eksik"
+                      )
+
+          except Exception as e:
+              raise RuntimeError(
+                  "Masala özel sahne planı oluşturulamadı: "
+                  + str(e) + " | Yanıt: "
+                  + json.dumps(plan_data, ensure_ascii=False)[:1800]
+              ) from e
+
+          with open("sahne-plani.json", "w", encoding="utf-8") as f:
+              json.dump(
+                  scene_plan,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          for index, scene in enumerate(scenes, start=1):
+              scene["visual_prompt"] = (
+                  f"{style_bible}. "
+                  f"Consistent character design: {character_bible}. "
+                  f"Story moment {index}: {scene['visual_prompt']}. "
+                  "Wide 16:9 cinematic composition, characters fully visible "
+                  "inside safe frame, no text, no captions, no logo, no watermark."
+              )
+
+          print("Masala uygun 8 sahne planlandı; karakter tarifleri sabitlendi.")
 
           print("2/5 Azure ile seslendirme oluşturuluyor...")
 
@@ -351,48 +488,10 @@ jobs:
               f"{len(speech_response.content) / 1024:.1f} KB"
           )
 
-          print("3/5 Masal görselleri oluşturuluyor...")
+          print("3/5 Masala özel görseller oluşturuluyor...")
 
           image_prompts = [
-              "A beautiful whimsical children's storybook illustration, "
-              "a little rabbit standing in a magical forest, soft warm "
-              "sunlight, colorful flowers, charming 3D animated movie "
-              "style, highly detailed, child friendly, no text, no letters",
-
-              "A cute little rabbit walking along a forest path, "
-              "mushrooms and colorful flowers, magical golden sunlight, "
-              "beautiful children's picture book illustration, "
-              "high quality 3D animation style, no text",
-
-              "A friendly little fox meeting a cute rabbit in a lush "
-              "enchanted forest, warm expressions, vibrant natural colors, "
-              "cinematic children's storybook illustration, detailed, "
-              "no text, no letters",
-
-              "A magical woodland clearing with a sparkling blue stream, "
-              "a cute rabbit and a friendly fox exploring together, "
-              "beautiful soft lighting, high quality 3D animated storybook "
-              "art, no text",
-
-              "A small rabbit helping a tiny bird near a beautiful tree, "
-              "warm and heartwarming children's illustration, detailed "
-              "fur and feathers, rich natural colors, soft cinematic light, "
-              "no text",
-
-              "A cheerful rabbit and fox sharing berries in a magical "
-              "forest, colorful flowers, warm afternoon sunlight, "
-              "beautiful children's animated film style, detailed, "
-              "no text",
-
-              "A group of adorable woodland animals gathering in a "
-              "beautiful forest clearing, rabbit, fox, birds and hedgehog, "
-              "joyful expressions, vibrant storybook illustration, "
-              "cinematic lighting, no text",
-
-              "A peaceful magical forest at sunset, a cute rabbit and "
-              "friendly fox looking at a glowing golden sky, heartwarming "
-              "children's storybook ending, beautiful detailed 3D animation "
-              "style, warm colors, no text"
+              scene["visual_prompt"] for scene in scenes
           ]
 
           os.makedirs("images", exist_ok=True)
@@ -406,10 +505,13 @@ jobs:
                   "negative_prompt": (
                       "blurry, low quality, low resolution, distorted, "
                       "deformed, ugly, extra limbs, bad anatomy, "
-                      "text, letters, watermark, logo, noise, artifacts"
+                      "text, letters, watermark, logo, noise, artifacts, "
+                      "different character design, inconsistent costume, "
+                      "cropped head, cropped feet, black bars, borders, "
+                      "letterboxing, blank margins"
                   ),
                   "width": 1024,
-                  "height": 1024,
+                  "height": 576,
                   "num_steps": 20,
                   "guidance": 1.5
               }
@@ -431,23 +533,44 @@ jobs:
                       image = Image.open(
                           BytesIO(image_bytes)
                       ).convert("RGB")
+
                   except Exception:
                       result = image_response.json()
                       raise RuntimeError(
                           "Cloudflare geçerli görsel döndürmedi: "
-                          + json.dumps(result, ensure_ascii=False)[:1000]
+                          + json.dumps(
+                              result, ensure_ascii=False
+                          )[:1000]
                       )
 
-                  if image.width < 512 or image.height < 512:
+                  if image.width < 512 or image.height < 288:
                       raise RuntimeError(
                           f"Görsel çözünürlüğü düşük: "
                           f"{image.width}x{image.height}"
                       )
 
                   image_std = image.getchannel("R").getextrema()
+
                   if image_std[1] - image_std[0] < 8:
                       raise RuntimeError(
                           "Görsel kalite kontrolünden geçemedi."
+                      )
+
+                  # Kaynak görseli de 16:9 kadraja dönüştür.
+                  target_ratio = 16 / 9
+                  image_ratio = image.width / image.height
+
+                  if image_ratio > target_ratio:
+                      new_width = int(image.height * target_ratio)
+                      left = (image.width - new_width) // 2
+                      image = image.crop(
+                          (left, 0, left + new_width, image.height)
+                      )
+                  elif image_ratio < target_ratio:
+                      new_height = int(image.width / target_ratio)
+                      top = (image.height - new_height) // 2
+                      image = image.crop(
+                          (0, top, image.width, top + new_height)
                       )
 
                   image_path = f"images/scene_{i:02d}.png"
@@ -466,6 +589,7 @@ jobs:
                       fallback_path = f"images/scene_{i:02d}.png"
                       shutil.copy2(valid_images[-1], fallback_path)
                       valid_images.append(fallback_path)
+
                       print(
                           f"Önceki başarılı görsel {i}. görsel için kullanıldı."
                       )
@@ -477,31 +601,25 @@ jobs:
           if len(valid_images) != len(image_prompts):
               raise RuntimeError("Görsellerin tamamı oluşturulamadı.")
 
-          print("4/5 Görüntü klipleri oluşturuluyor...")
+          print("4/5 Masala uygun görüntü klipleri oluşturuluyor...")
 
           clip_paths = []
-
           motion_prompts = [
-              "A cute little rabbit gently looks around, blinks, breathes, and makes a small natural hop; subtle camera movement, preserve the original character and composition, smooth child-friendly animation, no morphing, no new characters, no text.",
-              "A cute rabbit takes a few small hops along the forest path; flowers and leaves sway softly in a breeze, preserve the original design, smooth natural motion, no morphing, no text.",
-              "A friendly fox and a little rabbit look at each other, blink and gently move their heads as if greeting; subtle body movement, preserve both characters and the original composition, no morphing, no text.",
-              "A little rabbit and friendly fox slowly explore beside a sparkling stream; gentle steps and subtle water movement, preserve the original characters and scene, no morphing, no text.",
-              "A little rabbit carefully helps a tiny bird near a tree; the bird flutters its wings gently, preserve the original characters and composition, smooth child-friendly motion, no morphing, no text.",
-              "A cheerful rabbit and friendly fox gently share berries and smile; subtle hand and head movement, preserve the original characters, no morphing, no text.",
-              "Woodland animals gently move and look at each other in a friendly gathering; small natural motions only, preserve all original characters, no morphing, no text.",
-              "A little rabbit and friendly fox peacefully look toward the glowing sunset; gentle breeze moves leaves and fur, subtle cinematic camera drift, preserve original characters, no morphing, no text."
+              scene["motion_prompt"] for scene in scenes
           ]
 
           for i, image_path in enumerate(valid_images, start=1):
               clip_path = f"clip_{i:02d}.mp4"
-              motion_prompt = motion_prompts[
-                  min(i - 1, len(motion_prompts) - 1)
-              ]
+              motion_prompt = motion_prompts[i - 1]
 
               try:
                   generate_animated_clip(
-                      image_path, clip_path, motion_prompt, i
+                      image_path,
+                      clip_path,
+                      motion_prompt,
+                      i
                   )
+
                   print(
                       f"Hareketli klip {i}/{len(valid_images)} oluşturuldu."
                   )
@@ -633,5 +751,6 @@ jobs:
           path: |
             masal-video.mp4
             masal.txt
+            sahne-plani.json
           if-no-files-found: error
           retention-days: 7
