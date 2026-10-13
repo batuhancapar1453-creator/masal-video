@@ -1,4 +1,4 @@
-name: Masal Video Uret
+name: Masal Videosu Oluştur
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  masal-video:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -28,7 +28,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Python paketlerini kur
+      - name: Paketleri kur
         run: |
           python -m pip install --upgrade pip
           pip install requests pillow numpy
@@ -38,859 +38,786 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NIFTYVID_WORKER_URL: https://nifty-vid.batuhancapar1453.workers.dev
-          ANIMATION_RUN_NUMBER: ${{ github.run_number }}
         run: |
           cat > create_video.py <<'PY'
           import os
+          import re
           import json
           import time
-          import random
+          import math
           import base64
+          import random
           import subprocess
-          import requests
-          import numpy as np
-
+          import wave
           from pathlib import Path
           from io import BytesIO
-          from PIL import Image, ImageEnhance, ImageFilter
+
+          import requests
+          import numpy as np
+          from PIL import Image, ImageEnhance, ImageFilter, ImageStat
 
           # --------------------------------------------------
           # AYARLAR
           # --------------------------------------------------
 
-          def secret(name):
-              value = os.getenv(name, "").strip()
-              if not value:
-                  raise RuntimeError(
-                      f"GitHub Secrets içinde {name} eksik."
-                  )
-              return value
+          GEMINI_KEY = os.environ["GEMINI_API_KEY"].strip()
+          CF_TOKEN = os.environ["CLOUDFLARE_API_TOKEN"].strip()
+          CF_ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"].strip()
 
-          GEMINI_KEY = secret("GEMINI_API_KEY")
-          CF_TOKEN = secret("CLOUDFLARE_API_TOKEN")
-          CF_ACCOUNT = secret("CLOUDFLARE_ACCOUNT_ID")
+          if not GEMINI_KEY:
+              raise RuntimeError("GEMINI_API_KEY boş.")
+          if not CF_TOKEN:
+              raise RuntimeError("CLOUDFLARE_API_TOKEN boş.")
+          if not CF_ACCOUNT:
+              raise RuntimeError("CLOUDFLARE_ACCOUNT_ID boş.")
 
-          NIFTYVID_URL = os.getenv(
-              "NIFTYVID_WORKER_URL",
-              "https://nifty-vid.batuhancapar1453.workers.dev"
-          ).rstrip("/")
+          GEMINI_MODEL = "gemini-2.5-flash"
+          IMAGE_MODEL = "@cf/lykon/dreamshaper-8-lcm"
 
-          RUN_NUMBER = os.getenv("ANIMATION_RUN_NUMBER", "1")
+          SCENE_COUNT = 8
+          SCENE_SECONDS = 7
+          FPS = 25
+          WIDTH = 1280
+          HEIGHT = 720
+          SAMPLE_RATE = 44100
 
-          GEMINI_URL = (
-              "https://generativelanguage.googleapis.com/v1beta/"
-              "models/gemini-3.8-flash:generateContent"
-          )
-
-          CF_URL = (
-              "https://api.cloudflare.com/client/v4/accounts/"
-              f"{CF_ACCOUNT}/ai/run/@cf/lykon/dreamshaper-8-lcm"
-          )
-
-          HF_FILE_URL = (
-              "https://cbensimon-wan2-2-fp8da-aoti-preview2.hf.space/"
-              "gradio_api/file="
-          )
-
-          OUT = Path("output")
+          ROOT = Path.cwd()
+          OUT = ROOT / "output"
           IMAGES = OUT / "images"
           CLIPS = OUT / "clips"
 
           OUT.mkdir(exist_ok=True)
-          IMAGES.mkdir(parents=True, exist_ok=True)
-          CLIPS.mkdir(parents=True, exist_ok=True)
+          IMAGES.mkdir(exist_ok=True)
+          CLIPS.mkdir(exist_ok=True)
 
           session = requests.Session()
+          random.seed(int(time.time()))
 
-          # Her çalıştırmada farklı bir hikâye ve rastgele ses düzeni.
-          random.seed(f"{RUN_NUMBER}-{time.time_ns()}")
+          # --------------------------------------------------
+          # KOMUT ÇALIŞTIRMA
+          # --------------------------------------------------
 
-          def run(command):
+          def run_cmd(command):
               subprocess.run(command, check=True)
 
-          # --------------------------------------------------
-          # GEÇİCİ HTTP HATALARINDA TEKRAR DENE
-          # --------------------------------------------------
-
-          def request_with_retry(method, url, **kwargs):
-              retry_statuses = {408, 429, 500, 502, 503, 504}
-              kwargs.setdefault("timeout", (30, 180))
-              last_error = "Bilinmeyen istek hatası"
-
-              for attempt in range(7):
-                  response = None
-                  try:
-                      response = session.request(
-                          method, url, **kwargs
-                      )
-
-                      if response.status_code not in retry_statuses:
-                          response.raise_for_status()
-                          return response
-
-                      last_error = (
-                          f"HTTP {response.status_code}: "
-                          f"{response.text[:400]}"
-                      )
-
-                  except requests.RequestException as exc:
-                      last_error = str(exc)
-
-                  finally:
-                      if response is not None:
-                          response.close()
-
-                  if attempt < 6:
-                      # 15, 30, 60, 120, 120, 120 saniye
-                      wait_seconds = min(
-                          15 * (2 ** attempt), 120
-                      )
-                      print(
-                          f"İstek geçici olarak başarısız: {last_error}"
-                      )
-                      print(
-                          f"{wait_seconds} saniye bekleniyor; "
-                          f"sonraki deneme {attempt + 2}/7."
-                      )
-                      time.sleep(wait_seconds)
-
-              raise RuntimeError(
-                  f"İstek 7 denemede başarısız oldu: {last_error}"
-              )
-
-          # --------------------------------------------------
-          # GEMINI METİN ÜRETİMİ
-          # --------------------------------------------------
-
-          def gemini_text(prompt, temperature=0.6,
-                          max_tokens=5000, json_mode=False):
-              config = {
-                  "temperature": temperature,
-                  "maxOutputTokens": max_tokens
-              }
-
-              if json_mode:
-                  config["responseMimeType"] = "application/json"
-
-              response = request_with_retry(
-                  "POST",
-                  GEMINI_URL,
-                  params={"key": GEMINI_KEY},
-                  timeout=(30, 240),
-                  json={
-                      "contents": [
-                          {
-                              "parts": [
-                                  {"text": prompt}
-                              ]
-                          }
-                      ],
-                      "generationConfig": config
-                  }
-              )
-
-              data = response.json()
-
-              try:
-                  text = (
-                      data["candidates"][0]["content"]["parts"][0]["text"]
-                  ).strip()
-              except (KeyError, IndexError, TypeError):
-                  raise RuntimeError(
-                      "Gemini geçerli metin döndürmedi: "
-                      + json.dumps(data, ensure_ascii=False)[:1500]
-                  )
-
-              if not text:
-                  raise RuntimeError("Gemini boş metin döndürdü.")
-
-              return text
-
-          def parse_json(text):
-              text = text.strip()
-
-              if text.startswith("```"):
-                  text = text.split("\n", 1)[-1]
-                  if text.endswith("```"):
-                      text = text[:-3].strip()
-
-              try:
-                  return json.loads(text)
-              except json.JSONDecodeError:
-                  start = text.find("{")
-                  end = text.rfind("}")
-                  if start >= 0 and end > start:
-                      return json.loads(text[start:end + 1])
-                  raise
-
-          # --------------------------------------------------
-          # 1. YENİ HİKÂYE
-          # --------------------------------------------------
-
-          print("1/6 Yeni Türkçe çocuk hikâyesi oluşturuluyor...")
-
-          story_prompt = f"""
-          {RUN_NUMBER} numaralı video çalıştırması için yepyeni ve özgün
-          bir Türkçe çocuk hikâyesi yaz.
-
-          Hedef yaş: 4-8.
-          Uzunluk: yaklaşık 500-700 kelime.
-          Tür: renkli, sıcak, komik ve macera dolu çocuk hikâyesi.
-          Mutlu ve anlaşılır bir sonu olsun.
-          Korku, şiddet, tehlikeli taklit edilebilir davranışlar olmasın.
-          Olaylar birbiriyle mantıklı biçimde bağlantılı ilerlesin.
-          En az bir belirgin ana karakter ve görsel olarak anlatılabilecek
-          somut olaylar içersin.
-          Önceki çalıştırmalardaki hikâyeyi tekrar etme.
-          Yalnızca hikâyeyi ve başlığını yaz; açıklama ekleme.
-          """
-
-          story = gemini_text(
-              story_prompt,
-              temperature=0.95,
-              max_tokens=5000
-          ).strip()
-
-          if len(story) < 800:
-              raise RuntimeError(
-                  f"Hikâye çok kısa: {len(story)} karakter."
-              )
-
-          (OUT / "masal.txt").write_text(
-              story, encoding="utf-8"
-          )
-
-          print(f"Hikâye hazır: {len(story)} karakter.")
-
-          # --------------------------------------------------
-          # 2. SEKİZ SAHNELİK PLAN
-          # --------------------------------------------------
-
-          print("2/6 Hikâyenin sekiz sahnesi planlanıyor...")
-
-          plan_prompt = f"""
-          Aşağıdaki hikâyeyi, olayların sırasını koruyan tam 8 sahnelik
-          bir 3D çizgi film planına dönüştür.
-
-          ÖNEMLİ:
-          - Sahne 1 hikâyenin başlangıcı olsun.
-          - Sahne 8 hikâyenin sonunu göstersin.
-          - Sekiz sahne hikâyedeki olayları sırayla anlatsın.
-          - Aynı ana karakterlerin görünüşü bütün sahnelerde değişmesin.
-          - Her sahnede yalnızca hikâyeye uygun karakter ve mekânlar olsun.
-          - Konuşma, anlatıcı, altyazı, yazı, logo veya filigran olmasın.
-          - Görsel tarz: yüksek kaliteli, sevimli 3D aile animasyonu.
-          - Yatay 16:9 kadraj, sinematik ışık ve temiz kompozisyon.
-          - Hareket istemleri, görüntüdeki karakterleri koruyan küçük
-            doğal hareketleri tarif etsin; dönüşüm veya yeni karakter
-            eklenmesini istemesin.
-          - sound_cues alanı, sahneye uygun kısa çevresel sesleri tarif etsin.
-          - background_music alanı, sözsüz müzik havasını tarif etsin.
-          - Her görsel ve hareket istemi İngilizce olsun.
-          - JSON dışında hiçbir metin döndürme.
-
-          Şu şemayı kullan:
-          {{
-            "title": "Hikâye başlığı",
-            "style": "Bütün sahnelerde kullanılacak ortak sanat stili",
-            "character_bible": "Karakterlerin sabit görünüşleri",
-            "scenes": [
-              {{
-                "scene": 1,
-                "story_beat": "Hikâyedeki olayın kısa açıklaması",
-                "visual_prompt": "Detailed English image prompt",
-                "motion_prompt": "English animation prompt",
-                "sound_cues": ["gentle footsteps", "soft leaves rustling"],
-                "background_music": "gentle playful orchestral music"
-              }}
-            ]
-          }}
-
-          Tam olarak 8 sahne oluştur.
-
-          HİKÂYE:
-          {story}
-          """
-
-          plan_text = gemini_text(
-              plan_prompt,
-              temperature=0.25,
-              max_tokens=7000,
-              json_mode=True
-          )
-
-          try:
-              plan = parse_json(plan_text)
-              scenes = plan["scenes"]
-              character_bible = str(
-                  plan.get("character_bible", "")
-              ).strip()
-              style_bible = str(plan.get("style", "")).strip()
-
-              if len(scenes) != 8:
-                  raise ValueError(
-                      f"8 sahne yerine {len(scenes)} sahne üretildi."
-                  )
-
-              for i, scene in enumerate(scenes, 1):
-                  for field in ("visual_prompt", "motion_prompt"):
-                      if not str(scene.get(field, "")).strip():
-                          raise ValueError(
-                              f"{i}. sahnede {field} eksik."
-                          )
-
-                  scene["scene"] = i
-                  scene["sound_cues"] = scene.get("sound_cues", [])
-                  if not isinstance(scene["sound_cues"], list):
-                      scene["sound_cues"] = [
-                          str(scene["sound_cues"])
-                      ]
-
-          except Exception as exc:
-              raise RuntimeError(
-                  "Sahne planı JSON olarak okunamadı: "
-                  f"{exc}. Yanıt: {plan_text[:1200]}"
-              ) from exc
-
-          title = str(plan.get("title", "Yeni Çocuk Hikâyesi"))
-
-          # Her görsel istemine aynı karakter tarifini ve stili ekle.
-          for scene in scenes:
-              scene["visual_prompt"] = (
-                  f"{style_bible}. "
-                  f"Consistent character design: {character_bible}. "
-                  f"Scene description: {scene['visual_prompt']}. "
-                  "High quality 3D animated family film, expressive faces, "
-                  "beautiful cinematic lighting, detailed environment, "
-                  "wide 16:9 composition, main characters fully visible, "
-                  "no text, no subtitles, no logo, no watermark."
-              )
-
-          plan["title"] = title
-          plan["scenes"] = scenes
-
-          (OUT / "sahne-plani.json").write_text(
-              json.dumps(plan, ensure_ascii=False, indent=2),
-              encoding="utf-8"
-          )
-
-          print(f"Sahne planı hazır: {title}")
-
-          # --------------------------------------------------
-          # 3. SEKİZ GÖRSEL OLUŞTUR
-          # --------------------------------------------------
-
-          def make_image(prompt, destination):
-              payload = {
-                  "prompt": prompt,
-                  "negative_prompt": (
-                      "blurry, low quality, distorted face, extra limbs, "
-                      "bad anatomy, text, letters, watermark, logo, "
-                      "inconsistent character design, cropped head, "
-                      "cropped feet, black bars, borders"
-                  ),
-                  "width": 1024,
-                  "height": 576,
-                  "num_steps": 20,
-                  "guidance": 1.5
-              }
-
-              response = request_with_retry(
-                  "POST",
-                  CF_URL,
-                  timeout=(30, 180),
-                  headers={
-                      "Authorization": f"Bearer {CF_TOKEN}",
-                      "Content-Type": "application/json"
-                  },
-                  json=payload
-              )
-
-              content = response.content
-
-              try:
-                  image = Image.open(BytesIO(content)).convert("RGB")
-              except Exception:
-                  try:
-                      result = response.json()
-                  except Exception:
-                      result = content[:500].decode(
-                          "utf-8", errors="replace"
-                      )
-                  raise RuntimeError(
-                      "Cloudflare geçerli bir görsel döndürmedi: "
-                      + str(result)[:1000]
-                  )
-
-              if image.width < 512 or image.height < 288:
-                  raise RuntimeError(
-                      f"Görsel çözünürlüğü düşük: "
-                      f"{image.width}x{image.height}"
-                  )
-
-              # Tam 16:9 kırpma.
-              target_ratio = 16 / 9
-              ratio = image.width / image.height
-
-              if ratio > target_ratio:
-                  new_width = int(image.height * target_ratio)
-                  left = (image.width - new_width) // 2
-                  image = image.crop(
-                      (left, 0, left + new_width, image.height)
-                  )
-              elif ratio < target_ratio:
-                  new_height = int(image.width / target_ratio)
-                  top = (image.height - new_height) // 2
-                  image = image.crop(
-                      (0, top, image.width, top + new_height)
-                  )
-
-              image = image.resize(
-                  (1280, 720), Image.Resampling.LANCZOS
-              )
-              image = ImageEnhance.Contrast(image).enhance(1.08)
-              image = ImageEnhance.Color(image).enhance(1.06)
-              image = image.filter(
-                  ImageFilter.UnsharpMask(
-                      radius=1.2, percent=100, threshold=3
-                  )
-              )
-              image.save(destination, "PNG")
-
-              if destination.stat().st_size < 20000:
-                  raise RuntimeError("Görsel dosyası beklenenden küçük.")
-
-          print("3/6 Sahne görselleri oluşturuluyor...")
-
-          image_paths = []
-
-          for i, scene in enumerate(scenes, 1):
-              image_path = IMAGES / f"scene_{i:02d}.png"
+          def api_json_with_retry(url, payload, headers=None,
+                                  params=None, timeout=180):
               last_error = None
 
-              for attempt in range(1, 4):
+              for attempt in range(1, 6):
                   try:
-                      prompt = scene["visual_prompt"]
-                      if attempt > 1:
-                          prompt += (
-                              " Clear central subject, simple readable "
-                              "composition, bright colors, crisp details."
+                      response = session.post(
+                          url,
+                          json=payload,
+                          headers=headers,
+                          params=params,
+                          timeout=timeout
+                      )
+
+                      if response.status_code in (429, 500, 502, 503, 504):
+                          raise RuntimeError(
+                              f"Geçici HTTP {response.status_code}: "
+                              f"{response.text[:500]}"
                           )
 
-                      make_image(prompt, image_path)
-                      image_paths.append(image_path)
-                      print(f"Görsel {i}/8 hazır.")
-                      break
+                      response.raise_for_status()
+                      return response.json()
 
                   except Exception as exc:
                       last_error = exc
                       print(
-                          f"Görsel {i}, deneme {attempt}/3 başarısız: "
-                          f"{exc}"
+                          f"API denemesi {attempt}/5 başarısız: {exc}"
                       )
-                      if attempt < 3:
-                          time.sleep(5 * attempt)
 
-              else:
+                      if attempt < 5:
+                          time.sleep(min(5 * attempt, 25))
+
+              raise RuntimeError(
+                  f"API 5 denemede yanıt vermedi: {last_error}"
+              )
+
+          # --------------------------------------------------
+          # 1. MASAL OLUŞTURMA
+          # --------------------------------------------------
+
+          def generate_story():
+              seed = random.randint(100000, 999999)
+
+              prompt = f"""
+              Türkçe çocuk masalı yazarı gibi davran.
+
+              {seed} numaralı çalıştırma için yepyeni ve özgün bir
+              uyku öncesi masalı üret.
+
+              Hedef yaş: 4-8.
+              Dil: doğal, akıcı Türkçe.
+              Ton: sıcak, huzurlu, hayal gücü yüksek.
+              Uzunluk: yaklaşık 650-850 kelime.
+
+              Korku, şiddet, tehlikeli davranış, marka veya telifli
+              karakter kullanma.
+
+              Masalın belirgin bir başlangıcı, gelişmesi ve mutlu
+              bir sonu olsun. Karakterlerin adları ve görünümleri
+              hikâye boyunca tutarlı kalsın.
+
+              Yalnızca geçerli JSON döndür:
+              {{
+                "title": "Masal başlığı",
+                "story": "Masalın tamamı"
+              }}
+
+              JSON dışında hiçbir şey yazma.
+              """
+
+              url = (
+                  "https://generativelanguage.googleapis.com/v1beta/"
+                  f"models/{GEMINI_MODEL}:generateContent"
+              )
+
+              for attempt in range(1, 5):
+                  try:
+                      result = api_json_with_retry(
+                          url,
+                          {
+                              "contents": [
+                                  {
+                                      "parts": [
+                                          {"text": prompt}
+                                      ]
+                                  }
+                              ],
+                              "generationConfig": {
+                                  "temperature": 0.9,
+                                  "responseMimeType": "application/json"
+                              }
+                          },
+                          params={"key": GEMINI_KEY},
+                          timeout=180
+                      )
+
+                      raw = (
+                          result["candidates"][0]["content"]
+                          ["parts"][0]["text"]
+                      )
+
+                      try:
+                          data = json.loads(raw)
+                      except json.JSONDecodeError:
+                          match = re.search(r"\{.*\}", raw, re.S)
+                          if not match:
+                              raise RuntimeError(
+                                  "Gemini geçerli JSON döndürmedi."
+                              )
+                          data = json.loads(match.group(0))
+
+                      title = str(data.get("title", "")).strip()
+                      story = str(data.get("story", "")).strip()
+
+                      if len(story) < 1500:
+                          raise RuntimeError(
+                              "Masal çok kısa; yeniden deneniyor."
+                          )
+
+                      if not title:
+                          title = "Yıldızların Masalı"
+
+                      return title, story
+
+                  except Exception as exc:
+                      print(
+                          f"Masal denemesi {attempt}/4: {exc}"
+                      )
+                      if attempt == 4:
+                          raise
+                      time.sleep(attempt * 4)
+
+          print("1/6 Masal oluşturuluyor...")
+
+          title, story = generate_story()
+
+          (OUT / "masal.txt").write_text(
+              title + "\n\n" + story,
+              encoding="utf-8"
+          )
+
+          print(f"Masal hazır: {title}")
+          print(f"Masal karakter sayısı: {len(story)}")
+
+          # --------------------------------------------------
+          # 2. SAHNE PLANI OLUŞTURMA
+          # --------------------------------------------------
+
+          def generate_scene_plan(title, story):
+              prompt = f"""
+              Aşağıdaki Türkçe çocuk masalını sekiz sıralı görsel
+              sahneye böl.
+
+              Başlık: {title}
+
+              Masal:
+              {story}
+
+              Tam 8 sahne üret.
+              Her sahne hikâyedeki gerçek bir olayı göstermeli.
+              Aynı karakterlerin görünüşünü her sahnede koru.
+              Görsel istemleri İngilizce yaz.
+              Görsellerde yazı, altyazı, logo veya filigran olmasın.
+              Çocuk kitabı illüstrasyonu tarzını kullan.
+
+              Yalnızca geçerli JSON döndür:
+              {{
+                "scenes": [
+                  {{
+                    "description": "Görselin ayrıntılı İngilizce açıklaması",
+                    "motion": "Kameranın sahnede nasıl hareket edeceği"
+                  }}
+                ]
+              }}
+
+              Her sahnede description ve motion alanları bulunmalı.
+              JSON dışında açıklama yazma.
+              """
+
+              url = (
+                  "https://generativelanguage.googleapis.com/v1beta/"
+                  f"models/{GEMINI_MODEL}:generateContent"
+              )
+
+              result = api_json_with_retry(
+                  url,
+                  {
+                      "contents": [
+                          {"parts": [{"text": prompt}]}
+                      ],
+                      "generationConfig": {
+                          "temperature": 0.65,
+                          "responseMimeType": "application/json"
+                      }
+                  },
+                  params={"key": GEMINI_KEY},
+                  timeout=180
+              )
+
+              raw = (
+                  result["candidates"][0]["content"]
+                  ["parts"][0]["text"]
+              )
+
+              try:
+                  data = json.loads(raw)
+              except json.JSONDecodeError:
+                  match = re.search(r"\{.*\}", raw, re.S)
+                  if not match:
+                      raise RuntimeError(
+                          "Sahne planı JSON biçiminde değil."
+                      )
+                  data = json.loads(match.group(0))
+
+              scenes = data.get("scenes", [])
+
+              if len(scenes) < SCENE_COUNT:
                   raise RuntimeError(
-                      f"{i}. sahne görseli oluşturulamadı: {last_error}"
+                      f"Yalnızca {len(scenes)} sahne oluşturuldu."
                   )
 
+              scenes = scenes[:SCENE_COUNT]
+
+              for index, scene in enumerate(scenes, start=1):
+                  scene["scene"] = index
+                  scene["description"] = str(
+                      scene.get("description", "")
+                  ).strip()
+                  scene["motion"] = str(
+                      scene.get("motion", "")
+                  ).strip()
+
+                  if not scene["description"]:
+                      raise RuntimeError(
+                          f"{index}. sahnenin açıklaması boş."
+                      )
+
+              return scenes
+
+          print("2/6 Sahne planı hazırlanıyor...")
+
+          scenes = generate_scene_plan(title, story)
+
+          (OUT / "sahne-plani.json").write_text(
+              json.dumps(
+                  {"title": title, "scenes": scenes},
+                  ensure_ascii=False,
+                  indent=2
+              ),
+              encoding="utf-8"
+          )
+
+          print(f"{len(scenes)} sahne hazır.")
+
           # --------------------------------------------------
-          # 4. GERÇEK HAREKETLİ KLİPLER
+          # 3. CLOUDFLARE İLE GÖRSEL ÜRETME
           # --------------------------------------------------
 
-          def extract_video_url(item):
-              if isinstance(item, str):
-                  if item.startswith("http://") or item.startswith("https://"):
-                      return item
-                  return HF_FILE_URL + item.lstrip("/")
+          def generate_image(description, destination):
+              url = (
+                  "https://api.cloudflare.com/client/v4/accounts/"
+                  f"{CF_ACCOUNT}/ai/run/{IMAGE_MODEL}"
+              )
 
-              if isinstance(item, dict):
-                  if item.get("url"):
-                      return item["url"]
-                  if item.get("path"):
-                      value = str(item["path"])
-                      if value.startswith("http://") or value.startswith("https://"):
-                          return value
-                      return HF_FILE_URL + value.lstrip("/")
+              prompt = (
+                  "High-quality children's picture book illustration. "
+                  "Warm magical atmosphere, detailed hand-painted look, "
+                  "beautiful lighting, clear readable composition, "
+                  "appealing original characters, consistent character "
+                  "design, colorful but harmonious palette. "
+                  "Landscape 16:9 composition. "
+                  "No text, no letters, no captions, no watermark. "
+                  "Scene: " + description
+              )
 
-              return None
+              last_error = None
 
-          def generate_animated_clip(image_path, output_path, scene):
-              params = {
-                  "prompt": scene["motion_prompt"],
-                  "duration_seconds": 3.5,
-                  "steps": 6
-              }
-
-              print(f"Sahne {scene['scene']}: hareket üretiliyor...")
-
-              with open(image_path, "rb") as image_file:
-                  with requests.post(
-                      f"{NIFTYVID_URL}/generate",
-                      files={
-                          "image": (
-                              image_path.name,
-                              image_file,
-                              "image/png"
-                          )
-                      },
-                      data={
-                          "params": json.dumps(
-                              params, ensure_ascii=False
-                          )
-                      },
-                      headers={"Accept": "text/event-stream"},
-                      stream=True,
-                      timeout=(30, 600)
-                  ) as response:
+              for attempt in range(1, 5):
+                  try:
+                      response = session.post(
+                          url,
+                          headers={
+                              "Authorization": f"Bearer {CF_TOKEN}",
+                              "Content-Type": "application/json"
+                          },
+                          json={"prompt": prompt},
+                          timeout=240
+                      )
 
                       if not response.ok:
                           raise RuntimeError(
-                              f"NiftyVid HTTP {response.status_code}: "
-                              f"{response.text[:500]}"
+                              f"Cloudflare HTTP {response.status_code}: "
+                              f"{response.text[:700]}"
                           )
 
-                      event_name = "message"
-                      data_lines = []
-                      video_url = None
+                      content_type = response.headers.get(
+                          "Content-Type", ""
+                      ).lower()
 
-                      for raw_line in response.iter_lines(
-                          decode_unicode=True
-                      ):
-                          if raw_line is None:
-                              continue
+                      if "json" in content_type or response.content[:1] == b"{":
+                          payload = response.json()
 
-                          line = raw_line.strip()
+                          if payload.get("success") is False:
+                              raise RuntimeError(
+                                  json.dumps(
+                                      payload.get("errors", payload),
+                                      ensure_ascii=False
+                                  )[:700]
+                              )
 
-                          if not line:
-                              if data_lines:
-                                  event_data = "\n".join(data_lines)
+                          result = payload.get("result", {})
+                          encoded = None
 
-                                  if event_name == "error":
-                                      raise RuntimeError(
-                                          "NiftyVid üretim hatası: "
-                                          + event_data[:700]
-                                      )
+                          if isinstance(result, dict):
+                              encoded = (
+                                  result.get("image")
+                                  or result.get("data")
+                              )
 
-                                  if event_name == "complete":
-                                      payload = json.loads(event_data)
-                                      first = (
-                                          payload[0]
-                                          if isinstance(payload, list)
-                                          and payload
-                                          else payload
-                                      )
-                                      video_url = extract_video_url(first)
-                                      if not video_url:
-                                          raise RuntimeError(
-                                              "NiftyVid video bağlantısı "
-                                              "döndürmedi."
-                                          )
-                                      break
+                          if not encoded:
+                              raise RuntimeError(
+                                  "Cloudflare yanıtında görsel bulunamadı."
+                              )
 
-                              event_name = "message"
-                              data_lines = []
+                          if isinstance(encoded, list):
+                              content = bytes(encoded)
+                          elif isinstance(encoded, str):
+                              encoded = encoded.strip()
 
-                          elif line.startswith("event:"):
-                              event_name = line[6:].strip()
+                              if encoded.startswith("data:"):
+                                  encoded = encoded.split(",", 1)[-1]
 
-                          elif line.startswith("data:"):
-                              data_lines.append(line[5:].strip())
+                              content = base64.b64decode(encoded)
+                          else:
+                              raise RuntimeError(
+                                  "Görsel yanıtının biçimi tanınmadı."
+                              )
+                      else:
+                          content = response.content
 
-              if not video_url:
+                      image = Image.open(
+                          BytesIO(content)
+                      ).convert("RGB")
+
+                      if image.width < 100 or image.height < 100:
+                          raise RuntimeError(
+                              "Üretilen görselin çözünürlüğü çok düşük."
+                          )
+
+                      # 16:9 kırpma
+                      target_ratio = WIDTH / HEIGHT
+                      current_ratio = image.width / image.height
+
+                      if current_ratio > target_ratio:
+                          new_width = int(image.height * target_ratio)
+                          left = (image.width - new_width) // 2
+                          image = image.crop(
+                              (
+                                  left, 0,
+                                  left + new_width, image.height
+                              )
+                          )
+                      else:
+                          new_height = int(image.width / target_ratio)
+                          top = (image.height - new_height) // 2
+                          image = image.crop(
+                              (
+                                  0, top,
+                                  image.width, top + new_height
+                              )
+                          )
+
+                      image = image.resize(
+                          (WIDTH, HEIGHT),
+                          Image.Resampling.LANCZOS
+                      )
+
+                      brightness = (
+                          sum(ImageStat.Stat(image).mean) / 3
+                      )
+
+                      if brightness < 12:
+                          raise RuntimeError(
+                              "Görsel neredeyse tamamen siyah."
+                          )
+
+                      image = ImageEnhance.Color(image).enhance(1.06)
+                      image = ImageEnhance.Contrast(image).enhance(1.04)
+                      image = image.filter(
+                          ImageFilter.UnsharpMask(
+                              radius=1.2,
+                              percent=100,
+                              threshold=3
+                          )
+                      )
+
+                      image.save(destination, format="PNG")
+                      return
+
+                  except Exception as exc:
+                      last_error = exc
+                      print(
+                          f"Görsel denemesi {attempt}/4: {exc}"
+                      )
+
+                      if attempt < 4:
+                          time.sleep(attempt * 4)
+
+              raise RuntimeError(
+                  f"Görsel oluşturulamadı: {last_error}"
+              )
+
+          print("3/6 Sahne görselleri oluşturuluyor...")
+
+          for scene in scenes:
+              number = scene["scene"]
+              destination = IMAGES / f"scene_{number:02d}.png"
+
+              if destination.exists():
+                  destination.unlink()
+
+              print(f"Görsel {number}/{SCENE_COUNT} oluşturuluyor...")
+
+              generate_image(
+                  scene["description"],
+                  destination
+              )
+
+              if not destination.exists() or destination.stat().st_size < 5000:
                   raise RuntimeError(
-                      "NiftyVid akışı tamamlanmadan kapandı."
+                      f"{number}. sahnenin görseli geçersiz."
                   )
 
-              temp_path = str(output_path) + ".download.mp4"
+              print(f"Görsel {number}/{SCENE_COUNT} hazır.")
 
-              with requests.get(
-                  video_url,
-                  stream=True,
-                  timeout=(30, 180)
-              ) as video_response:
-                  video_response.raise_for_status()
+          # --------------------------------------------------
+          # 4. HER GÖRSELDEN HAREKETLİ KLİP ÜRETME
+          # --------------------------------------------------
 
-                  with open(temp_path, "wb") as file:
-                      for chunk in video_response.iter_content(
-                          chunk_size=1024 * 1024
-                      ):
-                          if chunk:
-                              file.write(chunk)
+          def make_animated_clip(image_path, output_path, scene):
+              total_frames = SCENE_SECONDS * FPS
+              number = int(scene["scene"])
 
-              if not os.path.exists(temp_path) or os.path.getsize(temp_path) < 20000:
-                  raise RuntimeError("İndirilen hareketli video boş.")
+              # Hareket yönünü sahne numarasına göre değiştir.
+              if number % 4 == 1:
+                  x_expr = "iw/2-(iw/zoom/2)"
+                  y_expr = "ih/2-(ih/zoom/2)"
+                  zoom_expr = (
+                      "min(1.0+0.0007*on,1.06)"
+                  )
+              elif number % 4 == 2:
+                  x_expr = (
+                      "max(0,min(iw-iw/zoom,"
+                      "(iw-iw/zoom)*on/" + str(total_frames) + "))"
+                  )
+                  y_expr = "ih/2-(ih/zoom/2)"
+                  zoom_expr = (
+                      "min(1.06,1.0+0.0006*on)"
+                  )
+              elif number % 4 == 3:
+                  x_expr = (
+                      "max(0,min(iw-iw/zoom,"
+                      "(iw-iw/zoom)*(1-on/" + str(total_frames) + ")))"
+                  )
+                  y_expr = "ih/2-(ih/zoom/2)"
+                  zoom_expr = (
+                      "min(1.06,1.0+0.0006*on)"
+                  )
+              else:
+                  x_expr = "iw/2-(iw/zoom/2)"
+                  y_expr = (
+                      "max(0,min(ih-ih/zoom,"
+                      "(ih-ih/zoom)*on/" + str(total_frames) + "))"
+                  )
+                  zoom_expr = (
+                      "min(1.0+0.0007*on,1.06)"
+                  )
 
-              # Klipleri aynı çözünürlük ve kodeğe getir.
-              run([
-                  "ffmpeg", "-y",
-                  "-i", temp_path,
-                  "-t", "3.5",
-                  "-vf",
-                  "scale=1280:720:force_original_aspect_ratio=increase,"
-                  "crop=1280:720,setsar=1,fps=25,format=yuv420p",
+              video_filter = (
+                  "zoompan="
+                  f"z='{zoom_expr}':"
+                  f"x='{x_expr}':"
+                  f"y='{y_expr}':"
+                  f"d={total_frames}:"
+                  f"s={WIDTH}x{HEIGHT}:"
+                  f"fps={FPS},"
+                  "setsar=1,"
+                  "format=yuv420p"
+              )
+
+              run_cmd([
+                  "ffmpeg", "-hide_banner", "-loglevel", "error",
+                  "-y",
+                  "-loop", "1",
+                  "-framerate", str(FPS),
+                  "-i", str(image_path),
+                  "-vf", video_filter,
+                  "-frames:v", str(total_frames),
                   "-an",
                   "-c:v", "libx264",
                   "-preset", "veryfast",
                   "-crf", "20",
+                  "-pix_fmt", "yuv420p",
                   "-movflags", "+faststart",
                   str(output_path)
               ])
 
-              os.remove(temp_path)
+              if (
+                  not output_path.exists()
+                  or output_path.stat().st_size < 20000
+              ):
+                  raise RuntimeError(
+                      f"{number}. sahnenin klibi oluşturulamadı."
+                  )
 
-              if output_path.stat().st_size < 20000:
-                  raise RuntimeError("Hareketli klip kalite kontrolünü geçemedi.")
-
-          print("4/6 Sekiz sahnenin hareketli klipleri üretiliyor...")
+          print("4/6 Görseller hareketli kliplere dönüştürülüyor...")
 
           clip_paths = []
 
-          for i, scene in enumerate(scenes, 1):
-              clip_path = CLIPS / f"clip_{i:02d}.mp4"
-              last_error = None
+          for scene in scenes:
+              number = scene["scene"]
+              image_path = IMAGES / f"scene_{number:02d}.png"
+              clip_path = CLIPS / f"clip_{number:02d}.mp4"
 
-              for attempt in range(1, 3):
-                  try:
-                      generate_animated_clip(
-                          image_paths[i - 1],
-                          clip_path,
-                          scene
-                      )
-                      clip_paths.append(clip_path)
-                      print(f"Hareketli klip {i}/8 hazır.")
-                      break
+              print(f"Hareketli sahne {number}/{SCENE_COUNT}...")
 
-                  except Exception as exc:
-                      last_error = exc
-                      print(
-                          f"Sahne {i}, hareket denemesi {attempt}/2: {exc}"
-                      )
-                      if attempt < 2:
-                          time.sleep(10)
+              make_animated_clip(
+                  image_path,
+                  clip_path,
+                  scene
+              )
 
-              else:
-                  raise RuntimeError(
-                      f"{i}. sahne için gerçek animasyon üretilemedi. "
-                      f"Sabit görselle devam edilmiyor. Hata: {last_error}"
+              clip_paths.append(clip_path)
+              print(f"Sahne {number} hazır.")
+
+          # --------------------------------------------------
+          # 5. KONUŞMASIZ FON MÜZİĞİ VE AMBİYANS
+          # --------------------------------------------------
+
+          def make_soundtrack(destination):
+              duration = SCENE_COUNT * SCENE_SECONDS
+              sample_count = duration * SAMPLE_RATE
+
+              t = (
+                  np.arange(sample_count, dtype=np.float32)
+                  / SAMPLE_RATE
+              )
+
+              # Yumuşak, basit bir müzikal dizi.
+              notes = [
+                  261.63, 329.63, 392.00, 329.63,
+                  293.66, 349.23, 440.00, 349.23,
+                  261.63, 329.63, 392.00, 523.25,
+                  440.00, 392.00, 329.63, 293.66
+              ]
+
+              beat = 1.5
+              music = np.zeros(sample_count, dtype=np.float32)
+
+              for index, start in enumerate(
+                  np.arange(0, duration, beat)
+              ):
+                  end = min(start + beat, duration)
+                  start_i = int(start * SAMPLE_RATE)
+                  end_i = int(end * SAMPLE_RATE)
+
+                  if end_i <= start_i:
+                      continue
+
+                  local_t = (
+                      np.arange(end_i - start_i, dtype=np.float32)
+                      / SAMPLE_RATE
                   )
 
-          # Klipleri birleştir.
-          concat_path = OUT / "clips.txt"
-          with open(concat_path, "w", encoding="utf-8") as file:
-              for clip_path in clip_paths:
-                  file.write(
-                      "file '" + str(clip_path.resolve()) + "'\n"
+                  note = notes[index % len(notes)]
+                  envelope = np.minimum(
+                      local_t / 0.12, 1.0
+                  ) * np.minimum(
+                      (end - start - local_t) / 0.2, 1.0
+                  )
+                  envelope = np.clip(envelope, 0.0, 1.0)
+
+                  tone = (
+                      np.sin(2 * np.pi * note * local_t)
+                      + 0.35 * np.sin(
+                          2 * np.pi * note * 2 * local_t
+                      )
                   )
 
-          visuals_path = OUT / "visuals.mp4"
+                  music[start_i:end_i] += (
+                      0.10 * tone * envelope
+                  )
 
-          run([
-              "ffmpeg", "-y",
+              # Hafif, konuşmasız ortam sesi.
+              rng = np.random.default_rng()
+              noise = rng.normal(
+                  0, 1, sample_count
+              ).astype(np.float32)
+
+              # Düşük seviyeli yumuşak ambiyans.
+              ambience = (
+                  0.008 * noise
+                  + 0.003 * np.sin(2 * np.pi * 110 * t)
+                  + 0.002 * np.sin(2 * np.pi * 164.81 * t)
+              )
+
+              # Seyrek, yumuşak çan benzeri sesler.
+              chimes = np.zeros(sample_count, dtype=np.float32)
+
+              for start in np.arange(4.0, duration, 9.0):
+                  freq = random.choice(
+                      [523.25, 659.25, 783.99, 880.0]
+                  )
+                  start_i = int(start * SAMPLE_RATE)
+                  length = min(
+                      int(1.8 * SAMPLE_RATE),
+                      sample_count - start_i
+                  )
+
+                  if length <= 0:
+                      continue
+
+                  local_t = (
+                      np.arange(length, dtype=np.float32)
+                      / SAMPLE_RATE
+                  )
+
+                  decay = np.exp(-2.8 * local_t)
+                  chimes[start_i:start_i + length] += (
+                      0.035
+                      * np.sin(2 * np.pi * freq * local_t)
+                      * decay
+                  )
+
+              mix = music + ambience + chimes
+
+              # Başlangıç ve bitişte yumuşak geçiş.
+              fade_length = int(2 * SAMPLE_RATE)
+              fade_in = np.linspace(
+                  0, 1, fade_length, dtype=np.float32
+              )
+              fade_out = np.linspace(
+                  1, 0, fade_length, dtype=np.float32
+              )
+
+              mix[:fade_length] *= fade_in
+              mix[-fade_length:] *= fade_out
+
+              peak = float(np.max(np.abs(mix)))
+
+              if peak > 0:
+                  mix = mix * (0.75 / peak)
+
+              stereo = np.column_stack((mix, mix))
+              pcm = (
+                  np.clip(stereo, -1, 1) * 32767
+              ).astype("<i2")
+
+              with wave.open(str(destination), "wb") as wav:
+                  wav.setnchannels(2)
+                  wav.setsampwidth(2)
+                  wav.setframerate(SAMPLE_RATE)
+                  wav.writeframes(pcm.tobytes())
+
+          print("5/6 Fon müziği ve ambiyans hazırlanıyor...")
+
+          soundtrack = OUT / "soundtrack.wav"
+          make_soundtrack(soundtrack)
+
+          # --------------------------------------------------
+          # 6. KLİPLERİ BİRLEŞTİR VE VİDEOYU DOĞRULA
+          # --------------------------------------------------
+
+          concat_file = OUT / "concat.txt"
+
+          concat_file.write_text(
+              "".join(
+                  "file '" + str(path.resolve()) + "'\n"
+                  for path in clip_paths
+              ),
+              encoding="utf-8"
+          )
+
+          silent_video = OUT / "silent-video.mp4"
+
+          run_cmd([
+              "ffmpeg", "-hide_banner", "-loglevel", "error",
+              "-y",
               "-f", "concat",
               "-safe", "0",
-              "-i", str(concat_path),
-              "-c:v", "libx264",
-              "-preset", "veryfast",
-              "-crf", "20",
-              "-pix_fmt", "yuv420p",
-              "-an",
-              str(visuals_path)
+              "-i", str(concat_file),
+              "-c", "copy",
+              str(silent_video)
           ])
 
-          # --------------------------------------------------
-          # 5. SÖZSÜZ MÜZİK VE SAHNE SESLERİ
-          # --------------------------------------------------
+          final_video = ROOT / "animasyon-video.mp4"
 
-          print("5/6 Sözsüz arka plan müziği ve sahne sesleri hazırlanıyor...")
-
-          # Bu sesler Python ile üretilen basit sentetik ses efektleridir.
-          # Harici müzik dosyası veya seslendirme servisi gerektirmez.
-          sample_rate = 44100
-          scene_duration = 3.5
-          total_duration = scene_duration * len(scenes)
-          total_samples = int(sample_rate * total_duration)
-
-          audio = np.zeros((total_samples, 2), dtype=np.float32)
-
-          def add_tone(start_seconds, duration, frequency,
-                       volume=0.08, pan=0.0, kind="tone"):
-              start = max(0, int(start_seconds * sample_rate))
-              count = min(
-                  int(duration * sample_rate),
-                  total_samples - start
-              )
-              if count <= 0:
-                  return
-
-              t = np.arange(count, dtype=np.float32) / sample_rate
-              envelope = np.minimum(
-                  1.0,
-                  np.minimum(t / 0.08, (duration - t) / 0.12)
-              )
-              envelope = np.clip(envelope, 0, 1)
-
-              if kind == "noise":
-                  rng = np.random.default_rng(
-                      int(start_seconds * 1000) + int(frequency)
-                  )
-                  signal = rng.normal(0, 1, count).astype(np.float32)
-                  # Basit yumuşatma: komşu örneklerin ortalaması.
-                  signal = np.convolve(
-                      signal, np.ones(16, dtype=np.float32) / 16,
-                      mode="same"
-                  )
-                  peak = max(float(np.max(np.abs(signal))), 1e-6)
-                  signal = signal / peak
-              else:
-                  signal = (
-                      np.sin(2 * np.pi * frequency * t)
-                      + 0.25 * np.sin(2 * np.pi * frequency * 2 * t)
-                  ) / 1.25
-
-              signal = signal * envelope * volume
-              left = signal * np.sqrt((1 - pan) / 2)
-              right = signal * np.sqrt((1 + pan) / 2)
-
-              audio[start:start + count, 0] += left
-              audio[start:start + count, 1] += right
-
-          # Hafif, sözsüz ve neşeli arka plan melodisi.
-          # Basit pentatonik dizi; konuşma veya şarkı sözü içermez.
-          notes = [261.63, 329.63, 392.00, 440.00, 392.00, 329.63]
-          beat = 0.55
-          pos = 0.0
-
-          while pos < total_duration:
-              frequency = random.choice(notes)
-              add_tone(
-                  pos, 0.42, frequency,
-                  volume=0.035,
-                  pan=random.uniform(-0.25, 0.25)
-              )
-              add_tone(
-                  pos, 0.65, frequency / 2,
-                  volume=0.012,
-                  pan=0.0
-              )
-              pos += beat
-
-          # Her sahneye hafif çevresel efektler ekle.
-          for i, scene in enumerate(scenes):
-              start = i * scene_duration
-              cues = scene.get("sound_cues", [])
-              cue_text = " ".join(str(x) for x in cues).lower()
-
-              if any(word in cue_text for word in (
-                  "water", "river", "rain", "stream", "su", "yağmur"
-              )):
-                  for j in range(5):
-                      add_tone(
-                          start + j * 0.55, 0.35,
-                          random.uniform(900, 1800),
-                          volume=0.018,
-                          pan=random.uniform(-0.7, 0.7),
-                          kind="noise"
-                      )
-
-              elif any(word in cue_text for word in (
-                  "bird", "chirp", "forest", "birds", "kuş", "orman"
-              )):
-                  for j in range(3):
-                      add_tone(
-                          start + 0.3 + j * 0.8, 0.18,
-                          random.choice([1500, 1800, 2200]),
-                          volume=0.025,
-                          pan=random.uniform(-0.7, 0.7)
-                      )
-
-              elif any(word in cue_text for word in (
-                  "footstep", "steps", "walk", "running", "adım", "yürü"
-              )):
-                  for j in range(4):
-                      add_tone(
-                          start + 0.25 + j * 0.55, 0.12,
-                          random.choice([100, 140, 180]),
-                          volume=0.04,
-                          pan=random.uniform(-0.4, 0.4)
-                      )
-
-              elif any(word in cue_text for word in (
-                  "magic", "sparkle", "bell", "magical", "sihir", "zil"
-              )):
-                  for j, freq in enumerate([880, 1174.66, 1568]):
-                      add_tone(
-                          start + 0.35 + j * 0.18,
-                          0.5,
-                          freq,
-                          volume=0.025,
-                          pan=random.uniform(-0.5, 0.5)
-                      )
-
-              else:
-                  # Tanımlanmayan sahneler için hafif, kısa ambiyans.
-                  add_tone(
-                      start + 0.8, 0.22,
-                      random.choice([440, 523.25, 659.25]),
-                      volume=0.014,
-                      pan=random.uniform(-0.4, 0.4)
-                  )
-
-          # Ani ses patlamalarını önle ve WAV olarak kaydet.
-          peak = float(np.max(np.abs(audio)))
-          if peak > 0.85:
-              audio *= 0.85 / peak
-
-          audio_int16 = (
-              np.clip(audio, -1, 1) * 32767
-          ).astype(np.int16)
-
-          soundtrack_path = OUT / "soundtrack.wav"
-
-          import wave
-          with wave.open(str(soundtrack_path), "wb") as wav:
-              wav.setnchannels(2)
-              wav.setsampwidth(2)
-              wav.setframerate(sample_rate)
-              wav.writeframes(audio_int16.tobytes())
-
-          # --------------------------------------------------
-          # 6. SON VİDEO VE KALİTE KONTROLÜ
-          # --------------------------------------------------
-
-          print("6/6 Video, müzik ve efektlerle birleştiriliyor...")
-
-          final_path = Path("animasyon-video.mp4")
-
-          run([
-              "ffmpeg", "-y",
-              "-i", str(visuals_path),
-              "-i", str(soundtrack_path),
+          run_cmd([
+              "ffmpeg", "-hide_banner", "-loglevel", "error",
+              "-y",
+              "-i", str(silent_video),
+              "-i", str(soundtrack),
               "-map", "0:v:0",
               "-map", "1:a:0",
-              "-vf",
-              "scale=1280:720:force_original_aspect_ratio=increase,"
-              "crop=1280:720,setsar=1,format=yuv420p",
-              "-af", "loudnorm=I=-18:TP=-2:LRA=11",
               "-c:v", "copy",
               "-c:a", "aac",
               "-b:a", "192k",
-              "-ar", "44100",
-              "-ac", "2",
               "-shortest",
               "-movflags", "+faststart",
-              str(final_path)
+              str(final_video)
           ])
 
           probe = subprocess.check_output([
               "ffprobe", "-v", "error",
-              "-show_streams",
-              "-show_format",
+              "-show_entries",
+              "format=duration,size:stream=codec_type,width,height",
               "-of", "json",
-              str(final_path)
+              str(final_video)
           ], text=True)
 
           info = json.loads(probe)
@@ -900,68 +827,43 @@ jobs:
           }
 
           if "video" not in stream_types:
-              raise RuntimeError("Son videoda görüntü bulunamadı.")
+              raise RuntimeError("Video akışı bulunamadı.")
 
           if "audio" not in stream_types:
-              raise RuntimeError("Son videoda ses bulunamadı.")
-
-          video_stream = next(
-              stream for stream in streams
-              if stream.get("codec_type") == "video"
-          )
-
-          if (
-              video_stream.get("width") != 1280
-              or video_stream.get("height") != 720
-          ):
-              raise RuntimeError(
-                  "Video çözünürlüğü 1280x720 değil: "
-                  f"{video_stream.get('width')}x"
-                  f"{video_stream.get('height')}"
-              )
+              raise RuntimeError("Fon müziği akışı bulunamadı.")
 
           duration = float(info["format"]["duration"])
-          size = final_path.stat().st_size
+          size = int(info["format"]["size"])
 
-          if duration < 15:
+          if duration < 30:
               raise RuntimeError(
                   f"Video beklenenden kısa: {duration:.1f} saniye."
               )
 
-          if size < 200000:
-              raise RuntimeError(
-                  f"Video dosyası beklenenden küçük: {size} bayt."
-              )
+          if size < 500000:
+              raise RuntimeError("Video dosyası beklenenden küçük.")
 
-          # FFmpeg ile tüm dosyanın okunabildiğini doğrula.
-          run([
-              "ffmpeg", "-v", "error",
-              "-i", str(final_path),
-              "-f", "null", "-"
-          ])
-
-          print("=" * 55)
-          print("BAŞARILI: Animasyon videosu oluşturuldu.")
+          print("")
+          print("BAŞARILI: Video oluşturuldu.")
           print(f"Başlık: {title}")
-          print(f"Sahne sayısı: {len(scenes)}")
-          print(f"Çözünürlük: 1280x720")
           print(f"Süre: {duration:.1f} saniye")
-          print(f"Boyut: {size / (1024 * 1024):.2f} MB")
-          print("Ses: sözsüz müzik ve sahne efektleri")
-          print(f"Dosya: {final_path}")
-          print("=" * 55)
+          print(f"Boyut: {size / 1024 / 1024:.2f} MB")
+          print(f"Dosya: {final_video}")
+          print("Seslendirme: Yok")
+          print("Ses: Fon müziği ve hafif ambiyans")
           PY
 
           python create_video.py
 
-      - name: Video ve dosyaları yükle
+      - name: Videoyu ve dosyaları yükle
         uses: actions/upload-artifact@v4
         with:
-          name: animasyon-video
+          name: masal-video
           path: |
             animasyon-video.mp4
             output/masal.txt
             output/sahne-plani.json
             output/soundtrack.wav
+            output/images/
           if-no-files-found: error
           retention-days: 7
