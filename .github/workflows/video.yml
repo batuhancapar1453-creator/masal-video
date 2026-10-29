@@ -1,4 +1,4 @@
-name: Gizemli Dunya - Otomatik YouTube Shorts
+name: Gizemli Dunya - Ekonomik Shorts
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: gizemli-dunya-youtube
+  group: youtube-shorts-publisher
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: FFmpeg ve fontlari kur
+      - name: FFmpeg ve font kur
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
@@ -40,11 +40,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pillow numpy google-api-python-client google-auth
 
-      # ===========================================
-      # YENI: YOUTUBE BAGLANTISINI ONCEDEN TEST ET
-      # ===========================================
+      # =========================================
+      # 1. YOUTUBE OAUTH KONTROLU
+      # =========================================
 
-      - name: YouTube OAuth baglantisini test et
+      - name: YouTube OAuth baglantisini onceden denetle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -54,71 +54,62 @@ jobs:
           import os
           import requests
 
-          names = [
-              "YOUTUBE_CLIENT_ID",
-              "YOUTUBE_CLIENT_SECRET",
-              "YOUTUBE_REFRESH_TOKEN"
-          ]
-
           values = {
-              name: os.getenv(name, "").strip()
-              for name in names
+              key: os.getenv(key, "").strip()
+              for key in (
+                  "YOUTUBE_CLIENT_ID",
+                  "YOUTUBE_CLIENT_SECRET",
+                  "YOUTUBE_REFRESH_TOKEN"
+              )
           }
 
           missing = [
-              name
-              for name, value in values.items()
+              key for key, value in values.items()
               if not value
           ]
 
           if missing:
-              raise RuntimeError(
+              raise SystemExit(
                   "Eksik GitHub Secrets: "
                   + ", ".join(missing)
               )
 
-          print("YouTube OAuth baglantisi kontrol ediliyor...")
+          print("YouTube OAuth baglantisi test ediliyor...")
 
           response = requests.post(
               "https://oauth2.googleapis.com/token",
               data={
+                  "grant_type": "refresh_token",
                   "client_id": values["YOUTUBE_CLIENT_ID"],
                   "client_secret": values["YOUTUBE_CLIENT_SECRET"],
-                  "refresh_token": values["YOUTUBE_REFRESH_TOKEN"],
-                  "grant_type": "refresh_token"
+                  "refresh_token": values["YOUTUBE_REFRESH_TOKEN"]
               },
               timeout=30
           )
 
-          result = response.json()
+          try:
+              result = response.json()
+          except ValueError:
+              raise SystemExit(
+                  "Google OAuth gecersiz yanit verdi."
+              )
 
-          if response.ok and result.get("access_token"):
-              print("")
-              print("YOUTUBE BAGLANTISI BASARILI!")
-              print("Access Token yenileme calisiyor.")
-              print("Video uretimine gecilebilir.")
-          else:
-              error = result.get("error", "bilinmeyen")
+          if not response.ok or not result.get("access_token"):
+              error = result.get("error", "unknown")
+
               print("OAuth hatasi:", error)
 
               if error == "unauthorized_client":
                   print(
-                      "OAuth istemcisi yetkilendirilmedi. "
-                      "GitHub'daki Client ID, Client Secret "
-                      "ve Refresh Token ayni OAuth "
-                      "istemcisine ait olmali."
-                  )
-
-                  print(
-                      "OAuth Playground'da kendi OAuth "
-                      "kimlik bilgilerinizi kullanarak "
-                      "yeni Refresh Token olusturun."
+                      "OAuth Client ID, Client Secret ve "
+                      "Refresh Token ayni istemciyle "
+                      "olusturulmus olmali."
                   )
 
               elif error == "invalid_grant":
                   print(
-                      "Refresh Token gecersiz, suresi "
-                      "dolmus veya erisim iptal edilmis."
+                      "Refresh Token gecersiz veya "
+                      "erisim iptal edilmis."
                   )
 
               elif error == "invalid_client":
@@ -126,18 +117,15 @@ jobs:
                       "Client ID veya Client Secret hatali."
                   )
 
-              else:
-                  print(
-                      "Google OAuth projesini ve "
-                      "izinleri kontrol edin."
-                  )
-
               raise SystemExit(1)
+
+          print("YOUTUBE BAGLANTISI BASARILI!")
+          print("Gorsel uretimine gecilebilir.")
           PY
 
-      # ===========================================
-      # VIDEO URETIMI
-      # ===========================================
+      # =========================================
+      # 2. VIDEO URETIMI VE YOUTUBE YUKLEMESI
+      # =========================================
 
       - name: Video uret ve YouTube'a yukle
         env:
@@ -152,11 +140,12 @@ jobs:
           import os
           import io
           import json
+          import base64
           import time
           import wave
-          import base64
-          import hashlib
           import subprocess
+          import hashlib
+
           from pathlib import Path
           from datetime import datetime
           from zoneinfo import ZoneInfo
@@ -179,7 +168,7 @@ jobs:
           from googleapiclient.errors import HttpError
 
           # =========================================
-          # TEMEL AYARLAR
+          # AYARLAR
           # =========================================
 
           ROOT = Path.cwd()
@@ -199,27 +188,28 @@ jobs:
 
           SCENE_COUNT = 6
           SCENE_SECONDS = 5
+
           SAMPLE_RATE = 22050
 
-          CF_TOKEN = os.environ[
-              "CLOUDFLARE_API_TOKEN"
-          ].strip()
+          CF_TOKEN = os.getenv(
+              "CLOUDFLARE_API_TOKEN", ""
+          ).strip()
 
-          CF_ACCOUNT = os.environ[
-              "CLOUDFLARE_ACCOUNT_ID"
-          ].strip()
+          CF_ACCOUNT = os.getenv(
+              "CLOUDFLARE_ACCOUNT_ID", ""
+          ).strip()
 
-          YOUTUBE_CLIENT_ID = os.environ[
-              "YOUTUBE_CLIENT_ID"
-          ].strip()
+          YOUTUBE_CLIENT_ID = os.getenv(
+              "YOUTUBE_CLIENT_ID", ""
+          ).strip()
 
-          YOUTUBE_CLIENT_SECRET = os.environ[
-              "YOUTUBE_CLIENT_SECRET"
-          ].strip()
+          YOUTUBE_CLIENT_SECRET = os.getenv(
+              "YOUTUBE_CLIENT_SECRET", ""
+          ).strip()
 
-          YOUTUBE_REFRESH_TOKEN = os.environ[
-              "YOUTUBE_REFRESH_TOKEN"
-          ].strip()
+          YOUTUBE_REFRESH_TOKEN = os.getenv(
+              "YOUTUBE_REFRESH_TOKEN", ""
+          ).strip()
 
           YOUTUBE_PRIVACY = os.getenv(
               "YOUTUBE_PRIVACY", "private"
@@ -234,34 +224,72 @@ jobs:
               "GITHUB_RUN_ID", "local"
           )
 
-          PRIMARY_MODEL = (
-              "@cf/black-forest-labs/flux-2-klein-9b"
-          )
+          # Ekonomik model birinci tercih
+          PRIMARY_MODEL = "@cf/lykon/dreamshaper-8-lcm"
 
+          # Yedek model
           BACKUP_MODEL = (
-              "@cf/lykon/dreamshaper-8-lcm"
+              "@cf/black-forest-labs/flux-1-schnell"
           )
 
-          for folder in [
+          # KALITE / MALIYET AYARLARI
+          IMAGE_WIDTH = 768
+          IMAGE_HEIGHT = 1344
+
+          DREAMSHAPER_STEPS = 8
+          FLUX_STEPS = 4
+
+          for folder in (
               OUT,
               IMAGES,
               CAPTIONS,
               CLIPS,
               HISTORY_FILE.parent
-          ]:
+          ):
               folder.mkdir(
                   parents=True,
                   exist_ok=True
               )
 
+          required = {
+              "CLOUDFLARE_API_TOKEN": CF_TOKEN,
+              "CLOUDFLARE_ACCOUNT_ID": CF_ACCOUNT,
+              "YOUTUBE_CLIENT_ID": YOUTUBE_CLIENT_ID,
+              "YOUTUBE_CLIENT_SECRET": YOUTUBE_CLIENT_SECRET,
+              "YOUTUBE_REFRESH_TOKEN": YOUTUBE_REFRESH_TOKEN
+          }
+
+          missing = [
+              key for key, value in required.items()
+              if not value
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "GitHub Secrets eksik: "
+                  + ", ".join(missing)
+              )
+
+          if YOUTUBE_PRIVACY not in (
+              "private",
+              "public",
+              "unlisted"
+          ):
+              raise RuntimeError(
+                  "YOUTUBE_PRIVACY gecersiz."
+              )
+
           session = requests.Session()
 
           # =========================================
-          # 36 FARKLI KONU
+          # 36 FARKLI KONU HAVUZU
           # =========================================
-          # Format:
+          # Her konu:
           # ID, baslik, kategori, ana gorsel,
-          # dort farkli bilgi ve gorsel istemi
+          # 4 bilgi sahnesi
+          #
+          # Baslangic ve bitis sahnesi eklenince
+          # toplam 6 sahne olur.
           # =========================================
 
           TOPICS = [
@@ -269,582 +297,870 @@ jobs:
                   "giza-void",
                   "Piramitlerin Gizli Boşluğu",
                   "Tarih",
-                  "Great Pyramid of Giza Egyptian desert sunrise",
+                  "Great Pyramid of Giza, Egyptian desert, sunrise",
                   [
-                      ("Büyük Piramit yaklaşık 4.500 yıllık.",
-                       "Great Pyramid massive ancient limestone blocks"),
-                      ("Kozmik parçacıklarla iç yapı incelendi.",
-                       "scientists using muon detectors inside pyramid"),
-                      ("2017'de büyük bir boşluk duyuruldu.",
-                       "scientific cutaway Great Pyramid mysterious void"),
-                      ("Boşluğun işlevi hâlâ kesin bilinmiyor.",
-                       "realistic ancient pyramid inner stone cavity")
+                      (
+                          "Büyük Piramit yaklaşık 4.500 yıllık.",
+                          "Great Pyramid weathered limestone blocks close view"
+                      ),
+                      (
+                          "Kozmik parçacıklarla iç yapı incelendi.",
+                          "cosmic muon detectors studying Egyptian pyramid"
+                      ),
+                      (
+                          "2017 yılında büyük bir boşluk duyuruldu.",
+                          "scientific cutaway of Great Pyramid unknown void"
+                      ),
+                      (
+                          "Boşluğun işlevi henüz kesin bilinmiyor.",
+                          "plausible empty internal limestone space, no artifacts"
+                      )
                   ]
               ),
               (
                   "europa-ocean",
-                  "Europa'nın Buz Altı Okyanusu",
+                  "Europa'nın Buz Altındaki Okyanusu",
                   "Uzay",
-                  "Jupiter and icy moon Europa realistic space",
+                  "Jupiter icy moon Europa in space",
                   [
-                      ("Europa, Jüpiter'in buzlu bir uydusudur.",
-                       "Europa moon near Jupiter dramatic space"),
-                      ("Yüzeyinde uzun çatlaklar bulunur.",
-                       "Europa reddish icy surface fractures"),
-                      ("Buz altında okyanus olduğu düşünülüyor.",
-                       "scientific cutaway Europa subsurface ocean"),
-                      ("Europa'da yaşam olup olmadığı bilinmiyor.",
-                       "Europa deep hidden ocean scientific concept")
+                      (
+                          "Europa, Jüpiter'in buzlu uydularından biri.",
+                          "Jupiter and Europa scientifically accurate appearance"
+                      ),
+                      (
+                          "Yüzeyinde uzun kırık çizgileri görülüyor.",
+                          "Europa surface reddish ice fractures"
+                      ),
+                      (
+                          "Buzun altında sıvı su okyanusu düşünülüyor.",
+                          "scientific cutaway Europa ice shell ocean"
+                      ),
+                      (
+                          "Orada yaşam olup olmadığı bilinmiyor.",
+                          "Europa dark subsurface ocean speculative empty water"
+                      )
                   ]
               ),
               (
-                  "nazca",
-                  "Nazca Çizgilerinin Gizemi",
+                  "nazca-lines",
+                  "Nazca Çizgilerinin Sırrı",
                   "Tarih",
-                  "Nazca lines Peru desert aerial",
+                  "Peru Nazca desert aerial geoglyphs",
                   [
-                      ("Peru çölünde dev çizimler bulunuyor.",
-                       "aerial Nazca geoglyphs desert"),
-                      ("Bazıları hayvanları betimliyor.",
-                       "Nazca hummingbird geoglyph aerial"),
-                      ("Çizimleri antik insanlar oluşturdu.",
-                       "ancient Nazca people making desert geoglyph"),
-                      ("Tam amaçları araştırılmaya devam ediyor.",
-                       "archaeologists investigating Nazca lines")
+                      (
+                          "Dev çizimler Peru'nun çölünde yer alıyor.",
+                          "Peru desert Nazca lines authentic aerial"
+                      ),
+                      (
+                          "Bazıları hayvan figürlerini betimliyor.",
+                          "Nazca hummingbird geoglyph aerial"
+                      ),
+                      (
+                          "Bunları eski Nazca toplulukları yaptı.",
+                          "historical people creating Nazca lines desert reconstruction"
+                      ),
+                      (
+                          "Ne amaçla yapıldıkları hâlâ araştırılıyor.",
+                          "archaeologists measuring Nazca geoglyphs"
+                      )
                   ]
               ),
               (
-                  "ocean-vents",
-                  "Okyanusun Güneşsiz Yaşamı",
+                  "hydrothermal",
+                  "Güneşsiz Okyanus Yaşamı",
                   "Dünya",
-                  "deep ocean hydrothermal vents realistic",
+                  "deep ocean hydrothermal vents scientific documentary",
                   [
-                      ("Derin okyanusta güneş ışığı yok.",
-                       "dark deep ocean abyss"),
-                      ("Sıcak su bacaları deniz dibinde bulunur.",
-                       "black smoker hydrothermal vents"),
-                      ("Bazı mikroplar kimyasal enerji kullanır.",
-                       "microbial mats deep sea vent"),
-                      ("Bu alanlarda ilginç canlılar yaşar.",
-                       "tube worms and crabs deep sea")
+                      (
+                          "Deniz dibine güneş ışığı ulaşmıyor.",
+                          "dark abyss underwater ocean landscape"
+                      ),
+                      (
+                          "Hidrotermal bacalar sıcak sıvılar çıkarıyor.",
+                          "black smoker hydrothermal vent ocean floor"
+                      ),
+                      (
+                          "Bazı mikroplar kimyasal enerji kullanıyor.",
+                          "deep sea microbial mats near vent scientific"
+                      ),
+                      (
+                          "Burada karmaşık yaşam toplulukları var.",
+                          "tube worms and crabs hydrothermal vent ecosystem"
+                      )
                   ]
               ),
               (
                   "moai",
-                  "Moai Heykellerinin Sırrı",
+                  "Moai Heykelleri Nasıl Taşındı?",
                   "Tarih",
-                  "Rapa Nui Moai stone statues cinematic",
+                  "Rapa Nui Moai statues Pacific island",
                   [
-                      ("Moai heykellerini Rapa Nui halkı yaptı.",
-                       "Rapa Nui people carving Moai historical"),
-                      ("Bazı heykeller tonlarca ağırlıktadır.",
-                       "gigantic Moai stone sculpture closeup"),
-                      ("Taşınma yöntemleri araştırılıyor.",
-                       "Moai transport archaeological reconstruction"),
-                      ("Bilim insanları farklı yöntemleri deniyor.",
-                       "experimental archaeology moving Moai ropes")
+                      (
+                          "Moai heykellerini Rapa Nui halkı yaptı.",
+                          "historical Rapa Nui carving stone Moai"
+                      ),
+                      (
+                          "Birçok heykel tonlarca ağırlığında.",
+                          "massive weathered Moai statue scale"
+                      ),
+                      (
+                          "Taşınmaları üzerine farklı görüşler var.",
+                          "archaeologists studying Moai pathways"
+                      ),
+                      (
+                          "Araştırmacılar hareket yöntemlerini deniyor.",
+                          "experimental walking Moai using ropes reconstruction"
+                      )
                   ]
               ),
               (
-                  "olympus",
+                  "mars-olympus",
                   "Mars'ın Dev Yanardağı",
                   "Uzay",
-                  "Olympus Mons Mars orbital documentary",
+                  "Olympus Mons volcano on Mars orbital visualization",
                   [
-                      ("Olympus Mons, Mars'ta bulunuyor.",
-                       "Mars Olympus Mons shield volcano"),
-                      ("Devasa bir yanardağ yapısıdır.",
-                       "Olympus Mons enormous caldera aerial"),
-                      ("Yüksekliği yaklaşık 22 kilometredir.",
-                       "Olympus Mons giant volcanic slopes"),
-                      ("Mars'ın geçmişine ışık tutuyor.",
-                       "Mars ancient volcanic landscape")
+                      (
+                          "Olympus Mons, Mars'ta bulunuyor.",
+                          "Mars Olympus Mons huge shield volcano"
+                      ),
+                      (
+                          "Güneş Sistemi'nin en büyük yanardağlarından.",
+                          "wide Olympus Mons caldera orbital perspective"
+                      ),
+                      (
+                          "Yüksekliği yaklaşık 22 kilometreye ulaşıyor.",
+                          "Olympus Mons volcanic slopes scale illustration"
+                      ),
+                      (
+                          "Mars'ın geçmişi hakkında ipuçları veriyor.",
+                          "Mars landscape ancient lava flows scientific"
+                      )
                   ]
               ),
               (
                   "stonehenge",
-                  "Stonehenge'in Gizemi",
+                  "Stonehenge Taşlarının Yolculuğu",
                   "Tarih",
-                  "Stonehenge ancient monument sunrise",
+                  "Stonehenge standing stones sunrise England",
                   [
-                      ("Stonehenge binlerce yıl önce yapıldı.",
-                       "Stonehenge prehistoric stone circle"),
-                      ("Bazı taşlar uzaklardan taşındı.",
-                       "Stonehenge bluestones closeup"),
-                      ("Gündönümüyle ilişkisi dikkat çekiyor.",
-                       "Stonehenge solstice sunrise"),
-                      ("İnşası hâlâ araştırılıyor.",
-                       "archaeologists studying Stonehenge")
+                      (
+                          "Stonehenge binlerce yıl önce inşa edildi.",
+                          "Stonehenge ancient stone circle misty sunrise"
+                      ),
+                      (
+                          "Bazı taşlar uzak bölgelerden taşındı.",
+                          "prehistoric bluestones at Stonehenge landscape"
+                      ),
+                      (
+                          "Yapı gündönümüyle ilişkilendiriliyor.",
+                          "Stonehenge solstice sunrise between stones"
+                      ),
+                      (
+                          "İnşası hâlâ arkeoloji araştırmalarına konu.",
+                          "archaeologists examining Stonehenge landscape"
+                      )
                   ]
               ),
               (
-                  "saturn",
-                  "Satürn'ün Halkalarının Sırrı",
+                  "saturn-rings",
+                  "Satürn'ün Halkaları",
                   "Uzay",
-                  "Saturn rings cinematic spacecraft view",
+                  "Saturn rings close space documentary",
                   [
-                      ("Halkalar buz ve kaya parçaları içerir.",
-                       "Saturn ring icy particles closeup"),
-                      ("Bu parçaların boyutları farklıdır.",
-                       "Saturn rings debris scientific detail"),
-                      ("Halka sistemi oldukça incedir.",
-                       "Saturn edge on rings scientific"),
-                      ("Uydular halkaların yapısını etkileyebilir.",
-                       "Saturn shepherd moon near rings")
+                      (
+                          "Halkalar sayısız buz ve kaya parçasından oluşur.",
+                          "Saturn rings individual ice particles visualization"
+                      ),
+                      (
+                          "Parçaların boyutları birbirinden farklıdır.",
+                          "detailed scientific rings debris and Saturn"
+                      ),
+                      (
+                          "Halkalar son derece ince bir sistemdir.",
+                          "edge on Saturn rings realistic scientific render"
+                      ),
+                      (
+                          "Satürn'ün uyduları halkaları etkileyebilir.",
+                          "Saturn moon shepherd near rings illustration"
+                      )
                   ]
               ),
               (
-                  "glowing-sea",
-                  "Işık Saçan Denizler",
+                  "bioluminescence",
+                  "Denizin Karanlık Işıkları",
                   "Dünya",
-                  "bioluminescent blue ocean shoreline",
+                  "bioluminescent plankton glowing blue ocean waves",
                   [
-                      ("Bazı deniz canlıları ışık üretir.",
-                       "bioluminescent organisms underwater"),
-                      ("Bu olaya biyolüminesans denir.",
-                       "glowing plankton microscopic"),
-                      ("Işık savunmada kullanılabilir.",
-                       "bioluminescent squid deep sea"),
-                      ("Bazı kıyılar geceleri parlayabilir.",
-                       "glowing blue bioluminescent waves")
+                      (
+                          "Bazı deniz canlıları ışık üretebilir.",
+                          "glowing bioluminescent marine organisms underwater"
+                      ),
+                      (
+                          "Bu olaya biyolüminesans denir.",
+                          "scientific macro plankton emitting blue light"
+                      ),
+                      (
+                          "Işık iletişim veya savunmada kullanılabilir.",
+                          "bioluminescent deep sea squid natural behavior"
+                      ),
+                      (
+                          "Parlayan kıyılar bu canlılarla ilişkilidir.",
+                          "bioluminescent shoreline blue waves at night"
+                      )
                   ]
               ),
               (
                   "gobeklitepe",
                   "Göbeklitepe'nin Dev Taşları",
                   "Tarih",
-                  "Gobekli Tepe ancient pillars Turkey",
+                  "Gobekli Tepe archaeological T pillars Turkey",
                   [
-                      ("Göbeklitepe Türkiye'de bulunuyor.",
-                       "Gobekli Tepe archaeological site aerial"),
-                      ("Taşlarda hayvan figürleri var.",
-                       "Gobekli Tepe carved animal reliefs"),
-                      ("Yapı Neolitik döneme uzanıyor.",
-                       "Gobekli Tepe prehistoric reconstruction"),
-                      ("Eski topluluklar hakkında bilgi veriyor.",
-                       "archaeologists studying Gobekli Tepe")
+                      (
+                          "Göbeklitepe günümüz Türkiye'sinde yer alır.",
+                          "Gobekli Tepe aerial archaeological site Turkey"
+                      ),
+                      (
+                          "Büyük taş dikmeler üzerinde figürler var.",
+                          "Gobekli Tepe carved T pillars animal reliefs"
+                      ),
+                      (
+                          "Yapı Neolitik döneme uzanıyor.",
+                          "prehistoric Gobekli Tepe reconstruction realistic"
+                      ),
+                      (
+                          "Tarihöncesi toplulukları anlamamızı sağlıyor.",
+                          "archaeologists documenting Gobekli Tepe pillars"
+                      )
                   ]
               ),
               (
-                  "titan",
+                  "titan-lakes",
                   "Titan'daki Metan Gölleri",
                   "Uzay",
-                  "Saturn moon Titan orange atmosphere",
+                  "Saturn moon Titan orange hazy atmosphere",
                   [
-                      ("Titan, Satürn'ün büyük bir uydusudur.",
-                       "Titan moon with Saturn background"),
-                      ("Yüzeyinde sıvı metan gölleri var.",
-                       "Titan methane lakes science visualization"),
-                      ("Yoğun bir atmosfere sahiptir.",
-                       "Titan hazy orange surface"),
-                      ("Yeni uzay görevleri Titan'ı araştıracak.",
-                       "Dragonfly robotic rotorcraft Titan concept")
+                      (
+                          "Titan, Satürn'ün büyük bir uydusudur.",
+                          "Saturn Titan orange haze in space"
+                      ),
+                      (
+                          "Yüzeyinde sıvı metan gölleri bulunur.",
+                          "Titan methane lakes radar inspired visualization"
+                      ),
+                      (
+                          "Atmosferi yoğun ve pusludur.",
+                          "Titan surface hazy orange atmosphere realistic"
+                      ),
+                      (
+                          "Titan için yeni keşif görevleri planlanıyor.",
+                          "NASA Dragonfly rotorcraft Titan scientific concept"
+                      )
                   ]
               ),
               (
-                  "naica",
+                  "giant-crystals",
                   "Yer Altındaki Dev Kristaller",
                   "Dünya",
-                  "Naica cave giant crystals Mexico",
+                  "Naica cave giant selenite crystals Mexico",
                   [
-                      ("Meksika'da dev kristaller keşfedildi.",
-                       "Naica crystal cave realistic"),
-                      ("Bazıları metrelerce uzunluğa ulaşıyor.",
-                       "enormous selenite crystals cave"),
-                      ("Mağara çok sıcak ve nemlidir.",
-                       "humid Naica crystal cavern"),
-                      ("Özel jeolojik koşullarda oluştular.",
-                       "mineral crystal growth geological detail")
+                      (
+                          "Meksika'da dev kristaller keşfedildi.",
+                          "Naica cave giant selenite crystals realistic"
+                      ),
+                      (
+                          "Kristallerin bazıları metrelerce uzanıyor.",
+                          "person scale beside huge Naica cave crystals"
+                      ),
+                      (
+                          "Sıcak ve nemli koşullar dikkat çekiyor.",
+                          "Naica cave humid sparkling crystal environment"
+                      ),
+                      (
+                          "Oluşumları çok özel jeolojik koşullara bağlı.",
+                          "geological mineral growth crystalline closeup"
+                      )
                   ]
               ),
               (
-                  "antarctica",
+                  "antarctic-lake",
                   "Antarktika Buzunun Altı",
                   "Dünya",
-                  "Antarctic ice sheet aerial realistic",
+                  "Antarctica vast ice sheet mountain cinematic",
                   [
-                      ("Antarktika kalın buzlarla kaplıdır.",
-                       "vast Antarctica glacier landscape"),
-                      ("Buz altında göller bulunabiliyor.",
-                       "Antarctic subglacial lake cutaway"),
-                      ("Bazıları uzun süre izole kalabilir.",
-                       "deep Antarctic ice geology"),
-                      ("Araştırmacılar bu ortamları inceliyor.",
-                       "scientists drilling Antarctic ice")
+                      (
+                          "Antarktika kalın buz tabakalarıyla kaplı.",
+                          "Antarctic ice sheet aerial"
+                      ),
+                      (
+                          "Buzun altında sıvı su gölleri bulunabiliyor.",
+                          "scientific Antarctic subglacial lake cutaway"
+                      ),
+                      (
+                          "Bu göller buzla çevrili kalabiliyor.",
+                          "Antarctic ice depth geology scientific illustration"
+                      ),
+                      (
+                          "Araştırmacılar örnekleme yöntemlerini geliştiriyor.",
+                          "polar scientists studying Antarctic ice cores"
+                      )
                   ]
               ),
               (
-                  "blackhole",
-                  "Kara Deliklerin Gizemi",
+                  "black-holes",
+                  "Kara Delikler Nasıl Görülür?",
                   "Uzay",
-                  "black hole bright accretion disk realistic",
+                  "black hole accretion disk scientifically inspired",
                   [
-                      ("Kara deliklerden ışık kaçamaz.",
-                       "black hole event horizon visualization"),
-                      ("Yakındaki sıcak gaz ışık saçabilir.",
-                       "black hole bright accretion disk"),
-                      ("Radyo teleskoplar gölgelerini görüntüledi.",
-                       "global radio telescope array"),
-                      ("Bu bölgelerdeki fizik araştırılıyor.",
-                       "black hole gravitational lensing simulation")
+                      (
+                          "Kara deliklerden ışık kaçamaz.",
+                          "dark black hole event horizon gravitational lensing"
+                      ),
+                      (
+                          "Yakınındaki sıcak gazlar ışık yayabilir.",
+                          "bright accretion disk around black hole"
+                      ),
+                      (
+                          "Radyo teleskoplar gölgelerini görüntüledi.",
+                          "global radio telescope array under night sky"
+                      ),
+                      (
+                          "Olay ufku çevresi bilim insanlarını şaşırtıyor.",
+                          "black hole shadow scientific visualization"
+                      )
                   ]
               ),
               (
                   "cappadocia",
-                  "Kapadokya Yer Altı Şehirleri",
+                  "Kapadokya'nın Yer Altı Şehirleri",
                   "Tarih",
-                  "Cappadocia underground city Turkey",
+                  "Cappadocia cave settlements Turkey cinematic",
                   [
-                      ("Kapadokya'da yer altı şehirleri var.",
-                       "Derinkuyu underground city tunnels"),
-                      ("Kayalara çok katlı odalar oyuldu.",
-                       "Cappadocia underground chambers"),
-                      ("Havalandırma kanalları kullanılmış.",
-                       "underground stone ventilation shaft"),
-                      ("Bu alanlar farklı amaçlarla kullanıldı.",
-                       "ancient underground living spaces")
+                      (
+                          "Kapadokya'da yer altı şehirleri var.",
+                          "Cappadocia underground city stone tunnels"
+                      ),
+                      (
+                          "Kayalara oyulmuş çok katlı bölümler bulunuyor.",
+                          "Derinkuyu underground city corridors floors"
+                      ),
+                      (
+                          "Havalandırma kanalları da kullanılmış.",
+                          "ancient stone ventilation shaft underground city"
+                      ),
+                      (
+                          "Bu alanlar tarih boyunca çeşitli amaçlara hizmet etti.",
+                          "Cappadocia rock cut underground rooms historic"
+                      )
                   ]
               ),
               (
-                  "moon",
+                  "moon-farside",
                   "Ay'ın Uzak Yüzü",
                   "Uzay",
-                  "Moon far side heavily cratered",
+                  "Moon farside crater landscape NASA inspired",
                   [
-                      ("Ay'ın uzak yüzünü Dünya'dan göremeyiz.",
-                       "Moon far side from orbit"),
-                      ("Nedeni eşzamanlı dönmesidir.",
-                       "Earth Moon synchronous rotation illustration"),
-                      ("Uzak yüzde çok sayıda krater var.",
-                       "lunar far side crater closeup"),
-                      ("Uzay araçları bölgeyi araştırdı.",
-                       "spacecraft above Moon far side")
+                      (
+                          "Ay'ın bir yüzünü Dünya'dan göremeyiz.",
+                          "Moon far side landscape with many craters"
+                      ),
+                      (
+                          "Bunun nedeni eşzamanlı dönmedir.",
+                          "Earth Moon synchronous rotation science visualization"
+                      ),
+                      (
+                          "Uzak yüzde çok sayıda krater bulunur.",
+                          "Moon far side cratered terrain orbital photo"
+                      ),
+                      (
+                          "Uzay araçları bu bölgeyi inceledi.",
+                          "lunar robotic probe above far side"
+                      )
                   ]
               ),
               (
-                  "squid",
+                  "deep-sea-giants",
                   "Okyanusun Dev Kalamarları",
                   "Dünya",
-                  "giant squid deep sea natural history",
+                  "giant squid deep ocean natural history",
                   [
-                      ("Dev kalamarlar derin denizlerde yaşar.",
-                       "giant squid realistic underwater"),
-                      ("Çok büyük gözleri vardır.",
-                       "giant squid eye macro documentary"),
-                      ("Canlı görüntülerine ulaşmak zordur.",
-                       "deep sea camera recording giant squid"),
-                      ("Bu hayvanlar hâlâ inceleniyor.",
-                       "marine biology squid exploration")
+                      (
+                          "Dev kalamarlar okyanusun derinliklerinde yaşar.",
+                          "giant squid swimming in deep sea realistic"
+                      ),
+                      (
+                          "Çok büyük gözleriyle bilinirler.",
+                          "giant squid eye macro underwater natural history"
+                      ),
+                      (
+                          "Canlı görüntülerini elde etmek zordur.",
+                          "deep sea research camera observing squid"
+                      ),
+                      (
+                          "Bu canlılar hâlâ araştırılıyor.",
+                          "marine scientists exploring deep sea squid habitat"
+                      )
                   ]
               ),
               (
-                  "machu",
-                  "Machu Picchu'nun Sırrı",
+                  "machu-picchu",
+                  "Machu Picchu'nun Taş İşçiliği",
                   "Tarih",
-                  "Machu Picchu Peru misty mountain",
+                  "Machu Picchu Peru mountain ruins cinematic",
                   [
-                      ("Machu Picchu, İnka uygarlığına aittir.",
-                       "Machu Picchu ancient Inca city"),
-                      ("Dağlık bir bölgede kurulmuştur.",
-                       "Machu Picchu mountain ridge aerial"),
-                      ("Taş işçiliği dikkat çeker.",
-                       "precise Inca stone masonry"),
-                      ("Bugün önemli bir kültür mirasıdır.",
-                       "Machu Picchu protected historical ruins")
+                      (
+                          "Machu Picchu, İnka uygarlığına aittir.",
+                          "Machu Picchu ancient Inca terraces mountains"
+                      ),
+                      (
+                          "Yüksek bir dağ sırtında kurulmuştur.",
+                          "Machu Picchu aerial mountain ridge cloud"
+                      ),
+                      (
+                          "Taş işçiliği dikkat çekici bir özelliktir.",
+                          "precision fitted Inca stone masonry closeup"
+                      ),
+                      (
+                          "Yapı bugün korunması gereken bir mirastır.",
+                          "Machu Picchu archaeological preservation landscape"
+                      )
                   ]
               ),
               (
-                  "neptune",
-                  "Neptün'deki Dev Rüzgârlar",
+                  "neptune-winds",
+                  "Neptün'ün Güçlü Rüzgârları",
                   "Uzay",
-                  "planet Neptune blue atmosphere cinematic",
+                  "planet Neptune blue atmosphere realistic",
                   [
-                      ("Neptün uzak ve soğuk bir gezegendir.",
-                       "Neptune blue planet distant space"),
-                      ("Çok hızlı atmosfer rüzgârları vardır.",
-                       "Neptune planetary storm visualization"),
-                      ("Metan mavi görünümünde rol oynar.",
-                       "Neptune atmospheric layers science"),
-                      ("Voyager 2 gezegeni yakından inceledi.",
-                       "Voyager spacecraft Neptune flyby")
+                      (
+                          "Neptün çok soğuk ve uzak bir gezegendir.",
+                          "Neptune blue planet distant sun"
+                      ),
+                      (
+                          "Atmosferinde çok hızlı rüzgârlar esebilir.",
+                          "Neptune atmospheric storms scientific illustration"
+                      ),
+                      (
+                          "Metan, mavi görünümünde rol oynar.",
+                          "Neptune atmospheric layers blue scientific visual"
+                      ),
+                      (
+                          "Uzay araçları onu yakından inceledi.",
+                          "Voyager spacecraft near Neptune scientific scene"
+                      )
                   ]
               ),
               (
                   "salar",
                   "Dünyanın Dev Tuz Düzlüğü",
                   "Dünya",
-                  "Salar de Uyuni Bolivia aerial",
+                  "Salar de Uyuni Bolivia mirror landscape",
                   [
-                      ("Salar de Uyuni Bolivya'da bulunur.",
-                       "Salar de Uyuni vast white salt flat"),
-                      ("Çok geniş bir tuz düzlüğüdür.",
-                       "salt polygon formations aerial"),
-                      ("Yağmurdan sonra ayna gibi görünür.",
-                       "Salar de Uyuni mirror reflection"),
-                      ("Manzara doğal süreçlerle oluşuyor.",
-                       "Bolivia salt flat mineral textures")
+                      (
+                          "Salar de Uyuni, Bolivya'da bulunuyor.",
+                          "Salar de Uyuni Bolivia aerial salt flat"
+                      ),
+                      (
+                          "Dünyanın en geniş tuz düzlüklerinden biridir.",
+                          "vast geometric salt polygons Salar de Uyuni"
+                      ),
+                      (
+                          "Yağmur sonrası ayna gibi görünebilir.",
+                          "mirror reflection Salar de Uyuni sunset"
+                      ),
+                      (
+                          "Bu manzara doğa koşullarıyla oluşuyor.",
+                          "Bolivia salar salt crust close geologic photo"
+                      )
                   ]
               ),
               (
                   "pulsar",
                   "Uzayın Düzenli Sinyalleri",
                   "Uzay",
-                  "pulsar neutron star science visualization",
+                  "pulsar neutron star beams astronomy visualization",
                   [
-                      ("Pulsarlar nötron yıldızlarıdır.",
-                       "rapidly rotating neutron star"),
-                      ("Düzenli sinyaller yayabilirler.",
-                       "pulsar beams scientific illustration"),
-                      ("Bunlar doğal gök cisimleridir.",
-                       "pulsar magnetic field visualization"),
-                      ("Astronomlar bu sinyalleri inceliyor.",
-                       "radio telescope studying pulsars")
+                      (
+                          "Pulsarlar hızla dönen nötron yıldızlarıdır.",
+                          "rotating neutron star pulsar space visualization"
+                      ),
+                      (
+                          "Düzenli aralıklarla sinyal algılanabilir.",
+                          "radio telescope observing pulsing stellar signals"
+                      ),
+                      (
+                          "Bunlar doğal gök cisimleridir.",
+                          "neutron star magnetic beams scientific visualization"
+                      ),
+                      (
+                          "Pulsarlar astronomiye önemli bilgiler sağlar.",
+                          "radio astronomy dish under starry sky"
+                      )
                   ]
               ),
               (
                   "petra",
-                  "Kayalara Oyulmuş Petra",
+                  "Petra'nın Kayalara Oyulmuş Şehri",
                   "Tarih",
-                  "Petra Treasury Jordan sandstone cinematic",
+                  "Petra Treasury sandstone rock Jordan cinematic",
                   [
-                      ("Petra, Ürdün'de bulunuyor.",
-                       "Petra ancient rock city Jordan"),
-                      ("Bazı yapılar doğrudan kayaya oyulmuş.",
-                       "Petra rock cut architecture"),
-                      ("Kent Nebatilerle ilişkilidir.",
-                       "ancient Nabataean city reconstruction"),
-                      ("Su yönetimi dikkat çekici özelliklerindendir.",
-                       "Petra ancient water channels")
+                      (
+                          "Petra, Ürdün'deki tarihî bir kenttir.",
+                          "Petra Treasury Jordan rose sandstone facade"
+                      ),
+                      (
+                          "Yapıların bazıları kayaya oyulmuştur.",
+                          "Petra rock-cut architecture close view"
+                      ),
+                      (
+                          "Nebatiler burada gelişmiş bir kent kurdu.",
+                          "ancient Nabataean Petra historical reconstruction"
+                      ),
+                      (
+                          "Bölgenin su yönetimi dikkat çekicidir.",
+                          "Petra ancient water channels carved rock"
+                      )
                   ]
               ),
               (
-                  "volcanic-lightning",
-                  "Yanardağların Şimşekleri",
+                  "volcano-lightning",
+                  "Yanardağlardaki Şimşekler",
                   "Dünya",
-                  "volcano erupting with lightning",
+                  "volcanic eruption lightning dramatic cinematic",
                   [
-                      ("Patlamalar kül bulutları oluşturur.",
-                       "enormous volcanic ash eruption"),
-                      ("Kül parçacıkları elektriklenebilir.",
-                       "volcanic ash particles macro science"),
-                      ("Bu durum şimşeğe yol açabilir.",
-                       "dramatic volcanic lightning eruption"),
-                      ("Olay bilim insanları tarafından incelenir.",
-                       "volcanologists observing active volcano")
+                      (
+                          "Patlamalar yoğun kül bulutları oluşturabilir.",
+                          "volcano erupting dense ash column"
+                      ),
+                      (
+                          "Kül bulutlarında elektrik yükleri birikebilir.",
+                          "volcanic ash particles macro scientific visualization"
+                      ),
+                      (
+                          "Bu durum şimşek oluşumuna yol açabilir.",
+                          "volcanic lightning illuminating ash cloud"
+                      ),
+                      (
+                          "Olay volkanoloji araştırmalarında incelenir.",
+                          "scientists observing volcano eruption at safe distance"
+                      )
                   ]
               ),
               (
-                  "venus",
+                  "venus-day",
                   "Venüs'ün Tuhaf Günü",
                   "Uzay",
-                  "planet Venus cloudy realistic",
+                  "Venus planet cloudy atmosphere astronomical",
                   [
-                      ("Venüs çok yavaş döner.",
-                       "Venus rotating planet astronomy"),
-                      ("Bir dönüşü bir yılından daha uzundur.",
-                       "Venus orbital science illustration"),
-                      ("Yüzeyi son derece sıcaktır.",
-                       "Venus surface scientific visualization"),
-                      ("Dünya'dan çok farklı koşullara sahiptir.",
-                       "Venus and Earth space comparison")
+                      (
+                          "Venüs kendi ekseninde çok yavaş döner.",
+                          "Venus rotating planet thick clouds scientific"
+                      ),
+                      (
+                          "Dönüş süresi bir yılından daha uzundur.",
+                          "Venus orbit and rotation illustration no text"
+                      ),
+                      (
+                          "Atmosferi çok yoğun ve sıcaktır.",
+                          "Venus hot hazy surface rocky scientific"
+                      ),
+                      (
+                          "Venüs, Dünya'dan çok farklıdır.",
+                          "Venus compared with Earth in space image"
+                      )
                   ]
               ),
               (
                   "pamukkale",
                   "Pamukkale'nin Beyaz Terasları",
                   "Dünya",
-                  "Pamukkale white travertine pools Turkey",
+                  "Pamukkale white travertine terraces Turkey",
                   [
-                      ("Pamukkale Türkiye'de bulunur.",
-                       "Pamukkale terraces panoramic"),
-                      ("Beyaz teraslar mineral birikimiyle oluşur.",
-                       "travertine mineral deposition closeup"),
-                      ("Termal sular oluşumda rol oynar.",
-                       "flowing thermal water white terrace"),
-                      ("Bu doğal alan korunmalıdır.",
-                       "Pamukkale protected landscape")
+                      (
+                          "Pamukkale, Türkiye'de bulunur.",
+                          "Pamukkale Turkey white mineral pools"
+                      ),
+                      (
+                          "Teraslar mineral çökelmesiyle oluştu.",
+                          "travertine calcium carbonate textures closeup"
+                      ),
+                      (
+                          "Suyun bileşimi bu görünümü etkiliyor.",
+                          "thermal water flowing over white travertine"
+                      ),
+                      (
+                          "Bu hassas doğal alan koruma gerektirir.",
+                          "Pamukkale terraces aerial landscape conservation"
+                      )
                   ]
               ),
               (
                   "james-webb",
-                  "Evrenin Eski Galaksileri",
+                  "Uzayın İlk Galaksilerine Bakış",
                   "Uzay",
-                  "James Webb telescope deep space",
+                  "James Webb Space Telescope in space",
                   [
-                      ("James Webb kızılötesi ışığı inceler.",
-                       "James Webb golden mirror telescope"),
-                      ("Çok uzak galaksileri gözlemleyebilir.",
-                       "deep space distant galaxies field"),
-                      ("Uzak ışık bize eski evreni gösterir.",
-                       "early universe galaxies visualization"),
-                      ("Bulgular galaksi oluşumunu aydınlatır.",
-                       "astronomers studying galaxy imagery")
+                      (
+                          "James Webb teleskobu kızılötesi ışığı gözler.",
+                          "James Webb golden mirror space telescope"
+                      ),
+                      (
+                          "Çok uzak galaksileri inceleyebilir.",
+                          "deep field many distant galaxies astronomy"
+                      ),
+                      (
+                          "Bu ışık bize eski evreni gösterir.",
+                          "early universe distant galaxy scientific render"
+                      ),
+                      (
+                          "Bulgular galaksi oluşumunu anlamamızı sağlar.",
+                          "astronomers analyzing distant galaxy telescope images"
+                      )
                   ]
               ),
               (
                   "angkor",
-                  "Ormanın İçindeki Antik Şehir",
+                  "Ormanın İçindeki Angkor",
                   "Tarih",
-                  "Angkor Wat Cambodia jungle cinematic",
+                  "Angkor Wat Cambodia temple jungle sunrise",
                   [
-                      ("Angkor Kamboçya'da bulunuyor.",
-                       "Angkor Wat temple sunrise"),
-                      ("Geniş bir tarihî yerleşim alanıdır.",
-                       "ancient Angkor temple complex aerial"),
-                      ("Su yapıları önemli bir özelliğidir.",
-                       "Angkor ancient water reservoirs"),
-                      ("Arkeologlar yeni yöntemlerle inceliyor.",
-                       "lidar archaeology Angkor jungle")
+                      (
+                          "Angkor, Kamboçya'da yer alır.",
+                          "Angkor Wat temple Cambodia sunrise"
+                      ),
+                      (
+                          "Geniş bir tarihî yerleşim alanıdır.",
+                          "Angkor complex aerial forest temples"
+                      ),
+                      (
+                          "Büyük su altyapılarıyla ilişkilidir.",
+                          "Angkor ancient reservoir and waterworks"
+                      ),
+                      (
+                          "Arkeologlar kenti yeni tekniklerle inceliyor.",
+                          "lidar archaeological survey Angkor jungle"
+                      )
                   ]
               ),
               (
                   "axolotl",
-                  "Kendini Yenileyen Semender",
+                  "Kendini Yenileyebilen Semender",
                   "Dünya",
-                  "axolotl salamander realistic underwater",
+                  "axolotl freshwater salamander natural habitat",
                   [
-                      ("Aksolotl Meksika kökenlidir.",
-                       "Mexican axolotl natural habitat"),
-                      ("Bazı vücut yapılarını yenileyebilir.",
-                       "axolotl regeneration scientific concept"),
-                      ("Bilim insanları bu özelliği inceliyor.",
-                       "biologists researching axolotl"),
-                      ("Doğal yaşam alanı tehdit altındadır.",
-                       "Xochimilco wetlands Mexico")
+                      (
+                          "Aksolotl, Meksika kökenli bir semenderdir.",
+                          "axolotl aquatic salamander realistic macro"
+                      ),
+                      (
+                          "Bazı vücut yapılarını yenileyebilir.",
+                          "axolotl limbs anatomy science visual no text"
+                      ),
+                      (
+                          "Bu özellik bilimsel araştırmalara konu olur.",
+                          "scientists studying axolotl in aquarium lab"
+                      ),
+                      (
+                          "Doğal yaşam alanı tehdit altındadır.",
+                          "Xochimilco wetlands canals Mexico habitat"
+                      )
                   ]
               ),
               (
                   "mammoth-cave",
-                  "Dev Yer Altı Mağaraları",
+                  "Dünyanın En Uzun Mağara Sistemleri",
                   "Dünya",
-                  "Mammoth Cave Kentucky giant chamber",
+                  "Mammoth Cave vast limestone passage Kentucky",
                   [
-                      ("Bazı mağara ağları çok uzundur.",
-                       "vast limestone cave corridor"),
-                      ("Mammoth Cave önemli örneklerden biridir.",
-                       "Mammoth Cave massive stone passage"),
-                      ("Yer altı suları mağaraları biçimlendirir.",
-                       "karst cave water erosion"),
-                      ("Yeni geçitler haritalanabiliyor.",
-                       "cave explorers mapping tunnels")
+                      (
+                          "Mağara sistemleri çok uzun olabilir.",
+                          "huge limestone cave chamber natural formation"
+                      ),
+                      (
+                          "Mammoth Cave çok geniş bir ağdır.",
+                          "Mammoth Cave Kentucky underground passage"
+                      ),
+                      (
+                          "Yer altı suları bu yapıları biçimlendirir.",
+                          "limestone karst cave water erosion"
+                      ),
+                      (
+                          "Yeni geçitler araştırmalarla haritalanır.",
+                          "cave explorers mapping passage with headlamps"
+                      )
                   ]
               ),
               (
                   "aurora",
                   "Kutup Işıkları Nasıl Oluşur?",
                   "Uzay",
-                  "aurora borealis northern lights sky",
+                  "aurora borealis over Arctic landscape",
                   [
-                      ("Güneş kaynaklı parçacıklar rol oynar.",
-                       "solar wind particles approaching Earth"),
-                      ("Manyetik alan parçacıkları yönlendirir.",
-                       "Earth magnetic field science image"),
-                      ("Atmosferde renkli ışımalar görülür.",
-                       "bright green purple aurora"),
-                      ("Kutup ışıkları güneyde de oluşabilir.",
-                       "aurora australis Antarctica")
+                      (
+                          "Güneş'ten gelen parçacıklar rol oynar.",
+                          "solar wind particles approaching Earth space"
+                      ),
+                      (
+                          "Dünya'nın manyetik alanı onları yönlendirir.",
+                          "Earth magnetic field aurora scientific visual"
+                      ),
+                      (
+                          "Atmosferde renkli ışımalar oluşur.",
+                          "green purple aurora over snowy mountains"
+                      ),
+                      (
+                          "Kutup ışıkları iki yarımkürede de görülür.",
+                          "aurora australis Antarctica night sky"
+                      )
                   ]
               ),
               (
-                  "nubia",
+                  "pyramids-nubia",
                   "Mısır Dışındaki Piramitler",
                   "Tarih",
-                  "Meroe pyramids Sudan desert",
+                  "Meroe Nubian pyramids Sudan desert",
                   [
-                      ("Sudan'da çok sayıda piramit bulunur.",
-                       "Sudan Meroe pyramid field"),
-                      ("Kuş Krallığı ile ilişkilidirler.",
-                       "Kushite pyramids historical archaeology"),
-                      ("Biçimleri Mısır'dakilerden farklı olabilir.",
-                       "steep Nubian pyramid close view"),
-                      ("Afrika tarihinin önemli mirasıdır.",
-                       "Meroe archaeological landscape")
+                      (
+                          "Sudan'da da çok sayıda piramit bulunur.",
+                          "Meroe pyramids Sudan aerial desert"
+                      ),
+                      (
+                          "Bunlar Kuş Krallığı ile ilişkilidir.",
+                          "Kushite Nubian pyramids archaeology"
+                      ),
+                      (
+                          "Biçimleri Mısır piramitlerinden farklı olabilir.",
+                          "narrow steep Nubian pyramid closeup"
+                      ),
+                      (
+                          "Bu yapılar Afrika tarihinin önemli parçasıdır.",
+                          "Meroe archaeological site sunrise"
+                      )
                   ]
               ),
               (
                   "mars-water",
-                  "Mars'taki Eski Su İzleri",
+                  "Mars'ta Su İzleri",
                   "Uzay",
-                  "Mars ancient riverbed landscape",
+                  "Mars ancient dried river valley orbital",
                   [
-                      ("Mars'ta eski akarsu izleri var.",
-                       "Mars dried river valley orbital"),
-                      ("Bazı kayaçlar suyla etkileşmiş.",
-                       "Mars sedimentary rocks scientific"),
-                      ("Mars bugün büyük ölçüde kurudur.",
-                       "dry Martian desert terrain"),
-                      ("Robotlar geçmiş koşulları araştırıyor.",
-                       "Mars rover studying lakebed")
+                      (
+                          "Mars'ta eski akarsu izleri bulundu.",
+                          "Mars dried river channels satellite view"
+                      ),
+                      (
+                          "Bazı kayaçlar suyla etkileşim göstermiştir.",
+                          "Mars sedimentary rocks rover close view"
+                      ),
+                      (
+                          "Bugünkü Mars çok daha kurudur.",
+                          "Mars arid desert dunes and mountains"
+                      ),
+                      (
+                          "Gezgin robotlar geçmiş koşulları araştırıyor.",
+                          "Mars rover exploring ancient lakebed"
+                      )
                   ]
               ),
               (
-                  "dragon-tree",
+                  "dragon-blood",
                   "Kırmızı Reçineli Ejder Ağacı",
                   "Dünya",
-                  "Socotra dragon blood trees cinematic",
+                  "Socotra dragon blood tree Yemen island",
                   [
-                      ("Ejder kanı ağaçları Sokotra'da bulunur.",
-                       "Socotra endemic dragon blood trees"),
-                      ("Şemsiye biçimli taçları vardır.",
-                       "dragon blood tree silhouette"),
-                      ("Kırmızı reçineleriyle tanınırlar.",
-                       "dragon blood tree resin macro"),
-                      ("Sokotra eşsiz türlere ev sahipliği yapar.",
-                       "Socotra island endemic vegetation")
+                      (
+                          "Ejder kanı ağaçları Sokotra'da yetişir.",
+                          "Socotra dragon blood trees island landscape"
+                      ),
+                      (
+                          "Şemsiye benzeri tepeleriyle tanınırlar.",
+                          "dragon blood tree umbrella silhouette details"
+                      ),
+                      (
+                          "Kırmızı renkli reçineleriyle de bilinirler.",
+                          "dragon blood tree red resin closeup"
+                      ),
+                      (
+                          "Sokotra eşsiz canlı çeşitliliğine sahiptir.",
+                          "Socotra island endemic plants landscape"
+                      )
                   ]
               ),
               (
-                  "methane-ice",
-                  "Buzun Altındaki Kabarcıklar",
+                  "methane-bubbles",
+                  "Buz Altındaki Metan Kabarcıkları",
                   "Dünya",
-                  "frozen lake trapped methane bubbles",
+                  "frozen lake methane bubbles layered ice",
                   [
-                      ("Bazı donmuş göllerde kabarcıklar görülür.",
-                       "frozen lake layered bubbles"),
-                      ("Bir kısmı metan gazı içerir.",
-                       "methane gas trapped in lake ice"),
-                      ("Gaz dipteki organik maddelerden oluşabilir.",
-                       "lake sediment decomposition science"),
-                      ("Araştırmacılar bu gazları inceliyor.",
-                       "scientists studying frozen lake bubbles")
+                      (
+                          "Bazı donmuş göllerde kabarcıklar görülür.",
+                          "frozen lake trapped white gas bubbles"
+                      ),
+                      (
+                          "Bunların bir bölümü metan içerir.",
+                          "methane bubbles stacked under clear lake ice"
+                      ),
+                      (
+                          "Gaz dipteki organik maddelerden oluşabilir.",
+                          "lake sediment decomposition scientific visual"
+                      ),
+                      (
+                          "Bu görüntü iklim araştırmalarına da konu olur.",
+                          "scientists examining icy lake gas bubbles"
+                      )
                   ]
               ),
               (
-                  "exoplanets",
+                  "exoplanet",
                   "Başka Yıldızların Gezegenleri",
                   "Uzay",
-                  "distant exoplanet near star realistic",
+                  "exoplanet orbiting distant star space science",
                   [
-                      ("Başka yıldızların da gezegenleri var.",
-                       "distant star multiple exoplanets"),
-                      ("Binlerce ötegezegen doğrulandı.",
-                       "variety of confirmed exoplanet types"),
-                      ("Bazıları geçiş yöntemiyle keşfedilir.",
-                       "planet transit in front of star"),
-                      ("Bu dünyalar çok farklı olabilir.",
-                       "rocky and gaseous alien planets scientific")
+                      (
+                          "Güneş dışındaki yıldızların da gezegenleri var.",
+                          "star with orbiting exoplanets scientific render"
+                      ),
+                      (
+                          "Binlerce ötegezegen doğrulandı.",
+                          "distant exoplanet system variety science"
+                      ),
+                      (
+                          "Bazıları yıldızının önünden geçerken bulunuyor.",
+                          "exoplanet transit silhouette star"
+                      ),
+                      (
+                          "Bu dünyaların koşulları çok farklı olabilir.",
+                          "different rocky and gas exoplanets visualization"
+                      )
                   ]
               ),
               (
-                  "rock-microbes",
+                  "bacteria-rock",
                   "Taşların İçindeki Yaşam",
                   "Dünya",
-                  "desert rocks microbial life scientific",
+                  "endolithic microbial life desert rock macro scientific",
                   [
-                      ("Bazı mikroplar kaya içinde yaşayabilir.",
-                       "endolithic microbes within stone"),
-                      ("Kaya onları çevreden koruyabilir.",
-                       "desert rock internal layers"),
-                      ("Araştırmacılar bu canlıları inceliyor.",
-                       "scientists collecting desert rock samples"),
-                      ("Bu bilgi astrobiyoloji için önemlidir.",
-                       "Mars analog microbial research")
+                      (
+                          "Bazı mikroorganizmalar kaya içinde yaşayabilir.",
+                          "microbial colonies inside rock microscopic view"
+                      ),
+                      (
+                          "Böyle ortamlar sert koşullardan koruyabilir.",
+                          "desert rock layers biology scientific illustration"
+                      ),
+                      (
+                          "Araştırmacılar aşırı koşullardaki yaşamı inceliyor.",
+                          "microbiologists sampling desert rocks"
+                      ),
+                      (
+                          "Bu çalışmalar başka dünyaları anlamaya yardım eder.",
+                          "Mars-like desert rock astrobiology investigation"
+                      )
                   ]
               )
           ]
 
           # =========================================
-          # YAYIN GECMISI
+          # KONU SECIMI VE YAYIN GECMISI
           # =========================================
 
           now = datetime.now(
@@ -856,7 +1172,6 @@ jobs:
                   "sabah" if now.hour < 15
                   else "aksam"
               )
-
               slot = f"{now:%Y-%m-%d}-{period}"
           else:
               slot = f"manuel-{RUN_ID}"
@@ -872,7 +1187,7 @@ jobs:
 
           if not isinstance(history, list):
               raise RuntimeError(
-                  "YouTube gecmis dosyasi hatali."
+                  "YouTube yayin gecmisi hatali."
               )
 
           if any(
@@ -891,40 +1206,43 @@ jobs:
           }
 
           available = [
-              topic
-              for topic in TOPICS
+              topic for topic in TOPICS
               if topic[0] not in used_ids
           ]
 
           if not available:
               print(
-                  "Tum konular kullanildi. "
+                  "Tum 36 konu kullanildi. "
                   "Tekrar video uretilmiyor."
               )
               raise SystemExit(0)
 
-          topic = available[0]
+          (
+              topic_id,
+              title,
+              category,
+              hero,
+              facts
+          ) = available[0]
 
-          topic_id, title, category, hero, facts = topic
-
-          print("Secilen konu:", title)
+          print("Konu:", title)
           print("Kalan konu sayisi:", len(available))
 
           scenes = [
               (
-                  f"{title}: ilginç gerçekler!",
-                  hero + " wide cinematic view"
+                  f"{title}: bilmeniz gerekenler!",
+                  hero + ", wide establishing shot"
               ),
               *facts,
               (
-                  "Daha fazla bilgi için takip et!",
-                  hero + " epic closing documentary shot"
+                  "Daha fazla ilginç bilgi için takip et!",
+                  hero + ", cinematic closing shot"
               )
           ]
 
           if len(scenes) != SCENE_COUNT:
               raise RuntimeError(
-                  "Sahne sayisi hatali."
+                  "Sahne sayisi 6 olmali."
               )
 
           (OUT / "video-plani.json").write_text(
@@ -942,27 +1260,28 @@ jobs:
           )
 
           # =========================================
-          # YUKSEK KALITELI GORSELLER
+          # CLOUDFLARE EKONOMIK GORSEL URETIMI
           # =========================================
 
+          class DailyQuotaExhausted(Exception):
+              pass
+
           STYLE = (
-              "Premium high quality realistic documentary, "
-              "cinematic professional lighting, "
-              "highly detailed authentic materials, "
-              "accurate science and archaeology, "
-              "dramatic atmospheric depth, "
-              "rich realistic colors, sharp details, "
-              "vertical portrait 9:16 composition, "
-              "centered main subject, "
-              "no text, no watermark, no subtitles. "
+              "High quality detailed documentary illustration, "
+              "scientifically and historically grounded, "
+              "cinematic natural lighting, "
+              "realistic stone, ice and atmosphere textures, "
+              "beautiful visual depth, "
+              "sharp central subject, "
+              "rich natural colors, "
+              "vertical 9:16 composition, "
+              "no words, no text, no logo, no watermark. "
           )
 
           def image_from_response(response):
-              content_type = (
-                  response.headers.get(
-                      "Content-Type", ""
-                  ).lower()
-              )
+              content_type = response.headers.get(
+                  "content-type", ""
+              ).lower()
 
               if (
                   "json" not in content_type
@@ -974,7 +1293,11 @@ jobs:
 
               if payload.get("success") is False:
                   raise RuntimeError(
-                      str(payload.get("errors"))[:500]
+                      str(
+                          payload.get(
+                              "errors", payload
+                          )
+                      )[:500]
                   )
 
               result = payload.get(
@@ -993,11 +1316,12 @@ jobs:
                   return bytes(encoded)
 
               if isinstance(encoded, str):
-                  encoded = encoded.split(",")[-1]
-                  return base64.b64decode(encoded)
+                  return base64.b64decode(
+                      encoded.split(",")[-1]
+                  )
 
               raise RuntimeError(
-                  "API gorsel verisi donmedi."
+                  "Cloudflare gorsel verisi donmedi."
               )
 
           def call_image(model, prompt, seed):
@@ -1011,45 +1335,57 @@ jobs:
               }
 
               if model == PRIMARY_MODEL:
-                  response = session.post(
-                      url,
-                      headers=headers,
-                      files={
-                          "prompt": (None, prompt[:2100]),
-                          "width": (None, "1024"),
-                          "height": (None, "1792"),
-                          "guidance": (None, "4"),
-                          "seed": (None, str(seed))
-                      },
-                      timeout=240
-                  )
+                  payload = {
+                      "prompt": prompt[:1800],
+                      "width": IMAGE_WIDTH,
+                      "height": IMAGE_HEIGHT,
+                      "num_steps": DREAMSHAPER_STEPS,
+                      "guidance": 7.5,
+                      "seed": seed,
+                      "negative_prompt": (
+                          "text, watermark, blurry, "
+                          "distorted, low quality, cartoon"
+                      )
+                  }
               else:
-                  response = session.post(
-                      url,
-                      headers=headers,
-                      json={
-                          "prompt": prompt[:1800],
-                          "width": 768,
-                          "height": 1344,
-                          "num_steps": 20,
-                          "seed": seed,
-                          "negative_prompt": (
-                              "blurry, cartoon, watermark, text, "
-                              "low quality, distorted"
-                          )
-                      },
-                      timeout=240
-                  )
+                  payload = {
+                      "prompt": prompt[:1800],
+                      "steps": FLUX_STEPS,
+                      "seed": seed
+                  }
+
+              response = session.post(
+                  url,
+                  headers=headers,
+                  json=payload,
+                  timeout=180
+              )
+
+              if response.status_code == 429:
+                  body = response.text.lower()
+
+                  if (
+                      "daily free allocation" in body
+                      or "10,000 neurons" in body
+                      or '"code":4006' in body
+                      or '"code": 4006' in body
+                  ):
+                      raise DailyQuotaExhausted(
+                          "Cloudflare gunluk neuron kotasi "
+                          "doldu. Yeniden denemek veya "
+                          "model degistirmek ise yaramaz."
+                      )
 
               if not response.ok:
                   raise RuntimeError(
-                      f"{model} HTTP {response.status_code}: "
+                      f"{model} HTTP "
+                      f"{response.status_code}: "
                       f"{response.text[:350]}"
                   )
 
               return image_from_response(response)
 
-          def save_image(raw, path):
+          def crop_and_save(raw, path):
               image = Image.open(
                   io.BytesIO(raw)
               ).convert("RGB")
@@ -1059,36 +1395,38 @@ jobs:
                       "Gorsel cozunurlugu cok dusuk."
                   )
 
-              ratio = WIDTH / HEIGHT
-              current = image.width / image.height
+              desired = WIDTH / HEIGHT
+              current = (
+                  image.width / image.height
+              )
 
-              if current > ratio:
-                  crop_w = round(
-                      image.height * ratio
+              if current > desired:
+                  crop_width = round(
+                      image.height * desired
                   )
 
-                  x = (
-                      image.width - crop_w
+                  left = (
+                      image.width - crop_width
                   ) // 2
 
                   image = image.crop((
-                      x, 0,
-                      x + crop_w,
+                      left, 0,
+                      left + crop_width,
                       image.height
                   ))
               else:
-                  crop_h = round(
-                      image.width / ratio
+                  crop_height = round(
+                      image.width / desired
                   )
 
-                  y = (
-                      image.height - crop_h
+                  top = (
+                      image.height - crop_height
                   ) // 2
 
                   image = image.crop((
-                      0, y,
+                      0, top,
                       image.width,
-                      y + crop_h
+                      top + crop_height
                   ))
 
               image = image.resize(
@@ -1116,25 +1454,22 @@ jobs:
               )
 
           # =========================================
-          # TURKCE ALTYAZI
+          # TURKCE EKRAN YAZILARI
           # =========================================
 
           def make_caption(text, path):
-              canvas = Image.new(
+              overlay = Image.new(
                   "RGBA",
                   (WIDTH, HEIGHT),
                   (0, 0, 0, 0)
               )
 
-              draw = ImageDraw.Draw(canvas)
-
-              font_path = (
-                  "/usr/share/fonts/truetype/dejavu/"
-                  "DejaVuSans-Bold.ttf"
-              )
+              draw = ImageDraw.Draw(overlay)
 
               font = ImageFont.truetype(
-                  font_path, 54
+                  "/usr/share/fonts/truetype/dejavu/"
+                  "DejaVuSans-Bold.ttf",
+                  54
               )
 
               lines = []
@@ -1145,14 +1480,15 @@ jobs:
                       current + " " + word
                   ).strip()
 
-                  bbox = draw.textbbox(
+                  bounds = draw.textbbox(
                       (0, 0),
                       candidate,
                       font=font
                   )
 
                   if (
-                      bbox[2] - bbox[0] <= WIDTH - 140
+                      bounds[2] - bounds[0]
+                      <= WIDTH - 140
                       or not current
                   ):
                       current = candidate
@@ -1198,10 +1534,10 @@ jobs:
                       stroke_fill="black"
                   )
 
-              canvas.save(path)
+              overlay.save(path)
 
           # =========================================
-          # HAREKETLI VIDEO KLIPLERI
+          # HAREKETLI KLIP URETIMI
           # =========================================
 
           def run_ffmpeg(arguments):
@@ -1216,8 +1552,12 @@ jobs:
                   check=True
               )
 
-          def make_clip(image_path, caption_path,
-                        destination, number):
+          def make_clip(
+              image_path,
+              caption_path,
+              destination,
+              number
+          ):
               frames = SCENE_SECONDS * FPS
 
               if number % 3 == 1:
@@ -1241,7 +1581,7 @@ jobs:
                       f"(ih-ih/zoom)*on/{frames}))"
                   )
 
-              filter_graph = (
+              filters = (
                   "[0:v]"
                   "zoompan="
                   f"z='{zoom}':"
@@ -1250,17 +1590,19 @@ jobs:
                   f"d={frames}:"
                   f"s={WIDTH}x{HEIGHT}:"
                   f"fps={FPS},"
-                  "setsar=1,format=yuv420p[bg];"
+                  "setsar=1,"
+                  "format=yuv420p[bg];"
                   "[bg][1:v]"
                   "overlay=0:0:"
-                  "shortest=0:repeatlast=1,"
+                  "shortest=0:"
+                  "repeatlast=1,"
                   "format=yuv420p[v]"
               )
 
               run_ffmpeg([
                   "-i", str(image_path),
                   "-i", str(caption_path),
-                  "-filter_complex", filter_graph,
+                  "-filter_complex", filters,
                   "-map", "[v]",
                   "-frames:v", str(frames),
                   "-an",
@@ -1272,19 +1614,19 @@ jobs:
               ])
 
           # =========================================
-          # FON MUZIGI
+          # MUZIK VE SES EFEKTLERI
           # =========================================
 
           def make_soundtrack(path):
-              duration = (
-                  SCENE_COUNT * SCENE_SECONDS
+              total = (
+                  SCENE_COUNT
+                  * SCENE_SECONDS
+                  * SAMPLE_RATE
               )
-
-              count = duration * SAMPLE_RATE
 
               t = (
                   np.arange(
-                      count,
+                      total,
                       dtype=np.float32
                   ) / SAMPLE_RATE
               )
@@ -1320,7 +1662,7 @@ jobs:
               for i, start in enumerate(
                   np.arange(
                       0.5,
-                      duration,
+                      SCENE_COUNT * SCENE_SECONDS,
                       2.5
                   )
               ):
@@ -1330,7 +1672,7 @@ jobs:
 
                   size = min(
                       int(2.1 * SAMPLE_RATE),
-                      count - first
+                      total - first
                   )
 
                   local_t = (
@@ -1340,9 +1682,7 @@ jobs:
                       ) / SAMPLE_RATE
                   )
 
-                  note = notes[
-                      i % len(notes)
-                  ]
+                  note = notes[i % len(notes)]
 
                   bell = (
                       0.07
@@ -1360,7 +1700,7 @@ jobs:
 
               for second in range(
                   SCENE_SECONDS,
-                  duration,
+                  SCENE_COUNT * SCENE_SECONDS,
                   SCENE_SECONDS
               ):
                   first = int(
@@ -1369,11 +1709,13 @@ jobs:
 
                   size = min(
                       int(0.4 * SAMPLE_RATE),
-                      count - first
+                      total - first
                   )
 
                   noise = rng.normal(
-                      0, 1, size
+                      0,
+                      1,
+                      size
                   ).astype(np.float32)
 
                   envelope = np.sin(
@@ -1427,10 +1769,10 @@ jobs:
                   wav.writeframes(pcm.tobytes())
 
           # =========================================
-          # YOUTUBE VIDEO YUKLEME
+          # YOUTUBE'A YUKLEME
           # =========================================
 
-          def youtube_upload(video_path):
+          def youtube_upload(path):
               credentials = Credentials(
                   token=None,
                   refresh_token=YOUTUBE_REFRESH_TOKEN,
@@ -1455,11 +1797,12 @@ jobs:
 
               description = (
                   f"{title}\n\n"
-                  "Dünya, uzay ve tarihten "
+                  "Dünya, tarih ve uzaydan "
                   "ilginç bilgiler.\n\n"
                   "Görseller yapay zekâ destekli "
                   "temsili canlandırmalardır. "
-                  "Gerçek görüntüler değildir.\n\n"
+                  "Bilimsel ve tarihsel sahneler "
+                  "gerçek görüntüler değildir.\n\n"
                   "#Shorts #Bilim #Tarih #Uzay #Gizem"
               )
 
@@ -1488,7 +1831,7 @@ jobs:
               }
 
               media = MediaFileUpload(
-                  str(video_path),
+                  str(path),
                   mimetype="video/mp4",
                   chunksize=-1,
                   resumable=True
@@ -1506,6 +1849,7 @@ jobs:
               while result is None:
                   try:
                       _, result = request.next_chunk()
+                      retry = 0
 
                   except HttpError as exc:
                       if (
@@ -1513,6 +1857,18 @@ jobs:
                           not in (500, 502, 503, 504)
                           or retry >= 4
                       ):
+                          raise
+
+                      retry += 1
+                      time.sleep(
+                          min(2 ** retry, 30)
+                      )
+
+                  except (
+                      OSError,
+                      ConnectionError
+                  ):
+                      if retry >= 4:
                           raise
 
                       retry += 1
@@ -1530,10 +1886,12 @@ jobs:
               return video_id
 
           # =========================================
-          # VIDEO URETIMI
+          # 1. GORSELLER VE KLIPLER
           # =========================================
 
-          print("1/5 Gorseller ve klipler uretiliyor...")
+          print(
+              "1/5 Ekonomik gorseller olusturuluyor..."
+          )
 
           seed_base = int(
               hashlib.sha256(
@@ -1565,40 +1923,21 @@ jobs:
 
               last_error = None
 
-              # FLUX once denenir.
-              # Hata verirse yedek modele gecilir.
-              try:
-                  raw = call_image(
-                      PRIMARY_MODEL,
-                      prompt,
-                      seed_base + number
-                  )
-
-                  save_image(raw, image_path)
-
-              except Exception as exc:
-                  print(
-                      "FLUX kullanilamadi:",
-                      str(exc)[:250]
-                  )
-
-                  print(
-                      "DreamShaper yedek modeline geciliyor."
-                  )
-
-                  last_error = exc
-
-                  for attempt in range(1, 4):
+              for model in (
+                  PRIMARY_MODEL,
+                  BACKUP_MODEL
+              ):
+                  for attempt in range(2):
                       try:
                           raw = call_image(
-                              BACKUP_MODEL,
+                              model,
                               prompt,
                               seed_base
-                              + number * 10
+                              + number * 17
                               + attempt
                           )
 
-                          save_image(
+                          crop_and_save(
                               raw,
                               image_path
                           )
@@ -1606,22 +1945,38 @@ jobs:
                           last_error = None
                           break
 
-                      except Exception as backup_error:
-                          last_error = backup_error
+                      except DailyQuotaExhausted as exc:
+                          print(
+                              "CLOUDFLARE KOTASI DOLDU:",
+                              exc
+                          )
+                          raise SystemExit(2)
+
+                      except Exception as exc:
+                          last_error = exc
 
                           print(
-                              f"Yedek model {attempt}/3:",
-                              str(backup_error)[:250]
+                              f"Gorsel {number}, "
+                              f"model {model}, "
+                              f"deneme {attempt + 1}: "
+                              f"{str(exc)[:220]}"
                           )
 
-                          if attempt < 3:
-                              time.sleep(attempt * 5)
+                          if attempt == 0:
+                              time.sleep(3)
+
+                  if last_error is None:
+                      break
 
               if last_error is not None:
                   raise RuntimeError(
-                      f"Gorsel {number} olusturulamadi: "
-                      f"{last_error}"
+                      f"{number}. gorsel "
+                      f"uretilemedi: {last_error}"
                   )
+
+              print(
+                  f"Gorsel {number}/{SCENE_COUNT} hazir."
+              )
 
               make_caption(
                   caption_text,
@@ -1637,11 +1992,13 @@ jobs:
 
               clip_paths.append(clip_path)
 
-              print(
-                  f"Sahne {number}/{SCENE_COUNT} tamam."
-              )
+          # =========================================
+          # 2. MUZIK
+          # =========================================
 
-          print("2/5 Fon muzigi olusturuluyor...")
+          print(
+              "2/5 Fon muzigi hazirlaniyor..."
+          )
 
           soundtrack = (
               OUT / "soundtrack.wav"
@@ -1649,9 +2006,17 @@ jobs:
 
           make_soundtrack(soundtrack)
 
-          print("3/5 Video birlestiriliyor...")
+          # =========================================
+          # 3. VIDEO BIRLESTIRME
+          # =========================================
 
-          concat_file = OUT / "concat.txt"
+          print(
+              "3/5 Video birlestiriliyor..."
+          )
+
+          concat_file = (
+              OUT / "concat.txt"
+          )
 
           concat_file.write_text(
               "".join(
@@ -1661,7 +2026,9 @@ jobs:
               encoding="utf-8"
           )
 
-          silent_video = OUT / "silent.mp4"
+          silent_video = (
+              OUT / "silent.mp4"
+          )
 
           run_ffmpeg([
               "-f", "concat",
@@ -1693,8 +2060,7 @@ jobs:
                   "ffprobe",
                   "-v", "error",
                   "-show_entries",
-                  "format=duration:"
-                  "stream=codec_type",
+                  "format=duration:stream=codec_type",
                   "-of", "json",
                   str(final_video)
               ],
@@ -1711,27 +2077,29 @@ jobs:
 
           if duration < 25:
               raise RuntimeError(
-                  "Video beklenenden kisa."
+                  "Video 25 saniyeden kisa."
               )
 
-          types = {
+          stream_types = {
               item.get("codec_type")
-              for item in info["streams"]
+              for item in info.get("streams", [])
           }
 
           if not (
-              "video" in types
-              and "audio" in types
+              "video" in stream_types
+              and "audio" in stream_types
           ):
               raise RuntimeError(
                   "Video veya ses akisi eksik."
               )
 
           # =========================================
-          # YOUTUBE'A YUKLE
+          # 4. YOUTUBE'A YUKLE
           # =========================================
 
-          print("4/5 YouTube yuklemesi basliyor...")
+          print(
+              "4/5 YouTube yuklemesi baslatiliyor..."
+          )
 
           youtube_id = youtube_upload(
               final_video
@@ -1742,7 +2110,7 @@ jobs:
               + youtube_id
           )
 
-          print("YOUTUBE VIDEO:", youtube_url)
+          print("YouTube video:", youtube_url)
 
           record = {
               "slot": slot,
@@ -1766,10 +2134,12 @@ jobs:
           )
 
           # =========================================
-          # YAYIN GECMISINI GITHUB'A KAYDET
+          # 5. YAYIN GECMISINI KAYDET
           # =========================================
 
-          print("5/5 Yayin gecmisi kaydediliyor...")
+          print(
+              "5/5 Yayin gecmisi kaydediliyor..."
+          )
 
           history.append(record)
 
@@ -1784,7 +2154,8 @@ jobs:
 
           subprocess.run(
               [
-                  "git", "config",
+                  "git",
+                  "config",
                   "user.name",
                   "github-actions[bot]"
               ],
@@ -1793,7 +2164,8 @@ jobs:
 
           subprocess.run(
               [
-                  "git", "config",
+                  "git",
+                  "config",
                   "user.email",
                   "41898282+github-actions[bot]@users.noreply.github.com"
               ],
@@ -1816,7 +2188,7 @@ jobs:
                   "git",
                   "commit",
                   "-m",
-                  f"YouTube yayin: {topic_id}"
+                  f"Yayin gecmisi: {topic_id}"
               ],
               check=True
           )
@@ -1834,35 +2206,36 @@ jobs:
 
           except subprocess.CalledProcessError as exc:
               raise RuntimeError(
-                  "Video YouTube'a yuklendi, "
-                  "ancak gecmis GitHub'a yazilamadi. "
-                  "Yeniden calistirmadan once "
-                  "output/upload-result.json "
+                  "Video YouTube'a yuklendi "
+                  "ancak yayin gecmisi GitHub'a "
+                  "kaydedilemedi. Yeniden calistirmadan "
+                  "once output/upload-result.json "
                   "dosyasini kontrol edin."
               ) from exc
 
           print("")
           print("==============================")
-          print("YOUTUBE YUKLEMESI BASARILI!")
+          print("YOUTUBE YUKLEMESI BASARILI")
           print("==============================")
-          print("Konu:", title)
-          print("Video:", youtube_url)
+          print("Baslik:", title)
+          print("YouTube:", youtube_url)
           print("Gizlilik:", YOUTUBE_PRIVACY)
           print("Sure:", round(duration, 1))
+          print("Video:", final_video)
           print("Cozunurluk: 1080x1920")
-          print("Turkce bilgiler: Var")
-          print("Fon muzigi: Var")
+          print("Seslendirme: Yok")
+          print("Muzik ve ses efektleri: Var")
           print("Yayin gecmisi: Kaydedildi")
 
           PY
 
           python create_video.py
 
-      # ===========================================
-      # DOSYALARI ARTIFACT OLARAK SAKLA
-      # ===========================================
+      # =========================================
+      # VIDEO VE KAYITLARI SAKLA
+      # =========================================
 
-      - name: Video ve yayin kayitlarini yukle
+      - name: Videoyu ve yayin kaydini sakla
         if: always()
         uses: actions/upload-artifact@v4
         with:
