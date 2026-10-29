@@ -1,16 +1,13 @@
-name: Masal Videosu Oluştur
+name: Gizemli Dunya Kisa Video
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  video:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -26,384 +23,434 @@ jobs:
       - name: FFmpeg kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
 
-      - name: Python paketlerini kur
+      - name: Paketleri kur
         run: |
           python -m pip install --upgrade pip
           pip install requests pillow numpy
 
-      - name: Masal videosunu oluştur
+      - name: Gizem videosunu olustur
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GEMINI_MODEL: gemini-3.8-flash
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           cat > create_video.py <<'PY'
           import os
+          import io
           import re
           import json
           import time
           import base64
+          import wave
           import random
           import subprocess
-          import wave
           from pathlib import Path
-          from io import BytesIO
 
           import requests
           import numpy as np
-          from PIL import Image, ImageEnhance, ImageFilter, ImageStat
+          from PIL import Image, ImageDraw, ImageFont
 
-          # ==========================================
+          # =====================================
           # AYARLAR
-          # ==========================================
+          # =====================================
 
           GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
           CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
           CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip()
 
-          GEMINI_MODEL = os.getenv(
-              "GEMINI_MODEL", "gemini-3.8-flash"
-          )
-
+          GEMINI_MODEL = "gemini-3.8-flash"
           IMAGE_MODEL = "@cf/lykon/dreamshaper-8-lcm"
 
-          SCENE_COUNT = 8
-          SCENE_SECONDS = 7
+          WIDTH = 720
+          HEIGHT = 1280
           FPS = 25
-          WIDTH = 1280
-          HEIGHT = 720
-          SAMPLE_RATE = 44100
+
+          SCENE_COUNT = 6
+          SCENE_SECONDS = 5
+          DURATION = SCENE_COUNT * SCENE_SECONDS
+
+          SAMPLE_RATE = 22050
 
           ROOT = Path.cwd()
           OUT = ROOT / "output"
           IMAGES = OUT / "images"
+          CAPTIONS = OUT / "captions"
           CLIPS = OUT / "clips"
 
-          OUT.mkdir(exist_ok=True)
-          IMAGES.mkdir(exist_ok=True)
-          CLIPS.mkdir(exist_ok=True)
-
-          session = requests.Session()
-          random.seed()
+          for folder in [OUT, IMAGES, CAPTIONS, CLIPS]:
+              folder.mkdir(parents=True, exist_ok=True)
 
           if not CF_TOKEN or not CF_ACCOUNT:
               raise RuntimeError(
-                  "Cloudflare API bilgileri eksik."
+                  "Cloudflare API bilgileri GitHub Secrets "
+                  "bolumunde eksik."
               )
 
-          # ==========================================
-          # API HATA YÖNETİMİ
-          # ==========================================
+          session = requests.Session()
 
-          class QuotaExceededError(Exception):
-              pass
+          # =====================================
+          # KONU HAVUZU
+          # =====================================
+          # Her konu 6 baglantili sahne icerir.
+          # Metinlerde kanitlanmamis iddialar
+          # kesin gercek olarak sunulmaz.
+          # =====================================
+
+          TOPICS = [
+              {
+                  "title": "Piramitlerin Gizli Boşlukları",
+                  "category": "Antik Mısır",
+                  "scenes": [
+                      [
+                          "Piramitlerin içinde hâlâ keşfedilecek şeyler var.",
+                          "Great Pyramid of Giza at sunrise, vast golden "
+                          "desert, dramatic ancient monument, aerial view"
+                      ],
+                      [
+                          "Büyük Piramit yaklaşık 4.500 yıllık.",
+                          "Great Pyramid of Giza, massive limestone blocks, "
+                          "ancient Egyptian architecture, cinematic closeup"
+                      ],
+                      [
+                          "Bilim insanları kozmik parçacıklardan yararlandı.",
+                          "Scientists studying an Egyptian pyramid using "
+                          "modern non-invasive scanning equipment"
+                      ],
+                      [
+                          "2017'de büyük bir iç boşluk tespit edildi.",
+                          "Scientific artistic cutaway visualization of "
+                          "the Great Pyramid showing an unknown internal void"
+                      ],
+                      [
+                          "Bu boşluğun amacı henüz kesin olarak bilinmiyor.",
+                          "Mysterious dark internal space inside ancient "
+                          "pyramid, historical architectural visualization"
+                      ],
+                      [
+                          "Piramitler araştırmacıları hâlâ şaşırtıyor.",
+                          "Epic sunset over the Great Pyramid of Giza, "
+                          "dramatic clouds, golden cinematic atmosphere"
+                      ]
+                  ]
+              },
+              {
+                  "title": "Europa'nın Buz Altı Okyanusu",
+                  "category": "Uzay",
+                  "scenes": [
+                      [
+                          "Jüpiter'in uydusu Europa buzla kaplı.",
+                          "Jupiter and its icy moon Europa seen from space, "
+                          "realistic scientific space illustration"
+                      ],
+                      [
+                          "Yüzeyinde dev çatlaklar bulunuyor.",
+                          "Close view of Europa icy surface, long reddish "
+                          "fractures cutting through bright frozen terrain"
+                      ],
+                      [
+                          "Bilim insanları altında okyanus olabileceğini düşünüyor.",
+                          "Scientific cutaway visualization of Europa ice "
+                          "shell and a deep liquid water ocean below"
+                      ],
+                      [
+                          "Bu okyanus, Dünya'dakilerden farklı olabilir.",
+                          "Underwater visualization below Europa ice, "
+                          "dark blue alien ocean, suspended ice particles"
+                      ],
+                      [
+                          "Uzay araçları bu gizemi araştırıyor.",
+                          "Robotic spacecraft approaching Europa near "
+                          "Jupiter, dramatic solar system scene"
+                      ],
+                      [
+                          "Peki Europa'da yaşam olabilir mi?",
+                          "Mysterious Europa above Jupiter, distant stars, "
+                          "cinematic scientific visualization"
+                      ]
+                  ]
+              },
+              {
+                  "title": "Nazca Çizgilerinin Gizemi",
+                  "category": "Antik uygarlıklar",
+                  "scenes": [
+                      [
+                          "Peru çölünde dev çizimler bulunuyor.",
+                          "Aerial view of Nazca desert Peru, enormous "
+                          "ancient geoglyphs etched into dry terrain"
+                      ],
+                      [
+                          "Bazıları yalnızca yukarıdan kolayca seçiliyor.",
+                          "High aerial view of huge Nazca hummingbird "
+                          "geoglyph in the desert"
+                      ],
+                      [
+                          "Bu çizimleri antik insanlar oluşturdu.",
+                          "Historical reconstruction of ancient Nazca "
+                          "people making lines in the dry Peruvian desert"
+                      ],
+                      [
+                          "Çizimler hayvanları ve geometrik şekilleri gösteriyor.",
+                          "Wide aerial montage of authentic style Nazca "
+                          "animal geoglyphs and geometric desert lines"
+                      ],
+                      [
+                          "Tam amaçları hâlâ araştırılıyor.",
+                          "Archaeologists studying ancient Nazca lines, "
+                          "measuring desert geoglyphs"
+                      ],
+                      [
+                          "Gizem uzaylı kanıtı değil, insanlık mirası.",
+                          "Beautiful cinematic aerial view over Nazca "
+                          "desert at sunset, ancient geoglyphs"
+                      ]
+                  ]
+              },
+              {
+                  "title": "Okyanusun Güneşsiz Yaşamı",
+                  "category": "Dünya'nın gizemleri",
+                  "scenes": [
+                      [
+                          "Okyanus derinlerinde güneş ışığı yok.",
+                          "Deep dark ocean abyss, faint blue light "
+                          "from above, mysterious underwater landscape"
+                      ],
+                      [
+                          "Ama burada yaşam devam ediyor.",
+                          "Deep sea creatures around underwater rocks, "
+                          "scientifically inspired marine ecosystem"
+                      ],
+                      [
+                          "Sıcak su bacaları deniz tabanından yükseliyor.",
+                          "Hydrothermal black smoker vents on deep ocean "
+                          "floor, mineral rich clouds rising"
+                      ],
+                      [
+                          "Bazı mikroplar kimyasal enerjiyi kullanıyor.",
+                          "Scientific visualization of microbes and "
+                          "chemical energy near deep sea hydrothermal vents"
+                      ],
+                      [
+                          "Bu yaşam için güneş şart değil.",
+                          "Deep sea tube worms near hydrothermal vents, "
+                          "vibrant scientifically inspired ocean life"
+                      ],
+                      [
+                          "Dünya'nın derinlikleri hâlâ keşfediliyor.",
+                          "Submersible exploring mysterious deep sea "
+                          "hydrothermal landscape, cinematic blue darkness"
+                      ]
+                  ]
+              },
+              {
+                  "title": "Paskalya Adası'nın Dev Heykelleri",
+                  "category": "Tarih",
+                  "scenes": [
+                      [
+                          "Bu dev taş heykellere Moai deniyor.",
+                          "Moai stone statues on Rapa Nui Easter Island, "
+                          "cinematic ocean backdrop"
+                      ],
+                      [
+                          "Heykelleri Rapa Nui halkı yaptı.",
+                          "Historical reconstruction of Rapa Nui stone "
+                          "carvers working on an enormous Moai statue"
+                      ],
+                      [
+                          "Bazıları tonlarca ağırlığında.",
+                          "Massive Moai stone statue closeup showing "
+                          "gigantic scale and weathered volcanic stone"
+                      ],
+                      [
+                          "Nasıl taşındıkları üzerine araştırmalar sürüyor.",
+                          "Historical archaeological reconstruction "
+                          "of people transporting a giant Moai statue"
+                      ],
+                      [
+                          "Araştırmacılar farklı yöntemleri test ediyor.",
+                          "Archaeologists testing Moai statue transport "
+                          "techniques in a Pacific island landscape"
+                      ],
+                      [
+                          "Bu heykeller güçlü bir kültürel miras.",
+                          "Majestic line of Moai statues at sunset, "
+                          "Rapa Nui island, Pacific Ocean, golden sky"
+                      ]
+                  ]
+              }
+          ]
+
+          # =====================================
+          # YARDIMCI FONKSIYONLAR
+          # =====================================
 
           def run_cmd(command):
               subprocess.run(command, check=True)
 
-          def api_json_with_retry(
-              url, payload, headers=None,
-              params=None, timeout=180
-          ):
-              last_error = None
-
-              for attempt in range(1, 6):
-                  try:
-                      response = session.post(
-                          url,
-                          json=payload,
-                          headers=headers,
-                          params=params,
-                          timeout=timeout
-                      )
-
-                      if response.status_code == 429:
-                          body = response.text.lower()
-
-                          if (
-                              "free_tier_requests" in body
-                              or "per day limit exceeded" in body
-                              or "quota exceeded" in body
-                          ):
-                              raise QuotaExceededError(
-                                  "Gemini kullanım kotası doldu."
-                              )
-
-                          raise RuntimeError(
-                              "HTTP 429: " + response.text[:500]
-                          )
-
-                      if response.status_code in (
-                          500, 502, 503, 504
-                      ):
-                          raise RuntimeError(
-                              f"Geçici HTTP {response.status_code}"
-                          )
-
-                      if not response.ok:
-                          raise ValueError(
-                              f"HTTP {response.status_code}: "
-                              f"{response.text[:1200]}"
-                          )
-
-                      return response.json()
-
-                  except QuotaExceededError:
-                      raise
-
-                  except ValueError:
-                      raise
-
-                  except (
-                      requests.RequestException,
-                      RuntimeError
-                  ) as exc:
-                      last_error = exc
-
-                      print(
-                          f"API denemesi {attempt}/5: {exc}"
-                      )
-
-                      if attempt < 5:
-                          time.sleep(min(attempt * 5, 25))
-
-              raise RuntimeError(
-                  f"API başarısız: {last_error}"
+          def choose_topic():
+              run_number = int(
+                  os.getenv("GITHUB_RUN_NUMBER", "1")
               )
 
-          # ==========================================
-          # GEMINI
-          # ==========================================
+              index = (run_number - 1) % len(TOPICS)
+              return TOPICS[index]
 
-          def gemini_generate(prompt):
+          def enrich_prompts_with_gemini(topic):
+              """
+              Gemini yalnizca gorsel istemlerini zenginlestirir.
+              Kota dolarsa hazir istemler kullanilir.
+              """
+              scenes = [
+                  {
+                      "caption": caption,
+                      "visual_prompt": prompt
+                  }
+                  for caption, prompt in topic["scenes"]
+              ]
+
               if not GEMINI_KEY:
-                  raise RuntimeError(
-                      "GEMINI_API_KEY tanımlı değil."
+                  print(
+                      "Gemini anahtari yok. "
+                      "Hazir sahneler kullaniliyor."
                   )
+                  return scenes
+
+              prompt = {
+                  "task": (
+                      "Improve six English visual prompts for a "
+                      "cinematic animated documentary short."
+                  ),
+                  "title": topic["title"],
+                  "rules": [
+                      "Keep exactly six scenes.",
+                      "Preserve chronological continuity.",
+                      "No new factual claims.",
+                      "Maintain accurate historical or scientific context.",
+                      "Use mysterious cinematic atmosphere.",
+                      "Avoid fictional aliens presented as facts.",
+                      "No text or logos in generated images.",
+                      "Portrait 9:16 composition."
+                  ],
+                  "scenes": [
+                      {
+                          "scene": i + 1,
+                          "caption": s["caption"],
+                          "prompt": s["visual_prompt"]
+                      }
+                      for i, s in enumerate(scenes)
+                  ],
+                  "output": (
+                      'JSON object with key "scenes", containing '
+                      'six objects with "visual_prompt" fields.'
+                  )
+              }
 
               url = (
                   "https://generativelanguage.googleapis.com/"
-                  "v1beta/models/"
-                  f"{GEMINI_MODEL}:generateContent"
+                  f"v1beta/models/{GEMINI_MODEL}:generateContent"
               )
 
               payload = {
-                  "contents": [{
-                      "parts": [{"text": prompt}]
-                  }],
+                  "contents": [
+                      {
+                          "parts": [
+                              {
+                                  "text": json.dumps(
+                                      prompt,
+                                      ensure_ascii=False
+                                  )
+                              }
+                          ]
+                      }
+                  ],
                   "generationConfig": {
                       "responseMimeType": "application/json"
                   }
               }
 
-              result = api_json_with_retry(
-                  url,
-                  payload,
-                  params={"key": GEMINI_KEY},
-                  timeout=240
-              )
-
-              candidates = result.get("candidates", [])
-
-              if not candidates:
-                  raise RuntimeError(
-                      "Gemini boş yanıt verdi."
-                  )
-
-              parts = candidates[0].get(
-                  "content", {}
-              ).get("parts", [])
-
-              raw = "".join(
-                  part.get("text", "")
-                  for part in parts
-                  if isinstance(part, dict)
-              ).strip()
-
-              if not raw:
-                  raise RuntimeError(
-                      "Gemini metin döndürmedi."
-                  )
-
-              return json.loads(raw)
-
-          # ==========================================
-          # 1. MASAL OLUŞTURMA
-          # ==========================================
-
-          def read_backup_story():
-              candidates = [
-                  ROOT / "masal.txt",
-                  ROOT / "backup" / "masal.txt"
-              ]
-
-              for path in candidates:
-                  if not path.is_file():
-                      continue
-
-                  content = path.read_text(
-                      encoding="utf-8"
-                  ).strip()
-
-                  if len(content) < 1500:
-                      continue
-
-                  lines = content.splitlines()
-                  title = lines[0].strip()
-                  story = "\n".join(lines[1:]).strip()
-
-                  if len(story) >= 1500:
-                      print(
-                          f"Yedek masal kullanılıyor: {path}"
-                      )
-                      return title, story
-
-              return None
-
-          def generate_story():
-              seed = random.randint(100000, 999999)
-
-              prompt = f"""
-              Özgün bir Türkçe çocuk masalı yaz.
-
-              Çalışma numarası: {seed}
-              Yaş grubu: 4-8.
-              Uzunluk: 650-850 kelime.
-
-              Masal sıcak, eğlenceli, huzurlu
-              ve hayal gücü yüksek olsun.
-
-              Belirgin başlangıç, gelişme
-              ve mutlu son içersin.
-
-              Şiddet, korku, telifli karakter
-              veya marka kullanma.
-
-              Yalnızca JSON döndür:
-
-              {{
-                "title": "Masal başlığı",
-                "story": "Masal metni"
-              }}
-              """
-
               try:
-                  data = gemini_generate(prompt)
+                  response = session.post(
+                      url,
+                      params={"key": GEMINI_KEY},
+                      json=payload,
+                      timeout=90
+                  )
 
-                  title = str(
-                      data.get("title", "")
-                  ).strip()
-
-                  story = str(
-                      data.get("story", "")
-                  ).strip()
-
-                  if len(story) < 1500:
-                      raise RuntimeError(
-                          "Gemini masalı çok kısa."
+                  if response.status_code == 429:
+                      print(
+                          "Gemini kotasi kullanilamiyor. "
+                          "Hazir istemlerle devam ediliyor."
                       )
+                      return scenes
 
-                  return title or "Yeni Bir Masal", story
+                  if not response.ok:
+                      print(
+                          "Gemini HTTP hatasi:",
+                          response.status_code
+                      )
+                      return scenes
+
+                  result = response.json()
+
+                  raw = "".join(
+                      part.get("text", "")
+                      for part in (
+                          result["candidates"][0]
+                          ["content"]["parts"]
+                      )
+                  )
+
+                  data = json.loads(raw)
+                  generated = data.get("scenes", [])
+
+                  if len(generated) != SCENE_COUNT:
+                      return scenes
+
+                  for i, generated_scene in enumerate(
+                      generated
+                  ):
+                      improved = str(
+                          generated_scene.get(
+                              "visual_prompt", ""
+                          )
+                      ).strip()
+
+                      if len(improved) > 25:
+                          scenes[i]["visual_prompt"] = (
+                              improved[:1200]
+                          )
+
+                  print("Gemini istemleri zenginlestirdi.")
 
               except Exception as exc:
                   print(
-                      f"Gemini kullanılamadı: {exc}"
+                      "Gemini yerine hazir istemler "
+                      "kullaniliyor:",
+                      str(exc)[:200]
                   )
-
-                  backup = read_backup_story()
-
-                  if backup:
-                      return backup
-
-                  raise RuntimeError(
-                      "Gemini masal oluşturamadı ve "
-                      "depoda geçerli bir yedek masal "
-                      "bulunamadı. Kota yenilenmesini "
-                      "bekleyin veya masal.txt ekleyin."
-                  ) from exc
-
-          print("1/6 Masal oluşturuluyor...")
-
-          title, story = generate_story()
-
-          (OUT / "masal.txt").write_text(
-              title + "\n\n" + story,
-              encoding="utf-8"
-          )
-
-          print(f"Masal hazır: {title}")
-
-          # ==========================================
-          # 2. YEREL SAHNE PLANI
-          # ==========================================
-
-          def generate_scene_plan(title, story):
-              sentences = re.split(
-                  r'(?<=[.!?])\s+',
-                  story.strip()
-              )
-
-              sentences = [
-                  s.strip()
-                  for s in sentences
-                  if s.strip()
-              ]
-
-              if len(sentences) < SCENE_COUNT:
-                  raise RuntimeError(
-                      "Masal sekiz sahneye bölünemiyor."
-                  )
-
-              scenes = []
-              total = len(sentences)
-
-              for i in range(SCENE_COUNT):
-                  start = i * total // SCENE_COUNT
-                  end = (i + 1) * total // SCENE_COUNT
-
-                  segment = " ".join(
-                      sentences[start:end]
-                  ).strip()
-
-                  description = (
-                      "Beautiful children's picture book "
-                      "illustration. "
-                      f"Story title: {title}. "
-                      f"Story moment: {segment}. "
-                      "Whimsical original characters, "
-                      "warm magical atmosphere, "
-                      "consistent character design, "
-                      "detailed colorful artwork, "
-                      "soft cinematic lighting, "
-                      "landscape composition 16:9. "
-                      "No text, no letters, "
-                      "no subtitles, no watermark."
-                  )
-
-                  scenes.append({
-                      "scene": i + 1,
-                      "description": description,
-                      "motion": (
-                          "Slow cinematic camera movement "
-                          "with gentle zoom and pan."
-                      )
-                  })
 
               return scenes
 
-          print("2/6 Sahne planı hazırlanıyor...")
+          # =====================================
+          # 1. KONUYU SEC
+          # =====================================
 
-          scenes = generate_scene_plan(
-              title, story
-          )
+          print("1/6 Konu seciliyor...")
 
-          (OUT / "sahne-plani.json").write_text(
+          topic = choose_topic()
+
+          print("Konu:", topic["title"])
+          print("Kategori:", topic["category"])
+
+          scenes = enrich_prompts_with_gemini(topic)
+
+          (OUT / "video-plani.json").write_text(
               json.dumps(
                   {
-                      "title": title,
+                      "title": topic["title"],
+                      "category": topic["category"],
                       "scenes": scenes
                   },
                   ensure_ascii=False,
@@ -412,32 +459,32 @@ jobs:
               encoding="utf-8"
           )
 
-          print("Sekiz sahne hazır.")
+          # =====================================
+          # 2. CLOUDFLARE GORSEL URETIMI
+          # =====================================
 
-          # ==========================================
-          # 3. CLOUDFLARE GÖRSELLERİ
-          # ==========================================
-
-          def generate_image(description, destination):
+          def generate_image(scene, destination):
               url = (
                   "https://api.cloudflare.com/client/v4/"
                   f"accounts/{CF_ACCOUNT}/ai/run/"
                   f"{IMAGE_MODEL}"
               )
 
-              prompt = (
-                  "Children's storybook illustration. "
-                  "Colorful hand-painted art, "
-                  "beautiful soft lighting, "
-                  "original friendly characters, "
-                  "magical environment, "
-                  "landscape 16:9, no text. "
-                  + description
+              full_prompt = (
+                  "High quality cinematic animated documentary "
+                  "concept art, visually stunning, "
+                  "scientifically or historically grounded, "
+                  "mysterious atmosphere, dramatic lighting, "
+                  "rich detailed environment, "
+                  "strong foreground and background depth, "
+                  "vertical portrait composition, "
+                  "no text, no letters, no watermark. "
+                  + scene["visual_prompt"]
               )
 
               last_error = None
 
-              for attempt in range(1, 5):
+              for attempt in range(1, 4):
                   try:
                       response = session.post(
                           url,
@@ -446,15 +493,29 @@ jobs:
                                   f"Bearer {CF_TOKEN}"
                               )
                           },
-                          json={"prompt": prompt},
-                          timeout=240
+                          json={
+                              "prompt": full_prompt[:1800],
+                              "negative_prompt": (
+                                  "text, subtitles, logo, "
+                                  "watermark, blurry, distorted"
+                              ),
+                              "width": 768,
+                              "height": 1024,
+                              "num_steps": 20
+                          },
+                          timeout=180
                       )
+
+                      if response.status_code in (401, 403):
+                          raise PermissionError(
+                              "Cloudflare token yetkisiz."
+                          )
 
                       if not response.ok:
                           raise RuntimeError(
                               f"Cloudflare HTTP "
                               f"{response.status_code}: "
-                              f"{response.text[:800]}"
+                              f"{response.text[:500]}"
                           )
 
                       content_type = (
@@ -464,83 +525,80 @@ jobs:
                       )
 
                       if (
-                          "json" in content_type
+                          "application/json" in content_type
                           or response.content[:1] == b"{"
                       ):
-                          payload = response.json()
+                          data = response.json()
 
-                          if payload.get("success") is False:
+                          if data.get("success") is False:
                               raise RuntimeError(
-                                  str(payload.get("errors"))
+                                  str(data.get("errors"))
                               )
 
-                          result = payload.get(
-                              "result", {}
-                          )
-
-                          encoded = None
+                          result = data.get("result", {})
 
                           if isinstance(result, dict):
                               encoded = (
                                   result.get("image")
                                   or result.get("data")
                               )
-
-                          if not encoded:
-                              raise RuntimeError(
-                                  "Cloudflare görsel döndürmedi."
-                              )
+                          else:
+                              encoded = None
 
                           if isinstance(encoded, list):
-                              content = bytes(encoded)
-                          else:
-                              encoded = str(encoded)
+                              image_bytes = bytes(encoded)
 
+                          elif isinstance(encoded, str):
                               if encoded.startswith("data:"):
                                   encoded = encoded.split(
                                       ",", 1
                                   )[-1]
 
-                              content = base64.b64decode(
+                              image_bytes = base64.b64decode(
                                   encoded
                               )
+                          else:
+                              raise RuntimeError(
+                                  "Gorsel verisi bulunamadi."
+                              )
                       else:
-                          content = response.content
+                          image_bytes = response.content
 
                       image = Image.open(
-                          BytesIO(content)
+                          io.BytesIO(image_bytes)
                       ).convert("RGB")
 
-                      ratio = WIDTH / HEIGHT
-                      current = (
+                      # 9:16 oranina kirp
+                      target_ratio = WIDTH / HEIGHT
+                      image_ratio = (
                           image.width / image.height
                       )
 
-                      if current > ratio:
-                          new_width = int(
-                              image.height * ratio
+                      if image_ratio > target_ratio:
+                          crop_width = int(
+                              image.height * target_ratio
                           )
-                          left = (
-                              image.width - new_width
+                          x = (
+                              image.width - crop_width
                           ) // 2
 
                           image = image.crop((
-                              left, 0,
-                              left + new_width,
+                              x, 0,
+                              x + crop_width,
                               image.height
                           ))
                       else:
-                          new_height = int(
-                              image.width / ratio
+                          crop_height = int(
+                              image.width / target_ratio
                           )
-                          top = (
-                              image.height - new_height
+                          y = (
+                              image.height - crop_height
                           ) // 2
 
                           image = image.crop((
-                              0, top,
+                              0, y,
                               image.width,
-                              top + new_height
+                              y + crop_height
                           ))
 
                       image = image.resize(
@@ -548,140 +606,198 @@ jobs:
                           Image.Resampling.LANCZOS
                       )
 
-                      brightness = (
-                          sum(
-                              ImageStat.Stat(image).mean
-                          ) / 3
-                      )
-
-                      if brightness < 12:
-                          raise RuntimeError(
-                              "Görsel çok karanlık."
-                          )
-
-                      image = (
-                          ImageEnhance.Color(image)
-                          .enhance(1.06)
-                      )
-
-                      image = (
-                          ImageEnhance.Contrast(image)
-                          .enhance(1.04)
-                      )
-
-                      image = image.filter(
-                          ImageFilter.UnsharpMask(
-                              radius=1.2,
-                              percent=100,
-                              threshold=3
-                          )
-                      )
-
-                      image.save(
-                          destination,
-                          format="PNG"
-                      )
+                      image.save(destination)
                       return
+
+                  except PermissionError:
+                      raise
 
                   except Exception as exc:
                       last_error = exc
-
                       print(
-                          f"Görsel denemesi "
-                          f"{attempt}/4: {exc}"
+                          f"Gorsel denemesi {attempt}/3:",
+                          exc
                       )
 
-                      if attempt < 4:
-                          time.sleep(attempt * 4)
+                      if attempt < 3:
+                          time.sleep(5 * attempt)
 
               raise RuntimeError(
-                  f"Görsel oluşturulamadı: "
-                  f"{last_error}"
+                  "Cloudflare gorsel olusturamadi: "
+                  + str(last_error)
               )
 
-          print("3/6 Görseller oluşturuluyor...")
+          print("2/6 Gorseller uretiliyor...")
 
-          for scene in scenes:
-              number = scene["scene"]
-
+          for index, scene in enumerate(scenes, 1):
               destination = (
-                  IMAGES /
-                  f"scene_{number:02d}.png"
+                  IMAGES / f"scene_{index:02d}.png"
               )
 
               print(
-                  f"Görsel {number}/{SCENE_COUNT}"
+                  f"Gorsel {index}/{SCENE_COUNT}"
               )
 
-              generate_image(
-                  scene["description"],
-                  destination
-              )
+              generate_image(scene, destination)
 
               if (
                   not destination.exists()
                   or destination.stat().st_size < 5000
               ):
                   raise RuntimeError(
-                      f"{number}. görsel geçersiz."
+                      "Olusturulan gorsel gecersiz."
                   )
 
-          # ==========================================
-          # 4. HAREKETLİ VİDEO SAHNELERİ
-          # ==========================================
+          # =====================================
+          # 3. TURKCE ALTYAZI GORSELLERI
+          # =====================================
 
-          def make_animated_clip(
-              image_path, output_path, scene
-          ):
-              frames = SCENE_SECONDS * FPS
-              number = int(scene["scene"])
+          FONT_PATH = (
+              "/usr/share/fonts/truetype/dejavu/"
+              "DejaVuSans-Bold.ttf"
+          )
 
-              if number % 4 == 1:
-                  x_expr = "iw/2-(iw/zoom/2)"
-                  y_expr = "ih/2-(ih/zoom/2)"
-                  zoom_expr = (
-                      "min(1.0+0.0007*on,1.06)"
+          def make_caption(text, destination):
+              overlay = Image.new(
+                  "RGBA",
+                  (WIDTH, HEIGHT),
+                  (0, 0, 0, 0)
+              )
+
+              draw = ImageDraw.Draw(overlay)
+
+              font = ImageFont.truetype(
+                  FONT_PATH, 36
+              )
+
+              words = text.split()
+              lines = []
+              current = ""
+
+              max_text_width = WIDTH - 100
+
+              for word in words:
+                  candidate = (
+                      (current + " " + word).strip()
                   )
 
-              elif number % 4 == 2:
-                  x_expr = (
+                  bounds = draw.textbbox(
+                      (0, 0),
+                      candidate,
+                      font=font
+                  )
+
+                  text_width = (
+                      bounds[2] - bounds[0]
+                  )
+
+                  if (
+                      text_width <= max_text_width
+                      or not current
+                  ):
+                      current = candidate
+                  else:
+                      lines.append(current)
+                      current = word
+
+              if current:
+                  lines.append(current)
+
+              line_height = 54
+              total_height = len(lines) * line_height
+
+              base_y = (
+                  HEIGHT - 215 - total_height
+              )
+
+              # Altta yari saydam koyu alan
+              draw.rounded_rectangle(
+                  (
+                      25,
+                      base_y - 25,
+                      WIDTH - 25,
+                      base_y + total_height + 30
+                  ),
+                  radius=24,
+                  fill=(0, 0, 0, 170)
+              )
+
+              for i, line in enumerate(lines):
+                  y = base_y + i * line_height
+
+                  draw.text(
+                      (WIDTH // 2, y),
+                      line,
+                      font=font,
+                      anchor="mt",
+                      fill="white",
+                      stroke_width=2,
+                      stroke_fill="black"
+                  )
+
+              overlay.save(destination)
+
+          print("3/6 Turkce bilgi yazilari hazirlaniyor...")
+
+          for index, scene in enumerate(scenes, 1):
+              make_caption(
+                  scene["caption"],
+                  CAPTIONS / f"caption_{index:02d}.png"
+              )
+
+          # =====================================
+          # 4. SINEMATIK HAREKETLI KLIPLER
+          # =====================================
+
+          def make_clip(image_path, caption_path,
+                        output_path, number):
+
+              total_frames = (
+                  SCENE_SECONDS * FPS
+              )
+
+              # Sahneler farkli kamera hareketleri
+              # kullanir: yakinlasma, yatay ve
+              # dikey kaydirma.
+
+              if number % 3 == 1:
+                  zoom = (
+                      "min(1.0+0.0012*on,1.15)"
+                  )
+                  x = "iw/2-(iw/zoom/2)"
+                  y = "ih/2-(ih/zoom/2)"
+
+              elif number % 3 == 2:
+                  zoom = "1.12"
+                  x = (
                       "max(0,min(iw-iw/zoom,"
-                      f"(iw-iw/zoom)*on/{frames}))"
+                      f"(iw-iw/zoom)*on/{total_frames}))"
                   )
-                  y_expr = "ih/2-(ih/zoom/2)"
-                  zoom_expr = (
-                      "min(1.06,1.0+0.0006*on)"
-                  )
-
-              elif number % 4 == 3:
-                  x_expr = (
-                      "max(0,min(iw-iw/zoom,"
-                      f"(iw-iw/zoom)*(1-on/{frames})))"
-                  )
-                  y_expr = "ih/2-(ih/zoom/2)"
-                  zoom_expr = (
-                      "min(1.06,1.0+0.0006*on)"
-                  )
+                  y = "ih/2-(ih/zoom/2)"
 
               else:
-                  x_expr = "iw/2-(iw/zoom/2)"
-                  y_expr = (
+                  zoom = "1.12"
+                  x = "iw/2-(iw/zoom/2)"
+                  y = (
                       "max(0,min(ih-ih/zoom,"
-                      f"(ih-ih/zoom)*on/{frames}))"
-                  )
-                  zoom_expr = (
-                      "min(1.0+0.0007*on,1.06)"
+                      f"(ih-ih/zoom)*on/{total_frames}))"
                   )
 
               video_filter = (
+                  "[0:v]"
                   "zoompan="
-                  f"z='{zoom_expr}':"
-                  f"x='{x_expr}':"
-                  f"y='{y_expr}':"
-                  f"d={frames}:"
+                  f"z='{zoom}':"
+                  f"x='{x}':"
+                  f"y='{y}':"
+                  f"d={total_frames}:"
                   f"s={WIDTH}x{HEIGHT}:"
                   f"fps={FPS},"
-                  "setsar=1,format=yuv420p"
+                  "format=yuv420p[bg];"
+                  "[bg][1:v]"
+                  "overlay=0:0:"
+                  "shortest=0:"
+                  "repeatlast=1,"
+                  "format=yuv420p[v]"
               )
 
               run_cmd([
@@ -689,198 +805,125 @@ jobs:
                   "-hide_banner",
                   "-loglevel", "error",
                   "-y",
-                  "-loop", "1",
-                  "-framerate", str(FPS),
                   "-i", str(image_path),
-                  "-vf", video_filter,
-                  "-frames:v", str(frames),
+                  "-i", str(caption_path),
+                  "-filter_complex",
+                  video_filter,
+                  "-map", "[v]",
+                  "-frames:v", str(total_frames),
                   "-an",
                   "-c:v", "libx264",
                   "-preset", "veryfast",
-                  "-crf", "20",
+                  "-crf", "22",
                   "-pix_fmt", "yuv420p",
-                  "-movflags", "+faststart",
                   str(output_path)
               ])
 
-              if not output_path.exists():
+              if (
+                  not output_path.exists()
+                  or output_path.stat().st_size < 10000
+              ):
                   raise RuntimeError(
-                      "Video sahnesi oluşturulamadı."
+                      "Hareketli klip olusturulamadi."
                   )
 
-          print("4/6 Hareketli sahneler hazırlanıyor...")
+          print("4/6 Hareketli klipler hazirlaniyor...")
 
           clip_paths = []
 
-          for scene in scenes:
-              number = scene["scene"]
-
+          for number in range(1, SCENE_COUNT + 1):
               image_path = (
-                  IMAGES /
-                  f"scene_{number:02d}.png"
+                  IMAGES / f"scene_{number:02d}.png"
+              )
+
+              caption_path = (
+                  CAPTIONS / f"caption_{number:02d}.png"
               )
 
               clip_path = (
-                  CLIPS /
-                  f"clip_{number:02d}.mp4"
+                  CLIPS / f"clip_{number:02d}.mp4"
               )
 
-              make_animated_clip(
+              make_clip(
                   image_path,
+                  caption_path,
                   clip_path,
-                  scene
+                  number
               )
 
               clip_paths.append(clip_path)
 
               print(
-                  f"Sahne {number}/{SCENE_COUNT} hazır."
+                  f"Klip {number}/{SCENE_COUNT} hazir."
               )
 
-          # ==========================================
-          # 5. FON MÜZİĞİ VE SES EFEKTLERİ
-          # ==========================================
+          # =====================================
+          # 5. GIZEMLI MUZIK VE SES EFEKTLERI
+          # =====================================
 
-          def make_soundtrack(destination):
-              duration = (
-                  SCENE_COUNT * SCENE_SECONDS
-              )
-
-              sample_count = (
-                  duration * SAMPLE_RATE
+          def make_music(destination):
+              total_samples = (
+                  DURATION * SAMPLE_RATE
               )
 
               t = (
                   np.arange(
-                      sample_count,
+                      total_samples,
                       dtype=np.float32
                   ) / SAMPLE_RATE
               )
 
-              notes = [
-                  261.63, 329.63,
-                  392.00, 329.63,
-                  293.66, 349.23,
-                  440.00, 349.23,
-                  261.63, 329.63,
-                  392.00, 523.25,
-                  440.00, 392.00,
-                  329.63, 293.66
-              ]
-
-              music = np.zeros(
-                  sample_count,
-                  dtype=np.float32
+              # Derin atmosferik sesler
+              low_drone = (
+                  0.12 * np.sin(
+                      2 * np.pi * 55 * t
+                  )
               )
 
-              beat = 1.5
-
-              for index, start in enumerate(
-                  np.arange(0, duration, beat)
-              ):
-                  end = min(
-                      start + beat,
-                      duration
+              mid_drone = (
+                  0.06 * np.sin(
+                      2 * np.pi * 82.41 * t
                   )
+              )
 
-                  start_i = int(
-                      start * SAMPLE_RATE
-                  )
-
-                  end_i = int(
-                      end * SAMPLE_RATE
-                  )
-
-                  length = end_i - start_i
-
-                  if length <= 0:
-                      continue
-
-                  local_t = (
-                      np.arange(
-                          length,
-                          dtype=np.float32
-                      ) / SAMPLE_RATE
-                  )
-
-                  note = notes[
-                      index % len(notes)
-                  ]
-
-                  envelope = np.minimum(
-                      local_t / 0.12, 1.0
-                  )
-
-                  envelope *= np.minimum(
-                      (
-                          end - start - local_t
-                      ) / 0.2,
-                      1.0
-                  )
-
-                  envelope = np.clip(
-                      envelope, 0, 1
-                  )
-
-                  tone = (
-                      np.sin(
-                          2 * np.pi
-                          * note * local_t
-                      )
-                      + 0.35 * np.sin(
-                          2 * np.pi
-                          * note * 2 * local_t
+              slow_pulse = (
+                  0.035
+                  * np.sin(2 * np.pi * 110 * t)
+                  * (
+                      0.5
+                      + 0.5 * np.sin(
+                          2 * np.pi * 0.5 * t
                       )
                   )
+              )
 
-                  music[
-                      start_i:end_i
-                  ] += (
-                      0.10 * tone * envelope
-                  )
-
-              rng = np.random.default_rng()
-
-              noise = rng.normal(
-                  0, 1, sample_count
+              music = (
+                  low_drone
+                  + mid_drone
+                  + slow_pulse
               ).astype(np.float32)
 
-              ambience = (
-                  0.008 * noise
-                  + 0.003 * np.sin(
-                      2 * np.pi * 110 * t
-                  )
-                  + 0.002 * np.sin(
-                      2 * np.pi * 164.81 * t
-                  )
-              )
+              # Kisa gizemli zil tonlari
+              notes = [
+                  329.63,
+                  392.0,
+                  493.88,
+                  440.0,
+                  392.0,
+                  293.66
+              ]
 
-              chimes = np.zeros(
-                  sample_count,
-                  dtype=np.float32
-              )
-
-              for start in np.arange(
-                  4.0, duration, 9.0
+              for i, start in enumerate(
+                  np.arange(0.5, DURATION, 2.5)
               ):
-                  freq = random.choice([
-                      523.25,
-                      659.25,
-                      783.99,
-                      880.0
-                  ])
-
                   start_i = int(
                       start * SAMPLE_RATE
                   )
 
                   length = min(
-                      int(1.8 * SAMPLE_RATE),
-                      sample_count - start_i
+                      int(2.2 * SAMPLE_RATE),
+                      total_samples - start_i
                   )
-
-                  if length <= 0:
-                      continue
 
                   local_t = (
                       np.arange(
@@ -889,64 +932,110 @@ jobs:
                       ) / SAMPLE_RATE
                   )
 
-                  decay = np.exp(
-                      -2.8 * local_t
-                  )
+                  freq = notes[
+                      i % len(notes)
+                  ]
 
-                  chimes[
-                      start_i:start_i + length
-                  ] += (
-                      0.035
+                  bell = (
+                      0.08
                       * np.sin(
-                          2 * np.pi
-                          * freq * local_t
+                          2 * np.pi * freq * local_t
                       )
-                      * decay
+                      * np.exp(
+                          -1.6 * local_t
+                      )
                   )
 
-              mix = (
-                  music + ambience + chimes
+                  music[
+                      start_i:start_i + length
+                  ] += bell
+
+              # Sahne gecislerinde hafif whoosh
+              rng = np.random.default_rng()
+
+              for second in range(
+                  SCENE_SECONDS,
+                  DURATION,
+                  SCENE_SECONDS
+              ):
+                  length = int(
+                      0.5 * SAMPLE_RATE
+                  )
+
+                  start_i = int(
+                      (second - 0.25)
+                      * SAMPLE_RATE
+                  )
+
+                  noise = rng.normal(
+                      0, 1, length
+                  ).astype(np.float32)
+
+                  envelope = np.sin(
+                      np.linspace(
+                          0,
+                          np.pi,
+                          length,
+                          dtype=np.float32
+                      )
+                  )
+
+                  whoosh = (
+                      0.035 * noise * envelope
+                  )
+
+                  end_i = min(
+                      start_i + length,
+                      total_samples
+                  )
+
+                  music[
+                      start_i:end_i
+                  ] += whoosh[
+                      :end_i - start_i
+                  ]
+
+              # Giris/cikis yumusatma
+              fade_len = int(
+                  1.2 * SAMPLE_RATE
               )
 
-              fade_length = int(
-                  2 * SAMPLE_RATE
-              )
-
-              mix[:fade_length] *= (
+              music[:fade_len] *= (
                   np.linspace(
-                      0, 1,
-                      fade_length,
-                      dtype=np.float32
+                      0, 1, fade_len
                   )
               )
 
-              mix[-fade_length:] *= (
+              music[-fade_len:] *= (
                   np.linspace(
-                      1, 0,
-                      fade_length,
-                      dtype=np.float32
+                      1, 0, fade_len
                   )
               )
 
               peak = float(
-                  np.max(np.abs(mix))
+                  np.max(np.abs(music))
               )
 
               if peak > 0:
-                  mix *= 0.75 / peak
+                  music *= (
+                      0.70 / peak
+                  )
 
               stereo = np.column_stack(
-                  (mix, mix)
+                  (music, music)
               )
 
               pcm = (
                   np.clip(
-                      stereo, -1, 1
+                      stereo,
+                      -1,
+                      1
                   ) * 32767
               ).astype("<i2")
 
               with wave.open(
-                  str(destination), "wb"
+                  str(destination),
+                  "wb"
               ) as wav:
                   wav.setnchannels(2)
                   wav.setsampwidth(2)
@@ -957,19 +1046,19 @@ jobs:
                       pcm.tobytes()
                   )
 
-          print("5/6 Müzik hazırlanıyor...")
+          print("5/6 Muzik ve efektler uretiliyor...")
 
           soundtrack = (
               OUT / "soundtrack.wav"
           )
 
-          make_soundtrack(soundtrack)
+          make_music(soundtrack)
 
-          # ==========================================
-          # 6. VİDEOYU BİRLEŞTİR
-          # ==========================================
+          # =====================================
+          # 6. VIDEO BIRLESTIRME
+          # =====================================
 
-          print("6/6 Video birleştiriliyor...")
+          print("6/6 Final video hazirlaniyor...")
 
           concat_file = (
               OUT / "concat.txt"
@@ -984,7 +1073,7 @@ jobs:
           )
 
           silent_video = (
-              OUT / "silent-video.mp4"
+              OUT / "silent.mp4"
           )
 
           run_cmd([
@@ -1000,7 +1089,7 @@ jobs:
           ])
 
           final_video = (
-              ROOT / "animasyon-video.mp4"
+              ROOT / "gizemli-dunya-video.mp4"
           )
 
           run_cmd([
@@ -1020,84 +1109,86 @@ jobs:
               str(final_video)
           ])
 
-          probe = subprocess.check_output([
-              "ffprobe",
-              "-v", "error",
-              "-show_entries",
-              "format=duration,size:"
-              "stream=codec_type,width,height",
-              "-of", "json",
-              str(final_video)
-          ], text=True)
+          # =====================================
+          # DOGRULAMA
+          # =====================================
 
-          info = json.loads(probe)
+          info = json.loads(
+              subprocess.check_output(
+                  [
+                      "ffprobe",
+                      "-v", "error",
+                      "-show_entries",
+                      "format=duration,size:"
+                      "stream=codec_type,width,height",
+                      "-of", "json",
+                      str(final_video)
+                  ],
+                  text=True
+              )
+          )
 
           streams = info.get(
               "streams", []
           )
 
-          stream_types = {
+          types = {
               stream.get("codec_type")
               for stream in streams
           }
 
-          if "video" not in stream_types:
+          if "video" not in types:
               raise RuntimeError(
-                  "Video akışı yok."
+                  "Video akisi yok."
               )
 
-          if "audio" not in stream_types:
+          if "audio" not in types:
               raise RuntimeError(
-                  "Ses akışı yok."
+                  "Ses akisi yok."
               )
 
           duration = float(
               info["format"]["duration"]
           )
 
-          size = int(
-              info["format"]["size"]
-          )
-
-          if duration < 30:
+          if duration < 25:
               raise RuntimeError(
-                  "Video beklenenden kısa."
+                  "Video suresi cok kisa."
               )
 
-          if size < 500000:
+          if not final_video.exists():
               raise RuntimeError(
-                  "Video dosyası çok küçük."
+                  "Final video bulunamadi."
               )
 
           print("")
-          print("================================")
-          print("VIDEO BASARIYLA OLUSTURULDU")
-          print("================================")
-          print(f"Başlık: {title}")
-          print(f"Süre: {duration:.1f} saniye")
-          print(
-              f"Boyut: "
-              f"{size / 1024 / 1024:.2f} MB"
-          )
-          print(f"Dosya: {final_video}")
+          print("==============================")
+          print("VIDEO OLUSTURULDU")
+          print("==============================")
+          print("Baslik:", topic["title"])
+          print("Kategori:", topic["category"])
+          print("Sure:", round(duration, 1), "saniye")
+          print("Cozunurluk:", WIDTH, "x", HEIGHT)
           print("Seslendirme: Yok")
-          print("Fon müziği: Var")
-          print("Ses efektleri: Var")
+          print("Turkce bilgi yazilari: Var")
+          print("Gizemli muzik: Var")
+          print("Kamera hareketleri: Var")
+          print("Dosya:", final_video)
 
           PY
 
           python create_video.py
 
-      - name: Videoyu ve dosyaları yükle
+      - name: Videoyu indirilebilir hale getir
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: masal-video
+          name: gizemli-dunya-video
           path: |
-            animasyon-video.mp4
-            output/masal.txt
-            output/sahne-plani.json
+            gizemli-dunya-video.mp4
+            output/video-plani.json
             output/soundtrack.wav
             output/images/
+            output/captions/
           if-no-files-found: warn
           retention-days: 7
