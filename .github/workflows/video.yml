@@ -73,7 +73,7 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_PRIVACY: private
+          YOUTUBE_PRIVACY: public
         run: |
           cat > create_video.py <<'PY'
           import os, io, json, base64, time, wave, subprocess, random, hashlib
