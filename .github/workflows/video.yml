@@ -107,7 +107,7 @@ jobs:
           RUN_EVENT = os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch')
           RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
 
-          # Her eleman baska bir video, her video 6 sahne.
+          # Toplam 60 farkli video konusu; her video 6 sahne ve 30 saniye.
           # Alti basit gercek / belgesel kadraji sabit hazirlanir.
           # Kaynak iddialari yayin oncesi editoryal kontrolden gecirilmelidir.
           # Format: id, baslik, kategori, ana gorsel, (4 ara bilgi + sahne gorseli).
@@ -292,7 +292,135 @@ jobs:
                   ('Böyle ortamlar sert koşullardan koruyabilir.','desert rock layers biology scientific illustration'),
                   ('Araştırmacılar aşırı koşullardaki yaşamı inceliyor.','microbiologists sampling desert rocks'),
                   ('Bu çalışmalar başka dünyaları anlamaya yardım eder.','Mars-like desert rock astrobiology investigation')]),
+              ('enceladus-geysers','Satürn’ün Uydusundan Su Fışkırıyor','Uzay','Enceladus icy moon Saturn water vapor geysers space documentary',[
+                  ('Enceladus, Satürn’ün buzlu uydularından biri.','Saturn and icy moon Enceladus in deep space'),
+                  ('Güney kutbundan su buharı ve buz püskürüyor.','Enceladus south pole water ice plumes close view'),
+                  ('Cassini uzay aracı bu püskürmelerin içinden geçti.','Cassini spacecraft flying through Enceladus plume'),
+                  ('Buz altındaki okyanusun özellikleri araştırılıyor.','scientific cutaway of Enceladus subsurface ocean')]),
+              ('io-volcanoes','Jüpiter’in Volkanlarla Kaplı Uydusu','Uzay','Jupiter moon Io active volcanoes space documentary',[
+                  ('Io, Jüpiter’in en dikkat çekici uydularından biri.','Jupiter and volcanic moon Io in space'),
+                  ('Yüzeyinde çok sayıda aktif yanardağ bulunur.','Io moon erupting volcano sulfur plume'),
+                  ('Jüpiter’in gelgit etkisi içini sürekli ısıtır.','Io tidal heating scientific cutaway Jupiter'),
+                  ('Bu yüzden Güneş Sistemi’nin en hareketli volkanik dünyasıdır.','Io colorful volcanic landscape from orbit')]),
+              ('mercury-extremes','Merkür’de Gündüz ve Gece Uçurum Gibi','Uzay','Mercury planet extreme temperature rocky surface',[
+                  ('Merkür, Güneş’e en yakın gezegendir.','Mercury planet close to the Sun'),
+                  ('Gündüz yüzeyi yaklaşık 430 dereceye ulaşabilir.','Mercury sunlit rocky surface intense sunlight'),
+                  ('Gece sıcaklık çok daha düşük seviyelere iner.','Mercury dark night side cold crater landscape'),
+                  ('Kutuplardaki gölgeli kraterlerde buz bulunabilir.','Mercury permanently shadowed polar crater water ice')]),
+              ('asteroid-bennu','Bir Asteroitten Dünya’ya Gelen Örnek','Uzay','asteroid Bennu OSIRIS REx spacecraft sample return',[
+                  ('Bennu, Dünya’ya yakın bir asteroittir.','asteroid Bennu rugged rocky surface in space'),
+                  ('NASA’nın OSIRIS-REx aracı ondan örnek topladı.','OSIRIS REx spacecraft collecting asteroid sample'),
+                  ('Örnek kapsülü 2023’te Dünya’ya ulaştı.','asteroid sample return capsule landing desert'),
+                  ('Numuneler Güneş Sistemi’nin geçmişini araştırmaya yardım ediyor.','scientists examining pristine asteroid grains laboratory')]),
+              ('cosmic-background','Evrenin Bebeklik Fotoğrafı','Uzay','cosmic microwave background early universe scientific visualization',[
+                  ('Uzayda Büyük Patlama’dan kalan bir ışınım var.','cosmic microwave background all sky map visualization'),
+                  ('Bu ışık evren yaklaşık 380 bin yaşındayken yayıldı.','early universe glowing plasma scientific illustration'),
+                  ('Bugün mikrodalga ışınımı olarak algılanıyor.','microwave background radiation scientific space visualization'),
+                  ('Küçük sıcaklık farkları evrenin geçmişini anlatıyor.','CMB tiny temperature variations scientific map')]),
+              ('magnetar','Evrenin En Güçlü Mıknatıslarından Biri','Uzay','magnetar neutron star magnetic field space visualization',[
+                  ('Magnetarlar, nötron yıldızlarının özel bir türüdür.','dense neutron star magnetar in deep space'),
+                  ('Manyetik alanları olağanüstü güçlüdür.','magnetar intense magnetic field scientific visualization'),
+                  ('Bazen uzaya güçlü X ışını patlamaları yayarlar.','magnetar high energy flare in space'),
+                  ('Bu yıldız kalıntıları hâlâ araştırılıyor.','astronomers observing neutron star with space telescope')]),
+              ('neutron-collision','İki Yıldız Çarpışınca Uzay Nasıl Sarsılır?','Uzay','binary neutron star collision gravitational waves kilonova',[
+                  ('Bazı nötron yıldızları çift sistemlerde dolanır.','two neutron stars orbiting each other space'),
+                  ('Birleşmeleri uzay-zamanda dalgalar oluşturur.','gravitational waves from neutron star merger visualization'),
+                  ('2017’de böyle bir olayın ışığı da gözlendi.','kilonova glow after neutron star collision'),
+                  ('Bu birleşmeler ağır elementlerin oluşumunu açıklamaya yardım ediyor.','heavy elements forming in neutron star merger')]),
+              ('magnetic-reversal','Dünya’nın Manyetik Kutupları Değişebilir mi?','Dünya','Earth magnetic field poles reversal scientific visualization',[
+                  ('Dünya’nın manyetik alanı zamanla değişir.','Earth magnetic field lines from space'),
+                  ('Jeolojik geçmişte kutuplar birçok kez yer değiştirdi.','geological magnetic polarity reversal science visual'),
+                  ('Son tam terslenme yaklaşık 780 bin yıl önceydi.','Earth ancient magnetic field scientific illustration'),
+                  ('Bu olay düzenli aralıklarla gerçekleşmez.','scientist studying paleomagnetism rock samples')]),
+              ('tectonic-plates','Kıtalar Neden Hareket Ediyor?','Dünya','Earth tectonic plates continents scientific 3D visualization',[
+                  ('Dünya’nın dış katmanı büyük levhalara ayrılmıştır.','Earth crust tectonic plates cutaway'),
+                  ('Bu levhalar yılda birkaç santimetre ilerleyebilir.','tectonic plate movement slow geological visualization'),
+                  ('Çarpışmaları dağları ve depremleri oluşturabilir.','mountain building tectonic plate collision'),
+                  ('Bilim insanları hareketi GPS ile ölçebiliyor.','GPS geodesy station measuring tectonic movement')]),
+              ('lake-baikal','Dünyanın En Derin Gölü','Dünya','Lake Baikal Siberia deep blue freshwater aerial',[
+                  ('Baykal Gölü Sibirya’da bulunur.','Lake Baikal Siberia aerial winter landscape'),
+                  ('En derin noktası yaklaşık 1.642 metredir.','deep blue Lake Baikal underwater depth visualization'),
+                  ('Dünyanın en büyük tatlı su rezervlerinden biridir.','vast Lake Baikal shoreline aerial panorama'),
+                  ('Yalnızca burada yaşayan fok türü de bulunur.','Baikal seal nerpa swimming underwater')]),
+              ('danakil','Dünyanın En Sert Coğrafyalarından Biri','Dünya','Danakil Depression Ethiopia colorful hydrothermal landscape',[
+                  ('Danakil Çöküntüsü Etiyopya’da yer alır.','Danakil Depression Ethiopia aerial landscape'),
+                  ('Bazı bölümleri deniz seviyesinin altındadır.','Danakil salt flats below sea level landscape'),
+                  ('Volkanik etkinlik ve mineraller sıra dışı renkler oluşturur.','Dallol colorful mineral hydrothermal formations'),
+                  ('Burası Dünya’nın jeolojik açıdan hareketli bölgelerindendir.','Afar Rift volcanic geology dramatic landscape')]),
+              ('giants-causeway','Denizdeki Kusursuz Altıgen Taşlar','Dünya','Giant Causeway Northern Ireland basalt columns coast',[
+                  ('Devler Kaldırımı Kuzey İrlanda kıyısındadır.','Giant Causeway Northern Ireland aerial coast'),
+                  ('Binlerce bazalt sütun yan yana uzanır.','hexagonal basalt columns close up coastal view'),
+                  ('Sütunlar soğuyan lavın çatlamasıyla oluştu.','cooling basalt lava column formation scientific visual'),
+                  ('Bazı kesitler neredeyse kusursuz altıgen görünür.','geometric hexagonal basalt rock formations')]),
+              ('antikythera','Antik Çağın Gizemli Dişli Makinesi','Tarih','Antikythera mechanism ancient Greek bronze gears museum',[
+                  ('Düzenek 1901’de bir batıktan çıkarıldı.','Antikythera mechanism recovered ancient shipwreck'),
+                  ('İçinde birbirine bağlı çok sayıda dişli var.','ancient Greek bronze astronomical gears macro'),
+                  ('Gök cisimlerinin hareketlerini hesaplamakta kullanılıyordu.','Antikythera mechanism astronomical dial reconstruction'),
+                  ('Nasıl üretildiği bugün bile hayranlık uyandırıyor.','Antikythera mechanism museum detailed reconstruction')]),
+              ('terracotta-army','Toprağın Altındaki Binlerce Asker','Tarih','Terracotta Army Qin Shi Huang warriors excavation China',[
+                  ('Terrakotta Ordusu Çin’de keşfedildi.','Terracotta Army rows of clay soldiers China'),
+                  ('Askerler ilk Çin imparatorunun mezar kompleksiyle bağlantılı.','Qin Shi Huang mausoleum terracotta warriors'),
+                  ('Binlerce gerçek boyutlu heykel bulundu.','close up terracotta warrior faces and armor'),
+                  ('Heykellerin ayrıntıları arkeologlarca inceleniyor.','archaeologists documenting terracotta army excavation')]),
+              ('roman-concrete','Roma Betonu Neden Hâlâ Araştırılıyor?','Tarih','ancient Roman concrete Pantheon ruins close up',[
+                  ('Roma’dan kalan bazı beton yapılar hâlâ ayakta.','Pantheon Rome ancient concrete architecture'),
+                  ('Antik karışımlar modern betondan farklıydı.','Roman concrete mineral aggregate close up'),
+                  ('Kireç parçacıklarının çatlakları onarmaya yardım ettiği düşünülüyor.','Roman concrete lime clasts scientific macro'),
+                  ('Araştırmacılar bu dayanıklılığın sırlarını inceliyor.','scientists testing ancient Roman concrete sample')]),
+              ('cahokia','Kuzey Amerika’daki Büyük Antik Kent','Tarih','Cahokia Mounds Monks Mound Illinois aerial',[
+                  ('Cahokia, Mississippi Nehri yakınında gelişti.','Cahokia Mounds Illinois aerial landscape'),
+                  ('Kolomb öncesi Kuzey Amerika’nın büyük merkezlerindendi.','ancient Cahokia settlement historical reconstruction'),
+                  ('Monks Mound adlı dev toprak höyük burada bulunur.','Monks Mound Cahokia large earthen mound'),
+                  ('Kentteki nüfus değişiminin nedenleri araştırılıyor.','archaeologists surveying Cahokia ancient site')]),
+              ('akrotiri','Volkan Külünün Koruduğu Antik Şehir','Tarih','Akrotiri Santorini Bronze Age archaeological ruins',[
+                  ('Akrotiri, Santorini Adası’nda bulunur.','Akrotiri Santorini archaeological site aerial'),
+                  ('Bronz Çağı’nda volkanik kül altında kaldı.','ancient Akrotiri buried by volcanic ash reconstruction'),
+                  ('Bazı binalar ve duvar resimleri korundu.','Akrotiri preserved fresco ancient rooms'),
+                  ('Kazılar Ege’nin eski yaşamına ışık tutuyor.','archaeologists excavating Akrotiri ancient settlement')]),
+              ('tardigrades','Mikroskobik Ama Olağanüstü Dayanıklı Canlı','Dünya','tardigrade water bear microscope macro scientific',[
+                  ('Tardigradlar mikroskobik canlılardır.','tardigrade water bear macro microscope image'),
+                  ('Zor koşullarda etkinliklerini çok azaltabilirler.','tardigrade cryptobiosis scientific illustration'),
+                  ('Kuruma ve aşırı soğuğa şaşırtıcı direnç gösterebilirler.','tardigrade under microscope detailed body'),
+                  ('Ama yenilmez değiller; koşulların da sınırları var.','tardigrade scientific laboratory microscope research')]),
+              ('octopus-camouflage','Ahtapotlar Nasıl Anında Renk Değiştiriyor?','Dünya','octopus camouflage changing color coral reef underwater',[
+                  ('Ahtapotların derisinde özel renk hücreleri bulunur.','octopus chromatophores skin macro scientific'),
+                  ('Bu hücreler farklı desenler oluşturmalarını sağlar.','octopus rapidly changing skin color underwater'),
+                  ('Bazı türler derilerinin dokusunu da değiştirebilir.','octopus textured skin mimicking coral rocks'),
+                  ('Kamuflaj hem saklanmaya hem iletişime yardım eder.','camouflaged octopus blending into reef')]),
+              ('honeybee-dance','Arılar Birbirine Yön Tarifi Veriyor','Dünya','honeybee waggle dance inside beehive macro',[
+                  ('Bal arıları besin kaynaklarını dansla anlatabilir.','honeybee waggle dance on honeycomb close view'),
+                  ('Dansın açısı yön hakkında bilgi verir.','bee waggle dance direction sun scientific visual'),
+                  ('Hareketin süresi uzaklığı işaret edebilir.','honeybee communicating food distance hive'),
+                  ('Diğer işçiler bu bilgiyi yiyecek bulmakta kullanır.','worker honeybees flying toward flower field')]),
+              ('monarch-migration','Minik Kelebeklerin Binlerce Kilometrelik Yolculuğu','Dünya','monarch butterfly migration Mexico forest orange butterflies',[
+                  ('Monark kelebekleri Kuzey Amerika’da göç eder.','monarch butterflies migration in autumn sky'),
+                  ('Bazıları kışı Meksika’daki ormanlarda geçirir.','monarch butterfly overwintering Mexico oyamel forest'),
+                  ('Kuzeye dönüş yolculuğu birkaç nesle yayılır.','monarch butterfly generations migration map visual no text'),
+                  ('Yön bulma biçimleri bilim insanlarını etkiliyor.','monarch butterfly close up on milkweed')]),
+              ('zombie-ant-fungus','Karıncaları Etkileyen Parazit Mantar','Dünya','cordyceps fungus infected ant rainforest macro documentary',[
+                  ('Bazı mantarlar karıncaları enfekte edebilir.','Ophiocordyceps fungus ant on tropical leaf macro'),
+                  ('Enfeksiyon karıncanın davranışını değiştirebilir.','infected ant climbing vegetation scientific macro'),
+                  ('Mantar uygun bir noktada gelişimini sürdürür.','cordyceps fungus growing from ant natural history'),
+                  ('Sonunda sporlarını çevreye yayar.','fungal spores release rainforest macro scientific')]),
+              ('archerfish','Suyla Avlanan Balık','Dünya','archerfish shooting water jet insect mangrove',[
+                  ('Okçu balıkları suyun üstündeki böcekleri hedef alır.','archerfish aiming at insect above water'),
+                  ('Ağızlarından güçlü bir su jeti fırlatırlar.','archerfish water jet striking insect slow motion'),
+                  ('Işığın sudaki kırılmasını hesaba katmaları gerekir.','archerfish underwater view refraction target'),
+                  ('Bu yöntem avlanmada şaşırtıcı bir beceridir.','archerfish catching insect mangrove water surface')]),
+              ('cuttlefish-display','Mürekkep Balığının Renkli Derisi','Dünya','cuttlefish changing colors underwater close up',[
+                  ('Mürekkep balıkları ahtapotlarla akraba kafadanbacaklılardır.','cuttlefish swimming over sandy seabed'),
+                  ('Derilerindeki hücrelerle renkli desenler oluştururlar.','cuttlefish chromatophore color patterns macro'),
+                  ('Desenler saklanmaya ve iletişime yardımcı olur.','cuttlefish camouflage coral reef underwater'),
+                  ('Bazı türler derilerinin görünümünü saniyeler içinde değiştirir.','cuttlefish rapid color display close up')]),
           ]
+
+          topic_ids = [item[0] for item in TOPICS]
+          if len(TOPICS) != 60:
+              raise RuntimeError(f'TOPICS listesi tam 60 konu olmali; bulunan: {len(TOPICS)}')
+          if len(set(topic_ids)) != len(topic_ids):
+              raise RuntimeError('TOPICS listesinde tekrar eden konu IDsi var.')
+          if any(len(item[4]) != 4 for item in TOPICS):
+              raise RuntimeError('Her konu tam 4 bilgi sahnesi icermeli.')
 
           for folder in (OUT, IMAGES, CAPTIONS, CLIPS, HISTORY_FILE.parent):
               folder.mkdir(parents=True, exist_ok=True)
@@ -322,13 +450,13 @@ jobs:
           used_ids = {item.get('topic_id') for item in history}
           available = [item for item in TOPICS if item[0] not in used_ids]
           if not available:
-              raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin durduruldu; TOPICS havuzuna yeni konular ekleyin.')
+              raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin TOPICS havuzuna yeni konular ekleyin.')
           topic_id, title, category, hero, facts = available[0]
           print(f'Konu: {title} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
           scenes = [
               (f'{title}: bilmeniz gerekenler!', hero + ', wide establishing shot'),
               *facts,
-              ('Daha fazla ilginç bilgi için takip et!', hero + ', breathtaking cinematic closing shot')
+              ('Sence hangisi şaşırttı? Beğen, yorum yap ve abone ol!', hero + ', breathtaking cinematic closing shot')
           ]
           assert len(scenes) == SCENE_COUNT
           (OUT / 'video-plani.json').write_text(json.dumps({'topic_id': topic_id, 'title': title, 'scenes': scenes}, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -503,7 +631,8 @@ jobs:
               youtube = build('youtube', 'v3', credentials=creds, cache_discovery=False)
               description = (f'{title}\n\nDünya, tarih ve uzaydan ilginç bilgiler. '
                              'Görseller yapay zekâ destekli temsili canlandırmalardır; '
-                             'özellikle bilimsel ve tarihsel sahneler gerçek görüntüler değildir.\n\n'
+                             'özellikle bilimsel ve tarihsel sahneler gerçek görüntüler değildir.\n'
+                             'Sence en şaşırtıcı bilgi hangisi? Yorumlarda paylaş; yeni videolar için abone ol!\n\n'
                              '#Shorts #Bilim #Tarih #Uzay #Gizem')
               body = {
                   'snippet': {
