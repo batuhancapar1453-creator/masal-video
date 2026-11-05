@@ -87,7 +87,7 @@ jobs:
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
           from googleapiclient.errors import HttpError
-          
+
           ROOT = Path.cwd()
           OUT = ROOT / 'output'
           CAPTIONS = OUT / 'captions'
@@ -106,7 +106,7 @@ jobs:
           YOUTUBE_PRIVACY = os.environ.get('YOUTUBE_PRIVACY', 'public').strip()
           RUN_EVENT = os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch')
           RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
-          
+
           TOPICS = [
             ["paranormal-0317-phone", "Gece 03.17’de Çalan Telefon", "Paranormal", [
               "Telefon her gece tam 03.17’de çalıyordu.",
@@ -476,10 +476,10 @@ jobs:
               raise RuntimeError('TOPICS listesinde tekrar eden konu IDsi var.')
           if any(len(item[3]) != 4 for item in TOPICS):
               raise RuntimeError('Her konu tam 4 bilgi sahnesi icermeli.')
-          
+
           for folder in (OUT, CAPTIONS, CLIPS, VOICE_DIR, HISTORY_FILE.parent):
               folder.mkdir(parents=True, exist_ok=True)
-          
+
           required = {
               'YOUTUBE_CLIENT_ID': YOUTUBE_CLIENT_ID,
               'YOUTUBE_CLIENT_SECRET': YOUTUBE_CLIENT_SECRET,
@@ -490,7 +490,7 @@ jobs:
               raise RuntimeError('GitHub Secrets eksik: ' + ', '.join(missing))
           if YOUTUBE_PRIVACY not in ('public', 'private', 'unlisted'):
               raise RuntimeError('YOUTUBE_PRIVACY public/private/unlisted olmali.')
-          
+
           now = datetime.now(ZoneInfo('Europe/Istanbul'))
           slot = (f'{now:%Y-%m-%d}-' + ('sabah' if now.hour < 15 else 'aksam')
                   if RUN_EVENT == 'schedule' else f'manuel-{RUN_ID}')
@@ -519,25 +519,25 @@ jobs:
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
               'voice': TTS_VOICE, 'duration_seconds': 30
           }, ensure_ascii=False, indent=2), encoding='utf-8')
-          
+
           FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
           FONT_REGULAR = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
           FONT_TITLE = ImageFont.truetype(FONT_PATH, 29)
           FONT_CAPTION = ImageFont.truetype(FONT_PATH, 27)
           FONT_SMALL = ImageFont.truetype(FONT_PATH, 18)
-          
-          
+
+
           def run_ffmpeg(args):
               subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', *args], check=True)
-          
-          
+
+
           def probe_duration(path):
               return float(subprocess.check_output([
                   'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                   '-of', 'default=noprint_wrappers=1:nokey=1', str(path)
               ], text=True).strip())
-          
-          
+
+
           async def create_tts(text_value, path):
               last_error = None
               for attempt in range(3):
@@ -568,8 +568,8 @@ jobs:
                   raise RuntimeError('Ucretsiz Turkce seslendirme olusturulamadi: '
                                      + str(last_error) + ' | cevrimdisi yedek: ' + str(fallback_error))
               raise RuntimeError('Ucretsiz Turkce seslendirme bos dosya olusturdu: ' + str(last_error))
-          
-          
+
+
           def make_voice_tracks():
               print('1/5 Ucretsiz Turkce seslendirme olusturuluyor...')
               raw_files, raw_durations = [], []
@@ -582,7 +582,7 @@ jobs:
                   raw_files.append(mp3)
                   raw_durations.append(duration)
                   print(f'Ses {i}/6: {duration:.2f} saniye')
-          
+
               total = sum(raw_durations)
               speed_factor = max(1.0, total / (TARGET_SECONDS - 0.15))
               if speed_factor > 1.65:
@@ -592,7 +592,7 @@ jobs:
               scene_durations = [d + extra_each for d in spoken_durations]
               # Son klipte kayan nokta farkini kapat; toplam tam 30 saniye olsun.
               scene_durations[-1] += TARGET_SECONDS - sum(scene_durations)
-          
+
               padded_files = []
               for i, (mp3, spoken, scene_duration) in enumerate(zip(raw_files, spoken_durations, scene_durations), 1):
                   wav = VOICE_DIR / f'voice_padded_{i:02d}.wav'
@@ -607,19 +607,50 @@ jobs:
               run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat_list),
                           '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(voice)])
               actual = probe_duration(voice)
-              if abs(actual - TARGET_SECONDS) > 0.12:
-                  raise RuntimeError(f'Seslendirme zamanlamasi 30 saniyeye oturmadi: {actual:.2f}s')
+              # Concat/MP3 zaman damgalarindaki kucuk farklari son WAV dosyasinda duzelt.
+              # Buyuk sapmalari sessizce kapatmak yerine hata ver; 0.5 saniyeden fazlasi
+              # seslendirme veya sahne zamanlamasinda gercek bir soruna isaret eder.
+              if actual <= 0 or abs(actual - TARGET_SECONDS) > 0.5:
+                  raise RuntimeError(
+                      f'Seslendirme suresi beklenenden fazla sasti: {actual:.3f}s '
+                      f'(hedef {TARGET_SECONDS:.2f}s).'
+                  )
+
+              fixed_voice = VOICE_DIR / 'narration_exact_30s.wav'
+              exact_filter = (
+                  f'apad=whole_dur={TARGET_SECONDS:.6f},'
+                  f'atrim=duration={TARGET_SECONDS:.6f},'
+                  'asetpts=N/SR/TB'
+              )
+              run_ffmpeg([
+                  '-i', str(voice), '-af', exact_filter,
+                  '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le',
+                  str(fixed_voice)
+              ])
+              fixed_actual = probe_duration(fixed_voice)
+              if abs(fixed_actual - TARGET_SECONDS) > 0.002:
+                  raise RuntimeError(
+                      f'Seslendirme 30 saniyeye sabitlenemedi: {fixed_actual:.3f}s'
+                  )
+
+              fixed_voice.replace(voice)
+              actual = probe_duration(voice)
+              if abs(actual - TARGET_SECONDS) > 0.002:
+                  raise RuntimeError(
+                      f'Son seslendirme suresi 30 saniye degil: {actual:.3f}s'
+                  )
+              print(f'Seslendirme kesin suresi: {actual:.3f} saniye')
               return voice, scene_durations
-          
-          
+
+
           def gradient(top, bottom):
               arr = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
               for y in range(HEIGHT):
                   t = y / max(1, HEIGHT - 1)
                   arr[y, :, :] = [int(top[k] * (1-t) + bottom[k] * t) for k in range(3)]
               return Image.fromarray(arr, 'RGB')
-          
-          
+
+
           def make_background(topic_id, category, scene_no, seed):
               rng = random.Random(seed + scene_no * 101)
               if category == 'Uzay':
@@ -720,8 +751,8 @@ jobs:
                       d.polygon([(0,690),(90,560),(190,680),(320,510),(450,675),(540,590),(540,960),(0,960)], fill=(44,91,76,255))
                       d.polygon([(0,800),(150,700),(280,790),(420,690),(540,770),(540,960),(0,960)], fill=(29,68,58,255))
               return img
-          
-          
+
+
           def draw_ghost(draw, x, y, phase, scale=1.0, alpha=190):
               # Translucent animated apparition: floating body, waving arms and trailing hem.
               bob = 11 * math.sin(phase * 1.8) * scale
@@ -788,8 +819,8 @@ jobs:
                   bx=x+27*scale; by=torso_top+3*scale+bob
                   draw.rounded_rectangle((bx,by,bx+35*scale,by+29*scale),radius=3,fill=(166,128,88,255),outline=(72,55,42,255),width=max(1,int(2*scale)))
                   draw.line((bx+7*scale,by+8*scale,bx+27*scale,by+8*scale),fill=(218,181,132,180),width=2)
-          
-          
+
+
           def draw_astronaut(draw, x, y, phase, scale=1.0):
               bob=math.sin(phase*1.8)*15*scale
               y += bob
@@ -801,15 +832,15 @@ jobs:
               draw.line((x+20*scale,y+20*scale,x+55*scale,y+45*scale-swing), fill=(225,232,238,255), width=max(4,int(12*scale)))
               draw.line((x-12*scale,y+70*scale,x-25*scale,y+105*scale-swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
               draw.line((x+12*scale,y+70*scale,x+25*scale,y+105*scale+swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
-          
-          
+
+
           def draw_fish(draw, x, y, phase, scale=1.0, color=(70,200,190,255)):
               tail=math.sin(phase*3)*16*scale
               draw.ellipse((x-45*scale,y-24*scale,x+38*scale,y+24*scale), fill=color, outline=(5,50,70,255), width=3)
               draw.polygon([(x+30*scale,y),(x+60*scale,y-22*scale+tail),(x+60*scale,y+22*scale+tail)], fill=color, outline=(5,50,70,255))
               draw.ellipse((x-25*scale,y-7*scale,x-17*scale,y+1*scale), fill=(5,20,25,255))
-          
-          
+
+
           def draw_octopus(draw, x, y, phase, scale=1.0):
               draw.ellipse((x-48*scale,y-70*scale,x+48*scale,y+25*scale), fill=(202,103,145,255), outline=(70,34,75,255), width=4)
               draw.ellipse((x-22*scale,y-35*scale,x-8*scale,y-21*scale), fill='white')
@@ -822,8 +853,8 @@ jobs:
                   end_x=base_x+side*(25+15*math.sin(phase+i))*scale
                   end_y=y+35*scale+(i//2)*13*scale+20*math.sin(phase*1.5+i)*scale
                   draw.line((base_x,y+5*scale,end_x,end_y), fill=(178,83,128,255), width=max(3,int(9*scale)))
-          
-          
+
+
           def wrap_text(draw, text_value, font, max_width):
               words=text_value.split(); lines=[]; current=''
               for word in words:
@@ -834,8 +865,8 @@ jobs:
                       lines.append(current); current=word
               if current: lines.append(current)
               return lines
-          
-          
+
+
           def draw_subtitles(draw, text_value, progress, category, scene_no):
               # Top editorial label and progress bar.
               draw.rounded_rectangle((24,24,WIDTH-24,67), radius=17, fill=(5,10,24,175))
@@ -851,8 +882,8 @@ jobs:
               for i,line in enumerate(lines):
                   draw.text((WIDTH//2,top+18+i*line_h),line,font=FONT_CAPTION,anchor='mt',
                             fill=(255,255,255,255),stroke_width=1,stroke_fill=(0,0,0,180))
-          
-          
+
+
           def render_frame(bg, topic_id, category, scene_no, frame_no, total_frames, caption, seed):
               img=bg.copy()
               d=ImageDraw.Draw(img,'RGBA')
@@ -950,8 +981,8 @@ jobs:
               progress=(frame_no+1)/max(1,total_frames)
               draw_subtitles(d,caption,progress,category,scene_no)
               return img
-          
-          
+
+
           def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
               frames=frame_count if frame_count is not None else max(1,round(duration*FPS))
               bg=make_background(topic_id,category,scene_no,seed)
@@ -975,8 +1006,8 @@ jobs:
                   raise
               if not output.exists() or output.stat().st_size < 10000:
                   raise RuntimeError(f'{scene_no}. animasyon klibi olusturulamadi.')
-          
-          
+
+
           def make_soundtrack(path):
               total=int(TARGET_SECONDS*SAMPLE_RATE)
               t=np.arange(total,dtype=np.float32)/SAMPLE_RATE
@@ -995,8 +1026,8 @@ jobs:
               pcm=(np.clip(np.column_stack((audio,audio)),-1,1)*32767).astype('<i2')
               with wave.open(str(path),'wb') as wav:
                   wav.setnchannels(2); wav.setsampwidth(2); wav.setframerate(SAMPLE_RATE); wav.writeframes(pcm.tobytes())
-          
-          
+
+
           def youtube_upload(path):
               creds=Credentials(token=None,refresh_token=YOUTUBE_REFRESH_TOKEN,
                   token_uri='https://oauth2.googleapis.com/token',client_id=YOUTUBE_CLIENT_ID,
@@ -1028,8 +1059,8 @@ jobs:
               youtube_id=result.get('id')
               if not youtube_id: raise RuntimeError('YouTube ID donmedi: '+str(result)[:300])
               return youtube_id
-          
-          
+
+
           # Üretim: sabit görsel slayt gösterisi yok; her kare Python ile yeniden çizilir.
           print('1/5 Hareketli 2D sahneler ve Türkçe seslendirme hazırlanıyor...')
           voice,scene_durations=make_voice_tracks()
@@ -1044,7 +1075,7 @@ jobs:
               render_animated_clip(i,caption,duration,category,topic_id,seed+i*97,clip,frame_count)
               clips.append(clip)
               print(f'Hareketli sahne {i}/6 hazir: {duration:.2f} saniye')
-          
+
           print('2/5 Fon muzigi hazirlaniyor...')
           sound=OUT/'soundtrack.wav'
           make_soundtrack(sound)
@@ -1067,7 +1098,7 @@ jobs:
           if int(info.get('streams',[{}])[0].get('width',0))!=OUTPUT_WIDTH: raise RuntimeError('Video genisligi 1080 degil.')
           if int(info.get('streams',[{}])[0].get('height',0))!=OUTPUT_HEIGHT: raise RuntimeError('Video yuksekligi 1920 degil.')
           if final.stat().st_size<250000: raise RuntimeError('Video dosyasi beklenenden kucuk.')
-          
+
           print('4/5 YouTube yuklemesi baslatiliyor...')
           youtube_id=youtube_upload(final)
           youtube_url=f'https://www.youtube.com/watch?v={youtube_id}'
@@ -1075,7 +1106,7 @@ jobs:
           record={'slot':slot,'topic_id':topic_id,'title':title,'youtube_id':youtube_id,'url':youtube_url,
                   'uploaded_at':datetime.now(ZoneInfo('Europe/Istanbul')).isoformat()}
           (OUT/'upload-result.json').write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
-          
+
           print('5/5 Kalici yayin gecmisi kaydediliyor...')
           history.append(record)
           HISTORY_FILE.write_text(json.dumps(history,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
