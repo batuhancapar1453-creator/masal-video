@@ -107,6 +107,101 @@ jobs:
           RUN_EVENT = os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch')
           RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
 
+          VISUAL_KIND_BY_TOPIC = {
+              'paranormal-0317-phone': 'phone',
+              'paranormal-thirteenth-room': 'hotel',
+              'paranormal-late-mirror': 'mirror',
+              'paranormal-three-knocks': 'forest',
+              'paranormal-ghost-train': 'train',
+              'paranormal-lighthouse': 'lighthouse',
+              'paranormal-attic-steps': 'attic',
+              'paranormal-stranger-photo': 'photo',
+              'paranormal-moving-chair': 'chair',
+              'paranormal-hospital-hall': 'hospital',
+              'paranormal-zero-floor': 'elevator',
+              'paranormal-village-bell': 'bell',
+              'paranormal-door-light': 'door',
+              'paranormal-piano': 'piano',
+              'paranormal-wall-whisper': 'wall',
+              'paranormal-ghost-ship': 'ship',
+              'paranormal-red-window': 'window',
+              'paranormal-shared-dream': 'dream',
+              'paranormal-missing-passenger': 'busstop',
+              'paranormal-umbrella': 'umbrella',
+              'paranormal-last-cassette': 'cassette',
+              'paranormal-empty-class': 'classroom',
+              'paranormal-night-shop': 'shop',
+              'paranormal-bridge-shadow': 'bridge',
+              'paranormal-thirteen-clock': 'clock',
+              'paranormal-snow-cabin': 'cabin',
+              'paranormal-lost-number': 'phonebook',
+              'paranormal-bus-stop-woman': 'missing_passenger',
+              'paranormal-museum-steps': 'museum',
+              'paranormal-lantern': 'lantern',
+              'paranormal-rain-house': 'rainhouse',
+              'paranormal-empty-playground': 'swing',
+              'paranormal-last-bus': 'bus',
+              'paranormal-rooftop-steps': 'rooftop',
+              'paranormal-street-silhouette': 'silhouette',
+              'paranormal-self-opening-door': 'door_self',
+              'paranormal-carousel': 'carousel',
+              'paranormal-lake-light': 'lake',
+              'paranormal-station-announcement': 'station',
+              'paranormal-basement-door': 'basement',
+              'paranormal-village-map': 'map',
+              'paranormal-night-photo': 'camera',
+              'paranormal-cold-spot': 'coldspot',
+              'paranormal-window-fingerprints': 'fingerprints',
+              'paranormal-old-key': 'key',
+              'paranormal-third-floor': 'elevator_zero',
+              'paranormal-pine-forest': 'pine_forest',
+              'paranormal-empty-cinema': 'cinema',
+              'paranormal-library-book': 'book',
+              'paranormal-window-face': 'window_face',
+              'paranormal-doorbell': 'doorbell',
+              'paranormal-fog-road': 'road',
+              'paranormal-dancing-shadow': 'shadow',
+              'paranormal-radio-time': 'radio',
+              'paranormal-clock-thirteen': 'clock_backwards',
+              'paranormal-warm-tea': 'tea',
+              'paranormal-photo-album': 'album',
+              'paranormal-hidden-room': 'hiddenroom',
+              'paranormal-last-ferry': 'ferry',
+              'paranormal-footprints': 'footprints',
+          }
+
+          def paranormal_visual_kind(topic_id, topic_title=''):
+              """Choose a visual world for each story; new topics get a keyword-based fallback."""
+              if topic_id in VISUAL_KIND_BY_TOPIC:
+                  return VISUAL_KIND_BY_TOPIC[topic_id]
+              text_value = (str(topic_id) + ' ' + str(topic_title)).lower()
+              rules = (
+                  (('telefon', 'phone', 'numara'), 'phone'),
+                  (('ayna', 'mirror'), 'mirror'),
+                  (('tren', 'train', 'istasyon'), 'train'),
+                  (('orman', 'forest', 'ağaç'), 'forest'),
+                  (('deniz feneri', 'lighthouse'), 'lighthouse'),
+                  (('gemi', 'feribot', 'ferry', 'ship'), 'ship'),
+                  (('otobüs', 'bus', 'durak'), 'bus'),
+                  (('saat', 'clock', 'vuruş'), 'clock'),
+                  (('kapı', 'door', 'zil'), 'door'),
+                  (('pencere', 'window'), 'window'),
+                  (('kitap', 'kütüphane', 'book'), 'book'),
+                  (('fotoğraf', 'foto', 'camera'), 'photo'),
+                  (('radyo', 'radio'), 'radio'),
+                  (('kaset', 'cassette'), 'cassette'),
+                  (('salıncak', 'playground'), 'swing'),
+                  (('göl', 'lake'), 'lake'),
+                  (('sisli yol', 'road'), 'road'),
+                  (('anahtar', 'key'), 'key'),
+                  (('hastane', 'hospital'), 'hospital'),
+                  (('asansör', 'elevator', 'kat'), 'elevator'),
+              )
+              for keywords, kind in rules:
+                  if any(word in text_value for word in keywords):
+                      return kind
+              return 'haunted_room'
+
           TOPICS = [
             ["paranormal-0317-phone", "Gece 03.17’de Çalan Telefon", "Paranormal", [
               "Telefon her gece tam 03.17’de çalıyordu.",
@@ -505,7 +600,8 @@ jobs:
           if not available:
               raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin durduruldu; TOPICS havuzuna yeni konular ekleyin.')
           topic_id, title, category, facts = available[0]
-          print(f'Konu: {title} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
+          visual_theme = paranormal_visual_kind(topic_id, title)
+          print(f'Konu: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
           scenes = [
               ('Her şey sıradan görünüyordu... ta ki ilk işaret ortaya çıkana kadar.', ''),
               *((story_beat, '') for story_beat in facts),
@@ -515,7 +611,8 @@ jobs:
           (OUT / 'video-plani.json').write_text(json.dumps({
               'topic_id': topic_id, 'title': title, 'category': category,
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
-              'style': 'original procedural 2D paranormal story animation; moving characters; no static-image slideshow',
+              'visual_theme': visual_theme,
+              'style': 'original topic-specific procedural 2D animation; moving story objects and characters; scene visuals follow narration; no static-image slideshow',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
               'voice': TTS_VOICE, 'duration_seconds': 30
           }, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -651,7 +748,559 @@ jobs:
               return Image.fromarray(arr, 'RGB')
 
 
+
+
+
+
+
+          def make_paranormal_background(topic_id, scene_no, seed):
+              """Draw a different illustrated setting for the selected paranormal story."""
+              kind = paranormal_visual_kind(topic_id, title)
+              rng = random.Random(seed + scene_no * 101)
+              palettes = {
+                  'phone': ((9, 12, 30), (35, 31, 48)), 'hotel': ((10, 13, 29), (35, 34, 48)),
+                  'mirror': ((8, 12, 29), (31, 36, 57)), 'forest': ((4, 16, 20), (20, 37, 38)),
+                  'train': ((8, 14, 31), (31, 34, 50)), 'lighthouse': ((5, 18, 35), (19, 44, 61)),
+                  'attic': ((13, 10, 23), (42, 31, 35)), 'photo': ((12, 12, 27), (42, 31, 42)),
+                  'chair': ((9, 12, 26), (34, 29, 38)), 'hospital': ((7, 16, 28), (30, 43, 54)),
+                  'elevator': ((9, 13, 26), (36, 38, 51)), 'bell': ((10, 13, 30), (37, 35, 47)),
+                  'door': ((7, 11, 25), (34, 30, 42)), 'piano': ((8, 9, 22), (34, 26, 34)),
+                  'wall': ((9, 12, 24), (37, 30, 39)), 'ship': ((3, 16, 31), (14, 40, 56)),
+                  'window': ((8, 12, 27), (29, 32, 47)), 'dream': ((13, 15, 42), (46, 39, 76)),
+                  'busstop': ((7, 15, 29), (31, 39, 52)), 'umbrella': ((8, 13, 25), (28, 34, 42)),
+                  'cassette': ((10, 10, 24), (39, 29, 35)), 'classroom': ((8, 14, 28), (34, 37, 48)),
+                  'shop': ((8, 13, 27), (36, 34, 42)), 'bridge': ((6, 15, 29), (28, 38, 48)),
+                  'clock': ((9, 12, 29), (35, 33, 47)), 'cabin': ((5, 16, 29), (31, 43, 53)),
+                  'phonebook': ((10, 12, 27), (39, 31, 42)), 'museum': ((12, 13, 27), (43, 37, 45)),
+                  'lantern': ((5, 17, 24), (26, 40, 39)), 'rainhouse': ((7, 15, 29), (31, 42, 53)),
+                  'swing': ((6, 15, 27), (30, 40, 46)), 'bus': ((7, 13, 27), (31, 35, 47)),
+                  'rooftop': ((7, 12, 28), (29, 33, 47)), 'silhouette': ((6, 8, 20), (25, 25, 38)),
+                  'carousel': ((15, 10, 29), (48, 29, 49)), 'lake': ((3, 17, 31), (15, 43, 57)),
+                  'station': ((7, 13, 29), (32, 38, 52)), 'basement': ((6, 8, 20), (27, 25, 34)),
+                  'map': ((9, 12, 25), (37, 31, 37)), 'camera': ((8, 11, 27), (35, 31, 44)),
+                  'coldspot': ((5, 17, 35), (26, 39, 59)), 'fingerprints': ((7, 15, 29), (30, 38, 51)),
+                  'key': ((9, 11, 24), (37, 30, 38)), 'cinema': ((8, 7, 20), (34, 24, 36)),
+                  'book': ((9, 12, 25), (37, 31, 40)), 'doorbell': ((8, 12, 25), (35, 30, 39)),
+                  'road': ((5, 13, 26), (24, 33, 46)), 'shadow': ((7, 8, 21), (31, 27, 39)),
+                  'radio': ((8, 11, 24), (37, 30, 37)), 'tea': ((11, 12, 25), (40, 30, 34)),
+                  'album': ((10, 10, 24), (40, 29, 36)), 'hiddenroom': ((8, 10, 23), (34, 28, 37)),
+                  'ferry': ((4, 16, 31), (17, 42, 55)), 'footprints': ((5, 14, 28), (29, 38, 49)),
+                  'pine_forest': ((3, 20, 18), (15, 47, 37)), 'elevator_zero': ((8, 10, 28), (25, 28, 55)),
+                  'door_self': ((20, 8, 14), (49, 22, 28)), 'window_face': ((10, 9, 27), (40, 20, 38)),
+                  'missing_passenger': ((5, 16, 32), (17, 36, 58)), 'clock_backwards': ((22, 9, 16), (48, 22, 31)),
+              }
+              top, bottom = palettes.get(kind, ((5, 8, 22), (25, 28, 43)))
+              img = gradient(top, bottom)
+              d = ImageDraw.Draw(img, 'RGBA')
+              # Night sky / ambient light, adjusted per scene so the six shots do not look identical.
+              moon_x = 430 if scene_no % 2 else 105
+              d.ellipse((moon_x-46, 95, moon_x+46, 187), fill=(190, 205, 225, 95))
+              for _ in range(24):
+                  x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT // 2)
+                  d.ellipse((x, y, x+2, y+2), fill=(190, 210, 235, rng.randrange(45, 125)))
+
+              if kind in ('forest', 'pine_forest', 'cabin', 'lantern', 'umbrella', 'rainhouse', 'road', 'footprints', 'shadow', 'bridge', 'rooftop'):
+                  d.polygon([(0, 700), (110, 620), (210, 710), (360, 610), (540, 700), (540, 960), (0, 960)], fill=(7, 22, 25, 255))
+                  for x in (18, 92, 445, 520):
+                      d.line((x, 820, x-8, 300), fill=(3, 10, 15, 255), width=17)
+                      for j in range(4):
+                          yy = 390 + j*82
+                          d.line((x, yy, x-65+j*8, yy-65), fill=(3, 10, 15, 255), width=9)
+                          d.line((x, yy+10, x+60-j*8, yy-60), fill=(3, 10, 15, 255), width=8)
+              elif kind in ('ship', 'ferry', 'lake', 'lighthouse'):
+                  d.rectangle((0, 610, WIDTH, HEIGHT), fill=(4, 25, 43, 255))
+                  for y in (690, 760, 835):
+                      pts = [(x, y + 8*math.sin(x/35 + scene_no)) for x in range(0, WIDTH+8, 8)]
+                      d.line(pts, fill=(70, 150, 180, 90), width=3)
+              elif kind in ('train', 'bus', 'busstop', 'missing_passenger', 'station'):
+                  d.rectangle((0, 730, WIDTH, HEIGHT), fill=(20, 23, 34, 255))
+                  d.polygon([(0, 960), (190, 720), (350, 720), (540, 960)], fill=(9, 13, 22, 255))
+                  d.line((250, 720, 45, 960), fill=(125, 130, 140, 120), width=5)
+                  d.line((290, 720, 495, 960), fill=(125, 130, 140, 120), width=5)
+              else:
+                  d.rectangle((0, 760, WIDTH, HEIGHT), fill=(12, 13, 24, 255))
+                  d.line((0, 760, WIDTH, 760), fill=(95, 95, 115, 100), width=3)
+
+              # Story-specific landmarks: the setting itself identifies the episode before the character moves.
+              if kind == 'pine_forest':
+                  for x in (65, 180, 360, 475):
+                      d.polygon([(x-58, 650), (x, 270), (x+58, 650)], fill=(5, 35, 27, 255), outline=(30, 75, 53, 220))
+                      d.polygon([(x-45, 520), (x, 190), (x+45, 520)], fill=(4, 27, 23, 255))
+              elif kind == 'elevator_zero':
+                  d.rectangle((165, 235, 375, 745), fill=(12, 16, 29, 255), outline=(125, 145, 165, 255), width=10)
+                  d.rectangle((205, 145, 335, 220), fill=(4, 6, 14, 255), outline=(180, 190, 205, 255), width=4)
+                  d.text((270, 182), '-1', fill=(255, 75, 75, 255), anchor='mm')
+              elif kind == 'door_self':
+                  d.rectangle((135, 230, 405, 755), fill=(33, 18, 20, 255), outline=(170, 115, 95, 255), width=10)
+                  d.ellipse((345, 485, 375, 515), fill=(230, 180, 100, 255))
+                  d.line((270, 240, 270, 745), fill=(90, 45, 42, 255), width=5)
+              elif kind == 'window_face':
+                  d.rectangle((95, 205, 445, 700), fill=(5, 9, 23, 255), outline=(180, 90, 100, 255), width=14)
+                  d.line((270, 205, 270, 700), fill=(110, 65, 80, 220), width=5)
+              elif kind == 'missing_passenger':
+                  d.rectangle((45, 275, 495, 510), fill=(9, 19, 31, 255), outline=(130, 145, 160, 255), width=8)
+                  d.line((80, 510, 80, 760), fill=(150, 155, 160, 255), width=8)
+                  d.line((460, 510, 460, 760), fill=(150, 155, 160, 255), width=8)
+              elif kind == 'clock_backwards':
+                  d.ellipse((115, 210, 425, 520), fill=(35, 13, 20, 255), outline=(220, 145, 95, 255), width=14)
+                  d.text((270, 365), '13', fill=(255, 90, 90, 255), anchor='mm', stroke_width=2, stroke_fill=(50, 5, 10, 255))
+              if kind == 'phone':
+                  d.rectangle((55, 250, 485, 760), fill=(13, 17, 31, 255), outline=(70, 78, 98, 180), width=5)
+                  d.rectangle((80, 285, 220, 485), fill=(9, 18, 34, 255), outline=(100, 110, 130, 150), width=5)
+                  d.rectangle((120, 650, 420, 760), fill=(74, 46, 39, 255))
+              elif kind == 'hotel':
+                  for x in (40, 175, 325, 455):
+                      d.rectangle((x-38, 245, x+38, 720), fill=(22, 24, 39, 255), outline=(105, 91, 79, 180), width=4)
+                      d.ellipse((x+20, 470, x+28, 478), fill=(235, 185, 95, 230))
+                  d.line((270, 180, 270, 760), fill=(95, 90, 100, 120), width=3)
+              elif kind in ('mirror', 'photo', 'camera', 'album'):
+                  d.rectangle((130, 240, 410, 680), fill=(25, 26, 39, 255), outline=(177, 145, 100, 255), width=12)
+                  d.rectangle((151, 260, 389, 655), fill=(10, 20, 35, 255))
+              elif kind == 'attic':
+                  d.polygon([(0, 430), (270, 170), (540, 430), (540, 960), (0, 960)], fill=(25, 19, 26, 255), outline=(95, 72, 61, 255))
+                  d.rectangle((190, 310, 350, 410), fill=(7, 9, 17, 255), outline=(130, 105, 78, 255), width=6)
+              elif kind == 'hospital':
+                  for x in (70, 390):
+                      d.rectangle((x, 220, x+85, 720), fill=(17, 28, 38, 255), outline=(90, 110, 120, 180), width=4)
+                  d.line((270, 160, 270, 760), fill=(130, 150, 160, 70), width=3)
+              elif kind in ('elevator', 'elevator_zero', 'door', 'door_self', 'basement', 'doorbell', 'hiddenroom', 'key'):
+                  d.rectangle((150, 245, 390, 740), fill=(23, 24, 35, 255), outline=(120, 103, 85, 255), width=8)
+                  d.line((270, 245, 270, 740), fill=(80, 77, 81, 255), width=4)
+              elif kind == 'piano':
+                  d.rectangle((55, 455, 485, 750), fill=(8, 9, 14, 255), outline=(130, 105, 80, 255), width=5)
+                  d.rectangle((85, 655, 455, 710), fill=(225, 218, 195, 255))
+                  for x in range(105, 450, 34):
+                      d.line((x, 655, x, 710), fill=(30, 30, 35, 255), width=2)
+              elif kind == 'wall':
+                  d.rectangle((35, 270, 505, 760), fill=(47, 43, 48, 255), outline=(110, 95, 95, 170), width=5)
+                  for y in range(320, 740, 55):
+                      d.line((45, y, 495, y), fill=(100, 82, 78, 100), width=2)
+              elif kind in ('window', 'window_face', 'fingerprints'):
+                  d.rectangle((100, 210, 440, 680), fill=(8, 18, 33, 255), outline=(110, 105, 105, 255), width=12)
+                  d.line((270, 210, 270, 680), fill=(105, 110, 125, 220), width=6)
+                  d.line((100, 445, 440, 445), fill=(105, 110, 125, 220), width=6)
+              elif kind == 'dream':
+                  d.ellipse((90, 470, 250, 630), fill=(22, 30, 54, 255))
+                  d.ellipse((285, 460, 450, 630), fill=(24, 29, 55, 255))
+                  for i in range(3):
+                      d.arc((120+i*20, 220+i*30, 430-i*20, 460+i*25), 185, 350, fill=(130, 145, 210, 100), width=5)
+              elif kind in ('cassette', 'phonebook', 'radio', 'tea', 'map', 'book', 'classroom', 'shop', 'museum', 'clock', 'clock_backwards', 'bell', 'chair', 'coldspot', 'cinema'):
+                  d.rectangle((45, 630, 495, 760), fill=(54, 38, 34, 255))
+                  d.line((45, 630, 495, 630), fill=(145, 112, 83, 190), width=5)
+              elif kind == 'lighthouse':
+                  d.polygon([(360, 690), (395, 290), (455, 290), (490, 690)], fill=(190, 190, 180, 255), outline=(40, 48, 58, 255))
+                  d.rectangle((385, 260, 465, 315), fill=(35, 39, 48, 255), outline=(200, 190, 160, 255), width=5)
+              elif kind == 'cabin' or kind == 'rainhouse':
+                  d.rectangle((130, 500, 420, 770), fill=(45, 34, 29, 255), outline=(130, 100, 75, 255), width=5)
+                  d.polygon([(95, 510), (270, 350), (455, 510)], fill=(28, 24, 29, 255), outline=(125, 95, 75, 255))
+                  d.rectangle((320, 600, 380, 700), fill=(255, 185, 95, 120))
+              elif kind == 'swing':
+                  d.line((160, 280, 380, 280), fill=(115, 105, 90, 255), width=12)
+                  d.line((210, 280, 210, 610), fill=(155, 155, 165, 255), width=5)
+                  d.line((330, 280, 330, 610), fill=(155, 155, 165, 255), width=5)
+              elif kind == 'carousel':
+                  d.line((270, 270, 270, 730), fill=(170, 145, 100, 255), width=12)
+                  d.ellipse((65, 380, 475, 690), fill=(60, 34, 58, 90), outline=(190, 145, 100, 220), width=7)
+              elif kind == 'bridge':
+                  d.arc((25, 430, 515, 820), 180, 360, fill=(120, 125, 135, 255), width=20)
+                  d.line((25, 625, 515, 625), fill=(125, 125, 135, 255), width=12)
+              elif kind in ('clock', 'clock_backwards'):
+                  d.ellipse((150, 250, 390, 490), fill=(32, 30, 39, 255), outline=(185, 155, 105, 255), width=12)
+              elif kind == 'ship' or kind == 'ferry':
+                  d.polygon([(75, 650), (465, 650), (390, 760), (150, 760)], fill=(22, 31, 43, 255), outline=(150, 140, 125, 255))
+                  d.rectangle((190, 535, 360, 650), fill=(34, 39, 49, 255))
+              elif kind == 'train' or kind == 'bus':
+                  d.rectangle((80, 485, 460, 735), fill=(25, 34, 45, 255), outline=(130, 135, 145, 255), width=7)
+                  for x in (125, 215, 305, 395):
+                      d.rectangle((x, 525, x+55, 600), fill=(185, 190, 190, 100), outline=(160, 165, 170, 160), width=3)
+              elif kind in ('station', 'busstop', 'missing_passenger'):
+                  d.rectangle((55, 260, 485, 380), fill=(15, 21, 32, 255), outline=(160, 145, 110, 255), width=5)
+                  d.line((95, 380, 95, 760), fill=(135, 130, 120, 255), width=8)
+                  d.line((445, 380, 445, 760), fill=(135, 130, 120, 255), width=8)
+              elif kind == 'lake':
+                  d.ellipse((205, 450, 335, 580), fill=(120, 205, 240, 70), outline=(150, 225, 255, 180), width=4)
+              elif kind == 'map':
+                  d.polygon([(70, 350), (460, 300), (490, 700), (95, 740)], fill=(164, 139, 100, 220), outline=(70, 55, 42, 255))
+                  for x in range(140, 430, 70):
+                      d.line((x, 370, x+35, 670), fill=(80, 95, 80, 130), width=3)
+              elif kind == 'lantern':
+                  d.line((270, 300, 270, 440), fill=(120, 110, 95, 255), width=8)
+                  d.rectangle((230, 440, 310, 590), fill=(40, 35, 28, 255), outline=(180, 145, 90, 255), width=6)
+              elif kind == 'umbrella':
+                  for x in (145, 270, 395):
+                      d.ellipse((x-42, 660, x+42, 735), fill=(32, 34, 42, 255))
+              elif kind == 'silhouette' or kind == 'shadow' or kind == 'rooftop':
+                  d.rectangle((0, 680, WIDTH, 960), fill=(8, 9, 18, 255))
+                  d.line((0, 680, WIDTH, 680), fill=(85, 83, 98, 150), width=4)
+              return img
+
+
+          def draw_paranormal_subject(d, topic_id, frame_no, total_frames, phase, scene_no, seed):
+              """Animate the object/action that belongs to this exact story topic."""
+              kind = paranormal_visual_kind(topic_id, title)
+              pulse = 0.5 + 0.5 * math.sin(phase * 2.0)
+              wobble = math.sin(phase * 1.7)
+              reveal = min(1.0, max(0.0, (scene_no - 1) / 4.0))
+              glow = int(90 + 120 * pulse)
+              white = (225, 230, 240, 255)
+              gold = (255, 205, 120, 230)
+
+              if kind == 'pine_forest':
+                  for i, x in enumerate((85, 205, 335, 455)):
+                      sway = 18 * math.sin(phase * 1.3 + i)
+                      d.line((x, 330, x+sway, 730), fill=(5, 18, 16, 255), width=18)
+                      for j in range(3):
+                          yy = 390 + j*75
+                          d.line((x+sway, yy, x-70+sway, yy-65), fill=(20, 75, 48, 230), width=12)
+                          d.line((x+sway, yy, x+70+sway, yy-65), fill=(20, 75, 48, 230), width=12)
+                  eyes = int(80 + 150*pulse)
+                  d.ellipse((250, 520, 270, 540), fill=(220, 245, 185, eyes))
+                  d.ellipse((292, 520, 312, 540), fill=(220, 245, 185, eyes))
+              elif kind == 'elevator_zero':
+                  opening = int(25 + 100*(0.5 + 0.5*math.sin(phase*.7)))
+                  d.rectangle((150, 265, 270-opening//2, 740), fill=(65, 73, 88, 255), outline=(190, 195, 205, 255), width=7)
+                  d.rectangle((270+opening//2, 265, 390, 740), fill=(48, 56, 72, 255), outline=(190, 195, 205, 255), width=7)
+                  d.rectangle((205, 150, 335, 225), fill=(4, 6, 14, 255), outline=(185, 190, 200, 255), width=4)
+                  d.text((270, 188), '-1' if scene_no < 4 else '0', fill=(255, 65, 65, glow), anchor='mm')
+                  for i in range(3):
+                      yy = 330 + i*115 + int(12*math.sin(phase*2+i))
+                      d.line((215, yy, 325, yy), fill=(120, 205, 235, 130), width=3)
+              elif kind == 'door_self':
+                  angle = 35 + 22*math.sin(phase*.8)
+                  d.polygon([(155, 265), (385, 265), (385+angle, 740), (155+angle, 740)], fill=(70, 38, 30, 255), outline=(205, 150, 105, 255))
+                  hx = 345 + angle*.75
+                  d.ellipse((hx-13, 485, hx+13, 511), fill=(245, 195, 105, 255))
+                  d.arc((365, 440, 520, 600), 80, 280, fill=(255, 185, 100, glow), width=5)
+              elif kind == 'window_face':
+                  alpha = int(55 + 190*reveal*pulse)
+                  shift = 12*math.sin(phase*.6)
+                  d.ellipse((205+shift, 340, 335+shift, 485), fill=(2, 4, 12, alpha), outline=(180, 195, 220, int(alpha*.65)), width=4)
+                  d.ellipse((232+shift, 395, 247+shift, 410), fill=(230, 235, 245, alpha))
+                  d.ellipse((293+shift, 395, 308+shift, 410), fill=(230, 235, 245, alpha))
+                  d.arc((235+shift, 420, 305+shift, 465), 10, 170, fill=(180, 195, 220, alpha), width=4)
+                  d.rounded_rectangle((220+shift, 480, 320+shift, 665), radius=35, fill=(2, 4, 12, int(alpha*.65)))
+              elif kind == 'missing_passenger':
+                  bus_x = -230 + (frame_no*5 % 850)
+                  d.rounded_rectangle((bus_x, 430, bus_x+330, 650), radius=24, fill=(35, 48, 62, 255), outline=(180, 185, 190, 255), width=6)
+                  for wx in (bus_x+45, bus_x+135, bus_x+225):
+                      d.rectangle((wx, 465, wx+58, 535), fill=(255, 205, 130, int(80+150*pulse)))
+                  d.ellipse((245, 510, 295, 560), fill=(2, 4, 10, int(90+130*reveal)))
+                  d.polygon([(245, 555), (295, 555), (315, 710), (225, 710)], fill=(2, 4, 10, int(90+130*reveal)))
+              elif kind == 'clock_backwards':
+                  d.ellipse((115, 215, 425, 525), fill=(30, 10, 18, 255), outline=(225, 155, 105, 255), width=12)
+                  for i in range(13):
+                      a = i*2*math.pi/13
+                      x = 270+125*math.sin(a); y = 370-125*math.cos(a)
+                      d.ellipse((x-5, y-5, x+5, y+5), fill=(255, 210, 165, 255))
+                  a1 = -phase*.7; a2 = -phase*.09
+                  d.line((270, 370, 270+105*math.sin(a1), 370-105*math.cos(a1)), fill=white, width=8)
+                  d.line((270, 370, 270+75*math.sin(a2), 370-75*math.cos(a2)), fill=gold, width=10)
+                  d.ellipse((258, 358, 282, 382), fill=gold)
+              elif kind in ('phone', 'phonebook'):
+                  x = 270 + 7*math.sin(phase*8)
+                  d.rounded_rectangle((x-76, 420, x+76, 690), radius=24, fill=(8, 11, 19, 255), outline=(160, 170, 185, 255), width=7)
+                  d.rounded_rectangle((x-60, 445, x+60, 635), radius=10, fill=(25, 45, 66, 255))
+                  d.ellipse((x-8, 650, x+8, 666), fill=(180, 185, 195, 255))
+                  d.text((x, 505), '03:17' if kind == 'phone' else '???', fill=(255, 225, 160, 255), anchor='mm')
+                  for r in (95, 125, 155):
+                      d.arc((x-r, 470-r/2, x+r, 470+r/2), 205, 335, fill=(255, 210, 130, int(glow*.7)), width=5)
+                  if scene_no >= 4:
+                      d.ellipse((x-105, 385, x+105, 595), outline=(190, 210, 245, 100), width=4)
+              elif kind == 'hotel':
+                  gap = int(18 + 16*(0.5+0.5*math.sin(phase*.8)))
+                  d.rectangle((155, 275, 385, 725), fill=(7, 10, 19, 255), outline=(175, 150, 112, 255), width=9)
+                  d.rectangle((165, 285, 375-gap, 715), fill=(24, 24, 37, 255))
+                  d.rectangle((375-gap, 285, 385, 715), fill=(5, 7, 14, 255))
+                  d.ellipse((340-gap, 490, 352-gap, 502), fill=gold)
+                  d.text((270, 250), '13', fill=gold, anchor='mm')
+                  d.ellipse((210, 400, 330, 590), fill=(2, 4, 12, int(100+100*reveal)))
+              elif kind == 'mirror':
+                  d.rounded_rectangle((145, 230, 395, 730), radius=85, fill=(22, 35, 50, 255), outline=(190, 165, 125, 255), width=12)
+                  d.ellipse((205, 330, 335, 470), fill=(5, 10, 20, 230))
+                  d.rounded_rectangle((220, 455, 320, 650), radius=35, fill=(5, 10, 20, 230))
+                  lag = 28 + 32*math.sin(phase*.55)
+                  d.ellipse((215+lag, 335, 330+lag, 465), outline=(170, 210, 230, 210), width=5)
+                  d.line((270+lag, 470, 270+lag, 640), fill=(170, 210, 230, 190), width=9)
+              elif kind == 'forest':
+                  for i in range(3):
+                      r = 20 + ((frame_no*3+i*30) % 115)
+                      d.ellipse((270-r, 610-r, 270+r, 610+r), outline=(170, 200, 210, max(25, 150-i*35)), width=4)
+                  sx = 350 + 20*math.sin(phase)
+                  d.ellipse((sx-20, 510, sx+20, 555), fill=(1, 3, 8, 230))
+                  d.rounded_rectangle((sx-27, 550, sx+27, 680), radius=14, fill=(1, 3, 8, 230))
+              elif kind == 'train':
+                  x = 270 + 38*math.sin(phase*.55)
+                  d.polygon([(x-155, 480), (x+155, 480), (x+125, 710), (x-125, 710)], fill=(39, 48, 60, 255), outline=(175, 175, 180, 255))
+                  d.rectangle((x-105, 515, x+105, 610), fill=(9, 17, 29, 255), outline=(195, 180, 145, 255), width=5)
+                  for wx in (x-70, x, x+70):
+                      d.rectangle((wx-20, 530, wx+20, 590), fill=(255, 210, 135, int(100+130*pulse)))
+                  d.ellipse((x-28, 635, x+28, 690), fill=(255, 230, 170, glow))
+              elif kind == 'lighthouse':
+                  angle = math.sin(phase*.65)*0.7
+                  bx = 430 + 160*math.sin(angle)
+                  d.polygon([(420, 285), (bx-180, 150), (bx+180, 150)], fill=(255, 235, 175, 38))
+                  d.ellipse((390, 260, 455, 325), fill=(255, 238, 180, glow))
+              elif kind == 'attic':
+                  hatch = int(22*math.sin(phase*.7))
+                  d.polygon([(190, 315), (350, 315), (350+hatch, 400), (190, 400)], fill=(74, 51, 39, 255), outline=(190, 155, 110, 255))
+                  for i in range(14):
+                      x = 210 + (i*37 + frame_no*2) % 170
+                      y = 410 + (i*51 + frame_no*3) % 250
+                      d.ellipse((x, y, x+3, y+3), fill=(210, 190, 150, 120))
+              elif kind in ('photo', 'camera', 'album'):
+                  alpha = int(35 + 210*reveal*pulse)
+                  d.rectangle((155, 260, 385, 650), fill=(20, 25, 35, 255), outline=(205, 170, 115, 255), width=10)
+                  d.ellipse((220, 340, 320, 445), fill=(5, 8, 15, alpha))
+                  d.rounded_rectangle((205, 440, 335, 610), radius=40, fill=(5, 8, 15, alpha))
+                  if kind == 'camera':
+                      d.rounded_rectangle((170, 650, 370, 760), radius=18, fill=(25, 30, 38, 255), outline=(170, 170, 180, 255), width=6)
+                      d.ellipse((225, 665, 315, 755), fill=(4, 9, 18, 255), outline=(160, 190, 210, glow), width=8)
+                      if frame_no % 50 < 4:
+                          d.rectangle((0, 0, WIDTH, HEIGHT), fill=(255, 255, 255, 100))
+              elif kind == 'chair':
+                  rock = 12*wobble
+                  d.polygon([(170+rock, 500), (370+rock, 500), (350-rock, 560), (190-rock, 560)], fill=(95, 55, 35, 255), outline=(190, 145, 95, 255))
+                  d.polygon([(190+rock, 495), (205+rock, 360), (345+rock, 360), (360+rock, 495)], fill=(80, 48, 34, 255), outline=(185, 140, 90, 255))
+                  for x in (205, 345):
+                      d.line((x+rock, 550, x+rock-18, 735), fill=(100, 65, 42, 255), width=13)
+              elif kind == 'hospital':
+                  x = 245 + 42*math.sin(phase*.45)
+                  d.rectangle((x-115, 570, x+120, 650), fill=(185, 195, 195, 255), outline=(65, 80, 90, 255), width=5)
+                  d.ellipse((x-95, 530, x-35, 590), fill=(170, 180, 185, 255))
+                  d.line((x-105, 650, x-105, 730), fill=(100, 110, 120, 255), width=8)
+                  d.line((x+95, 650, x+95, 730), fill=(100, 110, 120, 255), width=8)
+                  d.ellipse((235, 180, 305, 250), fill=(255, 240, 195, int(75+150*pulse)))
+              elif kind == 'elevator':
+                  opening = int(70 + 60*(0.5+0.5*math.sin(phase*.55)))
+                  d.rectangle((150, 270, 270-opening//2, 730), fill=(75, 83, 94, 255), outline=(185, 190, 195, 255), width=6)
+                  d.rectangle((270+opening//2, 270, 390, 730), fill=(65, 74, 86, 255), outline=(185, 190, 195, 255), width=6)
+                  d.rectangle((220, 175, 320, 235), fill=(5, 8, 15, 255), outline=(175, 160, 125, 255), width=4)
+                  d.text((270, 205), '0' if scene_no < 4 else '3', fill=(255, 85, 85, 255), anchor='mm')
+              elif kind == 'bell':
+                  swing = 22*wobble
+                  d.arc((175+swing, 330, 365+swing, 540), 180, 360, fill=(205, 175, 110, 255), width=16)
+                  d.polygon([(190+swing, 440), (350+swing, 440), (380+swing, 580), (160+swing, 580)], fill=(150, 120, 75, 255), outline=(225, 190, 125, 255))
+                  d.ellipse((245+swing, 565, 295+swing, 625), fill=(200, 165, 105, 255))
+              elif kind == 'door' or kind == 'doorbell' or kind == 'basement' or kind == 'hiddenroom' or kind == 'key':
+                  gap = int(10 + 48*(0.5+0.5*math.sin(phase*.55)))
+                  d.rectangle((155, 260, 385-gap, 740), fill=(67, 46, 36, 255), outline=(190, 150, 105, 255), width=8)
+                  d.rectangle((385-gap, 260, 385, 740), fill=(3, 5, 12, 255))
+                  d.polygon([(385-gap, 430), (500, 360), (500, 760), (385-gap, 650)], fill=(255, 210, 130, int(35+110*pulse)))
+                  d.ellipse((340-gap, 490, 355-gap, 505), fill=gold)
+                  if kind == 'doorbell':
+                      d.ellipse((420, 460, 470, 510), fill=(135, 145, 155, 255), outline=(230, 210, 165, 255), width=5)
+                      d.ellipse((433, 473, 457, 497), fill=(255, 80, 80, glow))
+                  if kind == 'key':
+                      d.ellipse((210, 590, 265, 645), outline=(235, 195, 105, 255), width=12)
+                      d.line((260, 615, 370, 615), fill=(235, 195, 105, 255), width=12)
+                      d.line((340, 615, 340, 650), fill=(235, 195, 105, 255), width=8)
+              elif kind == 'piano':
+                  for i in range(10):
+                      x = 70+i*40
+                      lift = 12 if (i + frame_no//8) % 4 == 0 else 0
+                      d.rectangle((x, 640+lift, x+38, 720), fill=(245, 240, 220, 255), outline=(35, 35, 40, 255), width=2)
+                  for i in (1, 2, 4, 5, 6, 8):
+                      x = 70+i*40
+                      d.rectangle((x+25, 640, x+48, 690), fill=(8, 9, 13, 255))
+                  for i in range(5):
+                      x = 160 + i*55
+                      d.arc((x, 430-i*10, x+55, 510-i*10), 190, 350, fill=(220, 195, 140, 140), width=4)
+              elif kind == 'wall':
+                  for i in range(4):
+                      r = 25 + ((frame_no*2+i*32) % 120)
+                      d.arc((270-r, 510-r, 270+r, 510+r), 200, 340, fill=(180, 195, 210, max(20, 130-i*25)), width=4)
+                  d.line((270, 360, 255+10*wobble, 500, 285, 610), fill=(100, 75, 75, 220), width=5)
+              elif kind == 'window' or kind == 'fingerprints':
+                  alpha = int(35 + 210*reveal*pulse)
+                  d.ellipse((205, 335, 335, 475), fill=(2, 4, 10, alpha))
+                  d.rounded_rectangle((210, 460, 330, 650), radius=35, fill=(2, 4, 10, alpha))
+                  if kind == 'fingerprints':
+                      for i in range(5):
+                          x = 190+i*38
+                          d.ellipse((x, 430+int(8*math.sin(phase+i)), x+25, 470+int(8*math.sin(phase+i))), outline=(190, 210, 225, 190), width=3)
+              elif kind == 'dream':
+                  for i in range(4):
+                      x = 130 + i*75 + 18*math.sin(phase+i)
+                      y = 320 + 20*math.cos(phase*.7+i)
+                      d.ellipse((x-30, y-18, x+30, y+18), fill=(180, 175, 225, 65), outline=(210, 205, 245, 120), width=3)
+                  d.line((145, 520, 210, 480, 275, 520, 340, 480, 405, 520), fill=(185, 180, 235, 140), width=5)
+              elif kind == 'busstop':
+                  d.line((390, 260, 390, 750), fill=(160, 160, 165, 255), width=8)
+                  d.rectangle((350, 260, 430, 355), fill=(24, 34, 46, 255), outline=(205, 190, 145, 255), width=4)
+                  alpha = int(35+210*reveal*pulse)
+                  d.ellipse((175, 475, 245, 545), fill=(2, 4, 10, alpha))
+                  d.polygon([(175, 545), (245, 545), (265, 710), (155, 710)], fill=(2, 4, 10, alpha))
+              elif kind == 'umbrella':
+                  angle = 16*wobble
+                  d.pieslice((130+angle, 360, 410+angle, 610), 180, 360, fill=(40, 48, 68, 255), outline=(170, 175, 190, 255), width=5)
+                  d.line((270+angle, 485, 270, 740), fill=(180, 175, 160, 255), width=8)
+                  d.arc((245, 690, 300, 755), 0, 180, fill=(180, 175, 160, 255), width=8)
+              elif kind == 'cassette':
+                  d.rounded_rectangle((100, 420, 440, 660), radius=20, fill=(43, 48, 54, 255), outline=(190, 175, 145, 255), width=7)
+                  for x in (195, 345):
+                      d.ellipse((x-48, 470, x+48, 565), fill=(10, 13, 18, 255), outline=(190, 185, 165, 255), width=6)
+                      for a in range(4):
+                          ang = phase*2 + a*math.pi/2
+                          d.line((x, 518, x+35*math.cos(ang), 518+35*math.sin(ang)), fill=(170, 175, 180, 220), width=4)
+                  d.rectangle((225, 590, 315, 620), fill=(15, 18, 22, 255))
+              elif kind == 'classroom':
+                  d.rectangle((70, 270, 470, 520), fill=(17, 48, 43, 255), outline=(135, 110, 80, 255), width=8)
+                  n = min(4, 1 + frame_no//18)
+                  for i in range(n):
+                      d.line((120, 335+i*42, 230+35*i, 335+i*42), fill=(225, 220, 195, 210), width=5)
+                  for x in (100, 270, 420):
+                      d.rectangle((x-50, 680, x+50, 725), fill=(72, 49, 34, 255))
+                      d.line((x-40, 725, x-45, 790), fill=(105, 80, 55, 255), width=6)
+              elif kind == 'shop':
+                  lift = int(65+65*(0.5+0.5*math.sin(phase*.5)))
+                  d.rectangle((120, 300+lift, 420, 720), fill=(8, 15, 22, 255), outline=(185, 145, 95, 255), width=7)
+                  d.rectangle((145, 330+lift, 395, 520+lift), fill=(255, 190, 100, int(70+120*pulse)))
+                  for y in range(300, 300+lift, 18):
+                      d.line((120, y, 420, y), fill=(110, 110, 120, 160), width=3)
+              elif kind == 'bridge':
+                  x = 270 + 85*math.sin(phase*.45)
+                  d.ellipse((x-18, 470, x+18, 510), fill=(1, 3, 8, 240))
+                  d.rounded_rectangle((x-23, 505, x+23, 650), radius=12, fill=(1, 3, 8, 240))
+                  d.ellipse((x+55-18, 470, x+55+18, 510), fill=(1, 3, 8, 210))
+                  d.rounded_rectangle((x+55-23, 505, x+55+23, 650), radius=12, fill=(1, 3, 8, 210))
+              elif kind == 'clock':
+                  d.ellipse((155, 250, 385, 480), fill=(30, 29, 38, 255), outline=(215, 180, 115, 255), width=10)
+                  for i in range(12):
+                      a = i*math.pi/6
+                      x = 270+88*math.sin(a); y = 365-88*math.cos(a)
+                      d.ellipse((x-4, y-4, x+4, y+4), fill=white)
+                  a1 = phase*.15; a2 = phase*.02
+                  d.line((270, 365, 270+70*math.sin(a1), 365-70*math.cos(a1)), fill=white, width=7)
+                  d.line((270, 365, 270+52*math.sin(a2), 365-52*math.cos(a2)), fill=gold, width=9)
+                  d.ellipse((258, 353, 282, 377), fill=gold)
+              elif kind == 'cabin' or kind == 'rainhouse':
+                  for i in range(18):
+                      x = (i*37 + frame_no*2) % WIDTH
+                      y = (i*61 + frame_no*5) % HEIGHT
+                      d.line((x, y, x-8, y+22), fill=(190, 210, 225, 100), width=2)
+                  d.rectangle((320, 600, 380, 700), fill=(255, 190, 110, int(60+170*pulse)))
+                  if kind == 'cabin':
+                      for i in range(8):
+                          x = 185+i*24
+                          d.ellipse((x, 330-int((frame_no+i*8)%100), x+12, 345-int((frame_no+i*8)%100)), fill=(220, 225, 235, 90))
+              elif kind == 'museum':
+                  d.rounded_rectangle((200, 350, 340, 650), radius=35, fill=(80, 88, 96, 255), outline=(190, 180, 155, 255), width=6)
+                  d.ellipse((220+8*wobble, 275, 320+8*wobble, 385), fill=(95, 105, 112, 255), outline=(190, 180, 155, 255), width=5)
+                  d.line((240, 440, 175, 540), fill=(150, 155, 160, 255), width=15)
+                  d.line((300, 440, 365, 530+18*wobble), fill=(150, 155, 160, 255), width=15)
+              elif kind == 'lantern':
+                  x = 270+35*wobble
+                  d.line((x, 280, x, 405), fill=(150, 145, 130, 255), width=6)
+                  d.polygon([(x-45, 420), (x+45, 420), (x+30, 570), (x-30, 570)], fill=(43, 39, 32, 255), outline=(200, 160, 95, 255))
+                  d.ellipse((x-22, 450, x+22, 540), fill=(255, 195, 90, glow))
+                  d.polygon([(x-25, 550), (x-155, 850), (x+160, 850)], fill=(255, 205, 120, 22))
+              elif kind == 'swing':
+                  angle = 30*wobble
+                  d.line((210, 280, 210+angle, 620), fill=(185, 190, 195, 255), width=6)
+                  d.line((330, 280, 330+angle, 620), fill=(185, 190, 195, 255), width=6)
+                  d.line((190+angle, 620, 350+angle, 620), fill=(140, 95, 55, 255), width=16)
+                  d.ellipse((235+angle, 505, 305+angle, 575), fill=(1, 3, 8, int(100+130*reveal)))
+              elif kind == 'bus':
+                  x = 270+55*math.sin(phase*.5)
+                  d.rounded_rectangle((x-190, 430, x+190, 700), radius=35, fill=(42, 54, 65, 255), outline=(185, 175, 145, 255), width=7)
+                  for wx in (x-130, x-35, x+60):
+                      d.rectangle((wx, 470, wx+72, 555), fill=(255, 205, 135, int(70+140*pulse)))
+                  for wx in (x-120, x+120):
+                      d.ellipse((wx-25, 675, wx+25, 725), fill=(8, 10, 15, 255), outline=(170, 170, 175, 255), width=5)
+              elif kind == 'rooftop' or kind == 'silhouette' or kind == 'shadow':
+                  x = (80 + frame_no*3) % 420 + 40
+                  d.ellipse((x-19, 460, x+19, 500), fill=(1, 2, 7, 245))
+                  d.polygon([(x-18, 500), (x+18, 500), (x+34, 660), (x-35, 660)], fill=(1, 2, 7, 245))
+                  d.line((x-10, 650, x-38, 735), fill=(1, 2, 7, 245), width=12)
+                  d.line((x+10, 650, x+40, 735), fill=(1, 2, 7, 245), width=12)
+                  if kind == 'shadow':
+                      d.line((x, 500, x+70*math.sin(phase*2), 380), fill=(1, 2, 7, 210), width=18)
+              elif kind == 'carousel':
+                  for i in range(4):
+                      a = phase*.6 + i*math.pi/2
+                      x = 270+125*math.cos(a); y = 540+65*math.sin(a)
+                      d.line((x, 390, x, y), fill=(205, 175, 120, 255), width=5)
+                      d.ellipse((x-24, y-30, x+24, y+30), fill=(205, 185, 145, 255), outline=(70, 45, 55, 255), width=4)
+                  d.ellipse((145, 370, 395, 430), fill=(140, 65, 95, 180), outline=(220, 170, 130, 255), width=6)
+              elif kind == 'lake':
+                  x = 270+65*math.sin(phase*.55)
+                  y = 500+30*math.cos(phase*.8)
+                  d.ellipse((x-35, y-35, x+35, y+35), fill=(130, 220, 255, glow), outline=(220, 245, 255, 230), width=4)
+                  for i in range(4):
+                      r = 45+i*28 + (frame_no*2 % 25)
+                      d.arc((x-r, 620-r/4, x+r, 620+r/4), 180, 360, fill=(110, 205, 230, 110-i*18), width=3)
+              elif kind == 'station':
+                  d.rectangle((75, 285, 465, 385), fill=(9, 14, 22, 255), outline=(195, 165, 110, 255), width=5)
+                  d.text((270, 335), 'SON SEFER', fill=(255, 200, 115, glow), anchor='mm')
+                  x = 120 + (frame_no*4 % 330)
+                  d.ellipse((x-18, 570, x+18, 606), fill=(255, 225, 160, glow))
+              elif kind == 'map':
+                  x = 130 + (frame_no*3 % 270)
+                  y = 510 + 75*math.sin(phase*.5)
+                  d.line((125, 570, x, y, 420, 430), fill=(165, 55, 45, 230), width=6)
+                  d.ellipse((x-12, y-12, x+12, y+12), fill=(255, 65, 55, 255))
+              elif kind == 'coldspot':
+                  r = 55 + 90*pulse
+                  d.ellipse((270-r, 520-r, 270+r, 520+r), outline=(140, 220, 255, 180), width=8)
+                  for i in range(12):
+                      x = 270 + (i%4-1.5)*48 + 10*math.sin(phase+i)
+                      y = 520 + (i//4-1)*55
+                      d.line((x, y-18, x, y+18), fill=(190, 230, 255, 190), width=4)
+                      d.line((x-12, y, x+12, y), fill=(190, 230, 255, 190), width=4)
+              elif kind == 'cinema':
+                  d.rectangle((95, 260, 445, 560), fill=(5, 8, 15, 255), outline=(180, 160, 125, 255), width=8)
+                  d.ellipse((210, 350, 330, 475), fill=(1, 3, 8, int(70+170*reveal)))
+                  d.polygon([(270, 160), (120, 280), (420, 280)], fill=(255, 230, 180, 25))
+                  for x in (110, 210, 310, 410):
+                      d.rounded_rectangle((x-30, 650, x+30, 740), radius=12, fill=(90, 20, 28, 255))
+              elif kind == 'book':
+                  open_amt = int(20+75*(0.5+0.5*math.sin(phase*.6)))
+                  d.polygon([(270, 500), (270-open_amt, 430), (270-open_amt, 680), (270, 735)], fill=(225, 210, 175, 255), outline=(95, 70, 50, 255))
+                  d.polygon([(270, 500), (270+open_amt, 430), (270+open_amt, 680), (270, 735)], fill=(238, 225, 190, 255), outline=(95, 70, 50, 255))
+                  for i in range(5):
+                      y = 525+i*34
+                      d.line((195, y, 255, y), fill=(95, 75, 60, 140), width=2)
+                      d.line((285, y, 345, y), fill=(95, 75, 60, 140), width=2)
+              elif kind == 'road':
+                  x = 270 + 120*math.sin(phase*.35)
+                  d.ellipse((x-22, 530, x+22, 574), fill=(255, 230, 175, glow))
+                  d.polygon([(x-15, 570), (x-125, 850), (x+130, 850)], fill=(255, 225, 160, 35))
+                  d.line((270, 700, 270, 950), fill=(185, 185, 175, 130), width=5)
+              elif kind == 'radio':
+                  d.rounded_rectangle((100, 430, 440, 680), radius=25, fill=(65, 43, 34, 255), outline=(185, 145, 95, 255), width=7)
+                  d.rectangle((145, 475, 300, 535), fill=(9, 13, 18, 255))
+                  d.line((170, 505, 275, 505+24*math.sin(phase*5)), fill=(90, 220, 180, 255), width=4)
+                  d.ellipse((335, 480, 405, 550), fill=(20, 22, 25, 255), outline=(180, 165, 135, 255), width=5)
+                  d.arc((330, 390, 455, 560), 190, 340, fill=(160, 210, 210, 150), width=4)
+              elif kind == 'tea':
+                  d.ellipse((175, 550, 365, 680), fill=(230, 220, 200, 255), outline=(150, 135, 120, 255), width=7)
+                  d.ellipse((195, 565, 345, 630), fill=(45, 25, 20, 255))
+                  d.arc((335, 570, 430, 680), 270, 90, fill=(220, 215, 200, 255), width=12)
+                  for i in range(3):
+                      x = 220+i*48+12*math.sin(phase+i)
+                      d.arc((x-25, 390-i*15, x+25, 535-i*15), 190, 350, fill=(220, 225, 230, 130), width=5)
+              elif kind == 'ferry' or kind == 'ship':
+                  x = 270+80*math.sin(phase*.35)
+                  d.polygon([(x-170, 600), (x+170, 600), (x+110, 710), (x-110, 710)], fill=(25, 35, 48, 255), outline=(175, 165, 145, 255))
+                  d.rectangle((x-75, 490, x+75, 600), fill=(48, 55, 64, 255), outline=(175, 165, 145, 255), width=5)
+                  for wx in (x-45, x, x+45):
+                      d.rectangle((wx-12, 510, wx+12, 550), fill=(255, 210, 135, glow))
+              elif kind == 'footprints':
+                  for i in range(min(10, 1+frame_no//5)):
+                      x = 210 + (i%2)*55 + 12*math.sin(i)
+                      y = 735 - i*45
+                      d.ellipse((x-12, y-22, x+12, y+22), fill=(3, 7, 14, 210))
+                      d.ellipse((x-22, y-35, x-12, y-22), fill=(3, 7, 14, 210))
+              elif kind == 'haunted_room':
+                  gx = 270+100*math.sin(phase*.5)
+                  d.ellipse((gx-32, 390, gx+32, 455), fill=(190, 205, 225, 150))
+                  d.rounded_rectangle((gx-42, 450, gx+42, 660), radius=30, fill=(190, 205, 225, 90))
+
+
           def make_background(topic_id, category, scene_no, seed):
+              if category == 'Paranormal':
+                  return make_paranormal_background(topic_id, scene_no, seed)
+              # Keep the existing non-paranormal visual worlds available if topics are expanded later.
               rng = random.Random(seed + scene_no * 101)
               if category == 'Uzay':
                   img = gradient((5, 9, 32), (18, 28, 67))
@@ -660,327 +1309,99 @@ jobs:
                       x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
                       r = rng.choice([1, 1, 2, 3])
                       d.ellipse((x-r, y-r, x+r, y+r), fill=(220, 235, 255, rng.randrange(90, 230)))
+                  cx, cy, radius = 340, 390, 150
+                  color = (65, 125, 190, 255)
                   if 'black-hole' in topic_id:
-                      cx, cy, radius = 310, 390, 150
                       d.ellipse((cx-radius-35, cy-radius//2, cx+radius+35, cy+radius//2), outline=(255, 145, 55, 220), width=22)
-                      d.ellipse((cx-radius-15, cy-radius//2-25, cx+radius+15, cy+radius//2+25), outline=(255, 210, 115, 180), width=8)
                       d.ellipse((cx-radius//2, cy-radius//2, cx+radius//2, cy+radius//2), fill=(2, 3, 10, 255))
                   else:
-                      if 'saturn' in topic_id or 'titan' in topic_id:
-                          color=(220, 175, 115, 255); cx, cy, radius=345, 390, 145
-                          d.ellipse((cx-radius-95, cy-45, cx+radius+95, cy+55), outline=(205, 180, 145, 230), width=24)
-                          d.ellipse((cx-radius-70, cy-32, cx+radius+70, cy+42), outline=(245, 220, 180, 180), width=8)
-                      elif 'mars' in topic_id:
-                          color=(198, 83, 48, 255); cx, cy, radius=340, 385, 165
-                      elif 'venus' in topic_id:
-                          color=(218, 161, 80, 255); cx, cy, radius=340, 385, 165
-                      elif 'neptune' in topic_id:
-                          color=(65, 105, 220, 255); cx, cy, radius=340, 385, 165
-                      elif 'moon' in topic_id or 'lunar' in topic_id:
-                          color=(160, 165, 177, 255); cx, cy, radius=340, 385, 165
-                      else:
-                          color=(65, 125, 190, 255); cx, cy, radius=340, 385, 165
-                      d.ellipse((cx-radius, cy-radius, cx+radius, cy+radius), fill=color)
-                      for _ in range(16):
-                          x=rng.randint(cx-radius+20,cx+radius-20); y=rng.randint(cy-radius+20,cy+radius-20); rr=rng.randint(5,18)
-                          d.ellipse((x-rr,y-rr,x+rr,y+rr), fill=(20,35,55,35), outline=(255,255,255,25), width=2)
-                  d.polygon([(0,780),(100,730),(210,780),(360,720),(540,785),(540,960),(0,960)], fill=(15,22,45,255))
-              elif category == 'Tarih':
-                  img = gradient((35, 44, 77), (230, 139, 75))
-                  d = ImageDraw.Draw(img, 'RGBA')
-                  d.ellipse((390,130,500,240), fill=(255,215,140,210))
-                  d.polygon([(0,650),(120,580),(240,650),(390,570),(540,650),(540,960),(0,960)], fill=(151,93,55,255))
-                  d.polygon([(0,760),(150,690),(270,770),(420,680),(540,750),(540,960),(0,960)], fill=(190,125,69,255))
-                  if topic_id in ('giza-void','cappadocia','petra','machu-picchu'):
-                      d.polygon([(35,680),(165,360),(295,680)], fill=(195,145,93,255), outline=(238,194,137,255))
-                      d.polygon([(245,680),(365,420),(485,680)], fill=(162,112,72,255), outline=(225,174,118,255))
-                      for yy in range(470,660,35):
-                          d.line((110,yy,205,yy), fill=(115,76,53,120), width=3)
-                  else:
-                      # Monumental stone pillars / ruins, not a static photograph.
-                      for x in (55,145,370,460):
-                          d.rectangle((x,440,x+42,690), fill=(178,157,125,255), outline=(90,75,60,255), width=3)
-                          d.rectangle((x-12,425,x+54,450), fill=(205,181,145,255))
-                      d.rectangle((120,410,425,455), fill=(185,163,130,255), outline=(90,75,60,255), width=3)
-                  # Scattered stone blocks in foreground.
-                  for x in (30,240,455):
-                      d.polygon([(x,760),(x+48,745),(x+82,770),(x+28,790)], fill=(120,88,62,255))
-              elif category == 'Paranormal':
-                  img = gradient((4, 7, 22), (18, 25, 48))
-                  d = ImageDraw.Draw(img, 'RGBA')
-                  # Cold moonlight, distant stars and drifting fog.
-                  d.ellipse((365, 105, 485, 225), fill=(205, 220, 235, 220))
-                  d.ellipse((390, 88, 500, 205), fill=(8, 13, 31, 255))
-                  for _ in range(55):
-                      x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
-                      r = rng.choice([1, 1, 2])
-                      d.ellipse((x-r, y-r, x+r, y+r), fill=(185, 205, 230, rng.randrange(70, 170)))
-                  # A haunted manor with lit windows; its lights flicker in the animation.
-                  d.polygon([(0, 635), (85, 545), (165, 620), (270, 505), (390, 615), (480, 535), (540, 610), (540, 960), (0, 960)], fill=(7, 15, 24, 255))
-                  d.polygon([(105, 715), (105, 430), (170, 360), (235, 430), (235, 715)], fill=(20, 25, 39, 255), outline=(65, 75, 95, 255))
-                  d.polygon([(85, 435), (170, 330), (255, 435)], fill=(13, 18, 32, 255), outline=(80, 86, 105, 255))
-                  d.rectangle((255, 510, 465, 730), fill=(16, 21, 34, 255), outline=(70, 80, 98, 255), width=4)
-                  d.polygon([(235, 515), (360, 405), (485, 515)], fill=(11, 17, 30, 255), outline=(75, 83, 102, 255))
-                  for x, y in ((135, 475), (190, 475), (300, 555), (405, 555)):
-                      d.rectangle((x, y, x+27, y+48), fill=(150, 145, 105, 120), outline=(95, 100, 115, 220), width=2)
-                  d.rectangle((325, 635, 375, 730), fill=(5, 8, 17, 255), outline=(85, 90, 105, 255), width=3)
-                  # Bare trees frame the house.
-                  for x in (35, 500):
-                      d.line((x, 790, x-12, 405), fill=(4, 9, 16, 255), width=13)
-                      for j in range(4):
-                          yy = 470 + j*65
-                          d.line((x-5, yy, x-65+j*8, yy-75), fill=(4, 9, 16, 255), width=8)
-                          d.line((x-5, yy+12, x+52-j*7, yy-70), fill=(4, 9, 16, 255), width=7)
-                  for y in (760, 810, 860):
-                      d.ellipse((-50, y, 590, y+65), fill=(155, 170, 190, 20))
-              else:
-                  underwater = any(k in topic_id for k in ('ocean','sea','squid','octopus','cuttlefish','fish','hydrothermal','jelly','coral','archer','bioluminescence'))
-                  if underwater:
-                      img = gradient((2,55,87),(3,15,42))
-                      d=ImageDraw.Draw(img,'RGBA')
-                      for x in range(0,WIDTH,65):
-                          d.line((x,0,x+random.randint(-20,20),HEIGHT), fill=(40,160,190,24), width=2)
-                      d.polygon([(0,810),(110,760),(220,820),(370,755),(540,810),(540,960),(0,960)], fill=(5,39,53,255))
-                      for _ in range(30):
-                          x=rng.randrange(WIDTH); y=rng.randrange(HEIGHT); r=rng.randrange(2,7)
-                          d.ellipse((x-r,y-r,x+r,y+r), outline=(155,230,245,100), width=2)
-                  else:
-                      img=gradient((48,106,142),(224,176,105))
-                      d=ImageDraw.Draw(img,'RGBA')
-                      d.ellipse((385,120,490,225), fill=(255,220,145,220))
-                      d.polygon([(0,690),(90,560),(190,680),(320,510),(450,675),(540,590),(540,960),(0,960)], fill=(44,91,76,255))
-                      d.polygon([(0,800),(150,700),(280,790),(420,690),(540,770),(540,960),(0,960)], fill=(29,68,58,255))
+                      if 'mars' in topic_id: color=(198,83,48,255)
+                      elif 'venus' in topic_id: color=(218,161,80,255)
+                      elif 'neptune' in topic_id: color=(65,105,220,255)
+                      elif 'moon' in topic_id or 'lunar' in topic_id: color=(160,165,177,255)
+                      d.ellipse((cx-radius,cy-radius,cx+radius,cy+radius),fill=color)
+                  d.polygon([(0,780),(100,730),(210,780),(360,720),(540,785),(540,960),(0,960)],fill=(15,22,45,255))
+                  return img
+              if category == 'Tarih':
+                  img=gradient((35,44,77),(230,139,75)); d=ImageDraw.Draw(img,'RGBA')
+                  d.ellipse((390,130,500,240),fill=(255,215,140,210))
+                  d.polygon([(0,650),(120,580),(240,650),(390,570),(540,650),(540,960),(0,960)],fill=(151,93,55,255))
+                  for x in (55,145,370,460):
+                      d.rectangle((x,440,x+42,690),fill=(178,157,125,255),outline=(90,75,60,255),width=3)
+                  return img
+              img=gradient((48,106,142),(224,176,105)); d=ImageDraw.Draw(img,'RGBA')
+              d.ellipse((385,120,490,225),fill=(255,220,145,220))
+              d.polygon([(0,690),(90,560),(190,680),(320,510),(450,675),(540,590),(540,960),(0,960)],fill=(44,91,76,255))
               return img
 
 
-          def draw_ghost(draw, x, y, phase, scale=1.0, alpha=190):
-              # Translucent animated apparition: floating body, waving arms and trailing hem.
-              bob = 11 * math.sin(phase * 1.8) * scale
-              sway = 17 * math.sin(phase * 1.2) * scale
-              x = x + sway
-              y = y + bob
-              fill = (205, 225, 240, int(alpha))
-              edge = (125, 160, 190, min(230, int(alpha + 35)))
-              r = 31 * scale
-              draw.ellipse((x-r, y-r, x+r, y+r), fill=fill, outline=edge, width=max(1, int(3*scale)))
-              draw.rounded_rectangle((x-r, y-3*scale, x+r, y+75*scale), radius=int(20*scale), fill=fill, outline=edge, width=max(1, int(3*scale)))
-              # Wavy lower edge moves from frame to frame.
-              points=[(x-r, y+60*scale)]
-              for j in range(9):
-                  px=x-r+j*(2*r/8)
-                  py=y+72*scale+math.sin(phase*2+j*0.8)*8*scale
-                  points.append((px,py))
-              points.extend([(x+r,y+55*scale),(x+r,y+8*scale)])
-              draw.polygon(points, fill=fill)
-              arm=math.sin(phase*2.1)*20*scale
-              draw.line((x-r+5*scale,y+18*scale,x-r-30*scale,y+40*scale+arm),fill=edge,width=max(3,int(11*scale)))
-              draw.line((x+r-5*scale,y+18*scale,x+r+30*scale,y+40*scale-arm),fill=edge,width=max(3,int(11*scale)))
-              draw.ellipse((x-12*scale,y-4*scale,x-5*scale,y+5*scale),fill=(20,35,55,int(alpha)))
-              draw.ellipse((x+5*scale,y-4*scale,x+12*scale,y+5*scale),fill=(20,35,55,int(alpha)))
-              draw.arc((x-10*scale,y+7*scale,x+10*scale,y+22*scale),10,170,fill=(50,65,85,int(alpha)),width=max(1,int(2*scale)))
-
-
-          def draw_worker(draw, x, ground, phase, scale=1.0, color=(105,69,43,255), carrying=True):
-              # Stylized but fully formed animated ancient worker: tunic, face, arms and legs.
-              bob = math.sin(phase*2) * 3.5 * scale
-              head_y = ground - 132*scale + bob
-              r = 17*scale
-              skin=(183,125,83,255); outline=(61,42,31,255)
-              draw.ellipse((x-r,head_y-r,x+r,head_y+r), fill=skin, outline=outline, width=max(1,int(2.5*scale)))
-              # Hair and linen head wrap.
-              draw.pieslice((x-r-2*scale,head_y-r-3*scale,x+r+2*scale,head_y+5*scale),180,355,fill=(49,35,29,255))
-              draw.arc((x-r,head_y-r-5*scale,x+r,head_y+12*scale),185,355,fill=(238,220,180,255),width=max(2,int(5*scale)))
-              draw.ellipse((x-7*scale,head_y-2*scale,x-3*scale,head_y+2*scale),fill=(30,25,22,255))
-              draw.ellipse((x+4*scale,head_y-2*scale,x+8*scale,head_y+2*scale),fill=(30,25,22,255))
-              draw.line((x,head_y+4*scale,x+2*scale,head_y+9*scale),fill=(105,64,46,255),width=max(1,int(2*scale)))
-              torso_top=head_y+19*scale
-              hip=ground-49*scale+bob
-              # Linen tunic with shoulder shape and waist sash.
-              draw.rounded_rectangle((x-20*scale,torso_top,x+20*scale,hip),radius=int(8*scale),fill=(226,207,162,255),outline=outline,width=max(1,int(2*scale)))
-              draw.polygon([(x-18*scale,torso_top+8*scale),(x-30*scale,torso_top+22*scale),(x-20*scale,torso_top+48*scale),(x-12*scale,torso_top+40*scale)],fill=(226,207,162,255),outline=outline)
-              draw.polygon([(x+18*scale,torso_top+8*scale),(x+30*scale,torso_top+22*scale),(x+20*scale,torso_top+48*scale),(x+12*scale,torso_top+40*scale)],fill=(226,207,162,255),outline=outline)
-              draw.line((x-18*scale,ground-68*scale,x+18*scale,ground-68*scale),fill=(133,79,45,255),width=max(2,int(5*scale)))
-              swing=math.sin(phase*2.2)*19*scale
-              # Arms swing while walking; hands are drawn as rounded fists.
-              left_hand=(x-34*scale,torso_top+46*scale+swing)
-              right_hand=(x+34*scale,torso_top+45*scale-swing)
-              draw.line((x-17*scale,torso_top+13*scale,*left_hand),fill=skin,width=max(4,int(10*scale)))
-              draw.line((x+17*scale,torso_top+13*scale,*right_hand),fill=skin,width=max(4,int(10*scale)))
-              for hx,hy in (left_hand,right_hand):
-                  draw.ellipse((hx-6*scale,hy-6*scale,hx+6*scale,hy+6*scale),fill=skin,outline=outline,width=1)
-              # Alternating stride gives a visible walk cycle.
-              stride=math.sin(phase*2.2)*15*scale
-              draw.line((x-9*scale,hip,x-15*scale+stride,ground-3*scale),fill=skin,width=max(4,int(10*scale)))
-              draw.line((x+9*scale,hip,x+15*scale-stride,ground-3*scale),fill=skin,width=max(4,int(10*scale)))
-              draw.line((x-15*scale+stride,ground-3*scale,x-3*scale+stride,ground),fill=(75,48,32,255),width=max(3,int(9*scale)))
-              draw.line((x+15*scale-stride,ground-3*scale,x+27*scale-stride,ground),fill=(75,48,32,255),width=max(3,int(9*scale)))
-              if carrying:
-                  # A stone block is held at shoulder height and bobs with the worker.
-                  bx=x+27*scale; by=torso_top+3*scale+bob
-                  draw.rounded_rectangle((bx,by,bx+35*scale,by+29*scale),radius=3,fill=(166,128,88,255),outline=(72,55,42,255),width=max(1,int(2*scale)))
-                  draw.line((bx+7*scale,by+8*scale,bx+27*scale,by+8*scale),fill=(218,181,132,180),width=2)
-
-
-          def draw_astronaut(draw, x, y, phase, scale=1.0):
-              bob=math.sin(phase*1.8)*15*scale
-              y += bob
-              draw.ellipse((x-25*scale,y-45*scale,x+25*scale,y+5*scale), fill=(225,232,238,255), outline=(35,48,75,255), width=4)
-              draw.ellipse((x-17*scale,y-37*scale,x+17*scale,y-8*scale), fill=(48,95,132,255), outline=(180,220,245,255), width=3)
-              draw.rounded_rectangle((x-29*scale,y+2*scale,x+29*scale,y+75*scale), radius=15, fill=(230,232,225,255), outline=(50,65,90,255), width=4)
-              swing=math.sin(phase*2)*22*scale
-              draw.line((x-20*scale,y+20*scale,x-55*scale,y+45*scale+swing), fill=(225,232,238,255), width=max(4,int(12*scale)))
-              draw.line((x+20*scale,y+20*scale,x+55*scale,y+45*scale-swing), fill=(225,232,238,255), width=max(4,int(12*scale)))
-              draw.line((x-12*scale,y+70*scale,x-25*scale,y+105*scale-swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
-              draw.line((x+12*scale,y+70*scale,x+25*scale,y+105*scale+swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
-
-
-          def draw_fish(draw, x, y, phase, scale=1.0, color=(70,200,190,255)):
-              tail=math.sin(phase*3)*16*scale
-              draw.ellipse((x-45*scale,y-24*scale,x+38*scale,y+24*scale), fill=color, outline=(5,50,70,255), width=3)
-              draw.polygon([(x+30*scale,y),(x+60*scale,y-22*scale+tail),(x+60*scale,y+22*scale+tail)], fill=color, outline=(5,50,70,255))
-              draw.ellipse((x-25*scale,y-7*scale,x-17*scale,y+1*scale), fill=(5,20,25,255))
-
-
-          def draw_octopus(draw, x, y, phase, scale=1.0):
-              draw.ellipse((x-48*scale,y-70*scale,x+48*scale,y+25*scale), fill=(202,103,145,255), outline=(70,34,75,255), width=4)
-              draw.ellipse((x-22*scale,y-35*scale,x-8*scale,y-21*scale), fill='white')
-              draw.ellipse((x+8*scale,y-35*scale,x+22*scale,y-21*scale), fill='white')
-              draw.ellipse((x-17*scale,y-31*scale,x-11*scale,y-25*scale), fill=(20,20,30,255))
-              draw.ellipse((x+13*scale,y-31*scale,x+19*scale,y-25*scale), fill=(20,20,30,255))
-              for i in range(8):
-                  side=-1 if i%2==0 else 1
-                  base_x=x+side*(25+i//2*5)*scale
-                  end_x=base_x+side*(25+15*math.sin(phase+i))*scale
-                  end_y=y+35*scale+(i//2)*13*scale+20*math.sin(phase*1.5+i)*scale
-                  draw.line((base_x,y+5*scale,end_x,end_y), fill=(178,83,128,255), width=max(3,int(9*scale)))
-
 
           def wrap_text(draw, text_value, font, max_width):
-              words=text_value.split(); lines=[]; current=''
+              words = text_value.split()
+              lines = []
+              current = ''
               for word in words:
-                  test=(current+' '+word).strip()
-                  if draw.textbbox((0,0),test,font=font)[2] <= max_width or not current:
-                      current=test
+                  test = (current + ' ' + word).strip()
+                  if draw.textbbox((0, 0), test, font=font)[2] <= max_width or not current:
+                      current = test
                   else:
-                      lines.append(current); current=word
-              if current: lines.append(current)
+                      lines.append(current)
+                      current = word
+              if current:
+                  lines.append(current)
               return lines
 
 
           def draw_subtitles(draw, text_value, progress, category, scene_no):
-              # Top editorial label and progress bar.
-              draw.rounded_rectangle((24,24,WIDTH-24,67), radius=17, fill=(5,10,24,175))
-              draw.text((WIDTH//2,45), f'GİZEMLİ DÜNYA  •  {category.upper()}', font=FONT_SMALL,
-                        anchor='mm', fill=(238,245,255,255))
-              draw.rounded_rectangle((24,82,WIDTH-24,89), radius=4, fill=(255,255,255,55))
-              draw.rounded_rectangle((24,82,24+(WIDTH-48)*progress,89), radius=4, fill=(255,194,75,255))
-              lines=wrap_text(draw,text_value,FONT_CAPTION,WIDTH-78)
-              line_h=37
-              panel_h=len(lines)*line_h+34
-              top=HEIGHT-72-panel_h
-              draw.rounded_rectangle((24,top,WIDTH-24,HEIGHT-72), radius=22, fill=(3,8,18,220), outline=(255,255,255,80), width=2)
-              for i,line in enumerate(lines):
-                  draw.text((WIDTH//2,top+18+i*line_h),line,font=FONT_CAPTION,anchor='mt',
-                            fill=(255,255,255,255),stroke_width=1,stroke_fill=(0,0,0,180))
+              draw.rounded_rectangle((24, 24, WIDTH-24, 67), radius=17, fill=(5, 10, 24, 175))
+              draw.text((WIDTH//2, 45), f'GİZEMLİ DÜNYA  •  {category.upper()}', font=FONT_SMALL,
+                        anchor='mm', fill=(238, 245, 255, 255))
+              draw.rounded_rectangle((24, 82, WIDTH-24, 89), radius=4, fill=(255, 255, 255, 55))
+              draw.rounded_rectangle((24, 82, 24+(WIDTH-48)*progress, 89), radius=4, fill=(255, 194, 75, 255))
+              lines = wrap_text(draw, text_value, FONT_CAPTION, WIDTH-78)
+              line_h = 37
+              panel_h = len(lines)*line_h + 34
+              top = HEIGHT-72-panel_h
+              draw.rounded_rectangle((24, top, WIDTH-24, HEIGHT-72), radius=22,
+                                     fill=(3, 8, 18, 220), outline=(255, 255, 255, 80), width=2)
+              for i, line in enumerate(lines):
+                  draw.text((WIDTH//2, top+18+i*line_h), line, font=FONT_CAPTION, anchor='mt',
+                            fill=(255, 255, 255, 255), stroke_width=1, stroke_fill=(0, 0, 0, 180))
 
 
           def render_frame(bg, topic_id, category, scene_no, frame_no, total_frames, caption, seed):
-              img=bg.copy()
-              d=ImageDraw.Draw(img,'RGBA')
-              t=frame_no/FPS
-              phase=t*2.8+scene_no
-              # Animated atmospheric layers: stars, bubbles, clouds and particles.
-              if category=='Uzay':
+              img = bg.copy()
+              d = ImageDraw.Draw(img, 'RGBA')
+              t = frame_no / FPS
+              phase = t*2.8 + scene_no
+              if category == 'Paranormal':
+                  draw_paranormal_subject(d, topic_id, frame_no, total_frames, phase, scene_no, seed)
+                  # Every story gets its own moving atmospheric details, not a repeated haunted-house overlay.
+                  kind = paranormal_visual_kind(topic_id, title)
+                  for i in range(12):
+                      x = (i*53 + frame_no*(1+i%3)*0.48 + seed%31) % WIDTH
+                      y = (i*79 - frame_no*(0.45+i%2*0.35)) % HEIGHT
+                      r = 1 + (i%3)
+                      color = (175, 205, 225, 70) if kind not in ('phone','piano','tea','cassette','radio') else (235, 190, 125, 65)
+                      d.ellipse((x-r, y-r, x+r, y+r), fill=color)
+              elif category == 'Uzay':
                   for i in range(22):
-                      x=(i*83 + frame_no*(1+i%3)*0.55 + seed%37)%WIDTH
-                      y=(i*137 + frame_no*(1+i%2)*0.7)%HEIGHT
+                      x=(i*83+frame_no*(1+i%3)*0.55+seed%37)%WIDTH
+                      y=(i*137+frame_no*(1+i%2)*0.7)%HEIGHT
                       r=2+(i%3)
                       d.ellipse((x-r,y-r,x+r,y+r),fill=(190,220,255,110))
-                  draw_astronaut(d, 105+25*math.sin(phase*.7), 560+20*math.cos(phase), phase, .72)
-                  if 'saturn' in topic_id or 'titan' in topic_id:
-                      d.arc((190,220,520,560),190,350,fill=(245,218,175,180),width=7)
-              elif category=='Tarih':
+                  draw_astronaut(d,105+25*math.sin(phase*.7),560+20*math.cos(phase),phase,.72)
+              elif category == 'Tarih':
                   for i in range(3):
-                      x=(55+i*185+frame_no*(5+i)*0.18)% (WIDTH+80)-30
-                      draw_worker(d,x,785,phase+i*1.7,.88 if i==1 else .78, carrying=(i!=1))
-                  # Dust motes drift across the construction site.
-                  for i in range(18):
-                      x=(i*53+frame_no*(1+i%2)*.6+seed%31)%WIDTH
-                      y=(i*71-frame_no*.8)%HEIGHT
-                      d.ellipse((x,y,x+3,y+3),fill=(255,218,160,100))
-              elif category=='Paranormal':
-                  # Moving fog bands, flickering windows, a drifting apparition and a sweeping light.
-                  for row in range(4):
-                      yy=700+row*48
-                      pts=[]
-                      for xx in range(0,WIDTH+12,12):
-                          pts.append((xx, yy+9*math.sin(xx/43+phase+row)))
-                      d.line(pts, fill=(170,190,215,55), width=18)
-                  flicker = 85 + int(95 * abs(math.sin(phase*2.4)))
-                  for x,y in ((135,475),(190,475),(300,555),(405,555)):
-                      d.rectangle((x,y,x+27,y+48), fill=(255,205,120,flicker))
-                  # A ghost glides across the scene, changing height and opacity.
-                  gx=270+115*math.sin(phase*.48)
-                  gy=420+38*math.sin(phase*1.1)
-                  alpha=145+int(65*(0.5+0.5*math.sin(phase*1.7)))
-                  draw_ghost(d,gx,gy,phase,1.05,alpha)
-                  # A second shadow briefly appears in a window or behind the house.
-                  if math.sin(phase*0.65+scene_no) > 0.12:
-                      sx=350+18*math.sin(phase*1.3)
-                      d.ellipse((sx-13,500,sx+13,530), fill=(1,3,9,230))
-                      d.rounded_rectangle((sx-17,525,sx+17,610), radius=9, fill=(1,3,9,230))
-                  # A flashlight beam sweeps over the ground like a moving explorer's torch.
-                  beam_x=80+(frame_no*3.2)%(WIDTH+100)-50
-                  d.polygon([(beam_x,650),(beam_x-75,900),(beam_x+115,900)], fill=(210,225,245,22))
-                  d.ellipse((beam_x-7,635,beam_x+7,649), fill=(255,238,185,235))
-                  for i in range(20):
-                      px=(i*47+frame_no*(1+i%3)*.65+seed%31)%WIDTH
-                      py=(i*83-frame_no*(.45+i%2*.4))%HEIGHT
-                      rr=1+(i%3)
-                      d.ellipse((px-rr,py-rr,px+rr,py+rr), fill=(190,210,235,90))
+                      x=(55+i*185+frame_no*(5+i)*.18)%(WIDTH+80)-30
+                      draw_worker(d,x,785,phase+i*1.7,.88 if i==1 else .78,carrying=(i!=1))
               else:
-                  if any(k in topic_id for k in ('squid','octopus','cuttlefish','archerfish')):
-                      if 'squid' in topic_id or 'octopus' in topic_id or 'cuttlefish' in topic_id:
-                          draw_octopus(d,270+35*math.sin(phase*.65),535+18*math.sin(phase),phase,1.0)
-                      else:
-                          draw_fish(d,245+45*math.sin(phase*.8),520+15*math.sin(phase*1.4),phase,1.3)
-                          d.line((290,500,370,470+12*math.sin(phase*2)),fill=(160,225,255,220),width=5)
-                  elif any(k in topic_id for k in ('honeybee','monarch','zombie-ant','tardigrade')):
-                      # A clearly visible animated insect/creature with moving legs.
-                      x=270+65*math.sin(phase*.55); y=570+12*math.sin(phase*2)
-                      if 'honeybee' in topic_id:
-                          d.ellipse((x-34,y-19,x+35,y+19),fill=(242,184,45,255),outline=(45,35,15,255),width=3)
-                          d.line((x-5,y-17,x-5,y+17),fill=(45,35,15,255),width=7)
-                          d.line((x+15,y-17,x+15,y+17),fill=(45,35,15,255),width=7)
-                          wing=abs(math.sin(phase*8))*18
-                          d.ellipse((x-22,y-35-wing,x+2,y-12),fill=(210,245,255,160))
-                          d.ellipse((x+2,y-36-wing,x+26,y-12),fill=(210,245,255,160))
-                      else:
-                          d.ellipse((x-42,y-20,x+42,y+20),fill=(100,150,95,255),outline=(25,50,30,255),width=3)
-                          for leg in range(6):
-                              lx=x-25+leg*10
-                              swing=math.sin(phase*3+leg)*12
-                              d.line((lx,y+12,lx-8+swing,y+35),fill=(45,55,35,255),width=4)
-                  else:
-                      # Moving researcher/explorer in landscape and nature scenes.
-                      x=95+((frame_no*2)%330)
-                      draw_worker(d,x,790,phase,.78,(35,48,43,255),False)
-                  for i in range(16):
-                      x=(i*47+frame_no*(1+i%3)*.7)%WIDTH
-                      y=(i*89-frame_no*(.8+i%2))%HEIGHT
-                      r=2+(i%3)
-                      d.ellipse((x-r,y-r,x+r,y+r),outline=(180,235,245,110),width=2)
-              # Animated foreground waves for underwater scenes.
-              if category=='Dünya' and any(k in topic_id for k in ('ocean','sea','squid','octopus','cuttlefish','fish','hydrothermal','archer','bioluminescence')):
-                  for row in range(3):
-                      yy=735+row*28
-                      points=[]
-                      for x in range(0,WIDTH+12,12):
-                          points.append((x,yy+8*math.sin(x/35+phase+row)))
-                      d.line(points,fill=(70,190,215,85),width=3)
+                  x=95+((frame_no*2)%330)
+                  draw_worker(d,x,790,phase,.78,(35,48,43,255),False)
               progress=(frame_no+1)/max(1,total_frames)
               draw_subtitles(d,caption,progress,category,scene_no)
               return img
+
 
 
           def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
