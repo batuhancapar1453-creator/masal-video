@@ -32,7 +32,7 @@ jobs:
       - name: FFmpeg ve font kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng blender
 
       - name: Ucretsiz Python paketlerini kur
         run: |
@@ -73,6 +73,171 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_PRIVACY: public
         run: |
+          cat > render_3d.py <<'BLENDER'
+          import bpy, sys, math, random, argparse
+          from mathutils import Vector
+          
+          argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
+          p = argparse.ArgumentParser()
+          p.add_argument('--theme', default='haunted_room')
+          p.add_argument('--scene', type=int, default=1)
+          p.add_argument('--seed', type=int, default=1)
+          p.add_argument('--duration', type=float, default=5)
+          p.add_argument('--output', required=True)
+          p.add_argument('--width', type=int, default=540)
+          p.add_argument('--height', type=int, default=960)
+          p.add_argument('--fps', type=int, default=25)
+          a = p.parse_args(argv)
+          rng = random.Random(a.seed)
+          
+          bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
+          for datablocks in (bpy.data.materials, bpy.data.curves, bpy.data.meshes, bpy.data.cameras, bpy.data.lights):
+              pass
+          
+          def mat(name, color, rough=0.72, metallic=0.0):
+              m=bpy.data.materials.new(name); m.diffuse_color=(*color,1); m.roughness=rough; m.metallic=metallic
+              return m
+          
+          colors=[(0.08,0.55,0.78),(0.92,0.28,0.18),(0.95,0.62,0.12),(0.35,0.72,0.38),(0.55,0.32,0.78),(0.92,0.35,0.58),(0.12,0.68,0.62)]
+          skin=mat('Character skin',rng.choice([(0.72,.43,.28),(.91,.68,.51),(.55,.32,.21),(.82,.59,.42),(.95,.77,.63)]))
+          shirt=mat('Unique clothing',rng.choice(colors)); pants=mat('Trousers',rng.choice([(0.05,.09,.19),(.12,.16,.24),(.28,.19,.14),(.12,.25,.28)]))
+          hair=mat('Unique hair',rng.choice([(.025,.02,.03),(.12,.055,.025),(.22,.12,.06),(.55,.19,.08),(.08,.12,.18)]))
+          shoe=mat('Shoes',(.025,.03,.045)); white=mat('Eyes',(.96,.97,1)); iris=mat('Iris',(.04,.08,.12)); dark=mat('Shadow figure',(.012,.018,.035),.95)
+          wall=mat('Deep teal walls',(.035,.095,.16)); floor=mat('Polished floor',(.055,.075,.11),.35); gold=mat('Warm light',(.98,.53,.12),.3,0.25); metal=mat('Metal',(.22,.32,.4),.25,.7)
+          
+          def cube(name, loc, scale, material, bevel=0.0):
+              bpy.ops.mesh.primitive_cube_add(size=1, location=loc); o=bpy.context.object; o.name=name; o.dimensions=scale; bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+              o.data.materials.append(material)
+              if bevel:
+                  mod=o.modifiers.new('Soft rounded edges','BEVEL'); mod.width=bevel; mod.segments=3
+                  o.modifiers.new('Weighted corner normals','WEIGHTED_NORMAL')
+              return o
+          
+          def sphere(name, loc, scale, material):
+              bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, location=loc); o=bpy.context.object; o.name=name; o.scale=scale; o.data.materials.append(material); bpy.ops.object.shade_smooth(); return o
+          
+          def cylinder(name, loc, radius, depth, material, rotation=None):
+              bpy.ops.mesh.primitive_cylinder_add(vertices=20, radius=radius, depth=depth, location=loc, rotation=rotation or (0,0,0)); o=bpy.context.object; o.name=name; o.data.materials.append(material); bpy.ops.object.shade_smooth(); return o
+          
+          def between(name, p1, p2, radius, material):
+              mid=(Vector(p1)+Vector(p2))/2; vec=Vector(p2)-Vector(p1)
+              o=cylinder(name,mid,radius,vec.length,material); o.rotation_mode='QUATERNION'; o.rotation_quaternion=vec.to_track_quat('Z','Y'); return o
+          
+          # Stage: a designed, colored 3D set, not a flat image.
+          cube('Floor',(0,0,-.18),(12,12,.35),floor,.12)
+          cube('Back wall',(0,3.0,3.3),(12,.35,7),wall,.12)
+          for x in (-5.3,5.3): cube('Side wall',(x,0,3.3),(.28,6.2,7),wall,.08)
+          # luminous wall strips and floor markings
+          for x in (-4.7,4.7): cube('Neon architectural strip',(x,2.78,3.2),(.07,.035,5.8),gold,.025)
+          for x in (-3,-1,1,3): cube('Floor inlay',(x,-.4,.005),(.025,6,.012),metal,.005)
+          
+          # Theme-specific 3D story prop.
+          if a.theme in ('elevator','elevator_zero','hotel','hospital','basement','door','door_self','doorbell','hiddenroom'):
+              cube('Elevator surround',(0,2.55,2.0),(3.25,.35,4.3),metal,.12)
+              left=cube('Elevator left door',(-.72,2.30,2.0),(1.38,.16,3.75),mat('Door blue',(.12,.3,.48)),.08)
+              right=cube('Elevator right door',(.72,2.30,2.0),(1.38,.16,3.75),mat('Door violet',(.28,.16,.48)),.08)
+              left.keyframe_insert('location',frame=1); left.location.x=-1.55; left.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.45)))
+              right.keyframe_insert('location',frame=1); right.location.x=1.55; right.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.45)))
+              for z in (1.25,2.0,2.75): sphere('Elevator button',(1.95,2.15,z),(.07,.07,.07),gold)
+          elif a.theme in ('mirror','window','window_face','photo','camera','album'):
+              cube('Mirror frame',(0,2.55,2.3),(2.6,.22,3.7),gold,.15); cube('Reflective dark glass',(0,2.40,2.3),(2.3,.08,3.4),mat('Mirror glass',(.06,.19,.27),.12,.8),.05)
+          elif a.theme in ('phone','phonebook','radio','cassette','piano','clock','clock_backwards','tea','key','book'):
+              cube('Antique table',(0,1.5,.65),(2.6,1.3,.18),mat('Wood',(.24,.095,.045)),.08)
+              for x in (-1,1):
+                  for y in (1.05,1.95): cube('Table leg',(x,y,.28),(.12,.12,.65),mat('Dark wood',(.12,.055,.03)),.035)
+              if a.theme in ('phone','phonebook'):
+                  cube('Glowing phone',(0,1.45,.88),(.52,.25,.12),mat('Phone casing',(.025,.035,.05),.2,.6),.04); cube('Phone screen',(0,1.31,.95),(.40,.012,.07),gold,.01)
+              else:
+                  sphere('Mysterious artifact',(0,1.45,1.02),(.42,.32,.24),gold)
+          elif a.theme in ('train','station','bus','busstop','missing_passenger','ship','ferry'):
+              cube('Vehicle body',(0,2.15,1.65),(4.6,.75,2.2),mat('Vehicle enamel',(.12,.34,.53)),.22)
+              for x in (-1.55,-.5,.5,1.55): cube('Vehicle window',(x,1.75,2.0),(.72,.06,.72),mat('Window glass',(.08,.28,.4),.1,.5),.05)
+              for x in (-1.5,1.5): cylinder('Wheel',(x,1.68,.55),.34,.18,shoe,(math.pi/2,0,0))
+          elif a.theme in ('forest','pine_forest','road','bridge','lake','swing','cabin','lighthouse'):
+              for i in range(7):
+                  x=-4.5+i*1.5
+                  cylinder('Tree trunk',(x,2.25,1.25),.15,2.5,mat('Bark',(.18,.075,.035)))
+                  bpy.ops.mesh.primitive_cone_add(vertices=12, radius1=.85, radius2=0, depth=2.2, location=(x,2.25,2.9)); bpy.context.object.data.materials.append(mat('Bright pine',(.045,.27,.16)))
+          else:
+              cube('Mysterious doorway',(0,2.55,2.0),(2.4,.22,3.8),gold,.08)
+              cube('Door dark inset',(0,2.39,2.0),(2.1,.08,3.5),mat('Door interior',(.018,.028,.055)),.04)
+          
+          # A different generated character per story. Body parts are separate animated 3D objects.
+          root=bpy.data.objects.new('Story character root',None); bpy.context.collection.objects.link(root)
+          root.location=(-.65,-1.0,0)
+          body=cube('Character torso',(0,0,0),(.78,.48,1.0),shirt,.20); body.parent=root; body.location=(0,0,1.55)
+          head=sphere('Character head',(0,0,0),(.39,.36,.43),skin); head.parent=root; head.location=(0,-.015,2.35)
+          haircap=sphere('Character hair',(0,0,0),(.405,.37,.23),hair); haircap.parent=root; haircap.location=(0,.015,2.62)
+          # eyes on the camera-facing side
+          for x in (-.14,.14):
+              e=sphere('Eye',(0,0,0),(.065,.035,.075),white); e.parent=root; e.location=(x,-.345,2.40)
+              q=sphere('Pupil',(0,0,0),(.027,.018,.04),iris); q.parent=root; q.location=(x,-.377,2.39)
+          # neck
+          neck=cylinder('Neck',(0,0,0),.13,.22,skin); neck.parent=root; neck.location=(0,0,2.03)
+          limbs=[]
+          for side in (-1,1):
+              arm=bpy.data.objects.new('Arm pivot',None); bpy.context.collection.objects.link(arm); arm.parent=root; arm.location=(side*.43,0,1.88)
+              upper=between('Upper arm',(0,0,0),(0,0,-.55),.13,shirt); upper.parent=arm; upper.location=(0,0,-.275)
+              hand=sphere('Hand',(0,0,0),(.14,.14,.15),skin); hand.parent=arm; hand.location=(0,0,-.62)
+              leg=bpy.data.objects.new('Leg pivot',None); bpy.context.collection.objects.link(leg); leg.parent=root; leg.location=(side*.20,0,1.12)
+              thigh=between('Leg',(0,0,0),(0,0,-.66),.16,pants); thigh.parent=leg; thigh.location=(0,0,-.33)
+              foot=cube('Sneaker',(0,0,0),(.28,.48,.16),shoe,.07); foot.parent=leg; foot.location=(0,-.10,-.67)
+              limbs.append((arm,leg,side))
+          
+          # Shadow apparition appears behind the protagonist in later beats.
+          if a.scene >= 4:
+              ghostmat=dark
+              gbody=sphere('Emerging shadow',(1.65,1.65,1.7),(.48,.22,1.15),ghostmat)
+              ghead=sphere('Shadow head',(1.65,1.62,2.85),(.38,.23,.42),ghostmat)
+              gbody.keyframe_insert('location',frame=1); gbody.location.x=.75; gbody.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.8)))
+              ghead.keyframe_insert('location',frame=1); ghead.location.x=.75; ghead.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.8)))
+          
+          # Animate protagonist according to beat; unique walk/run timing per seed.
+          frames=max(2,round(a.duration*a.fps)); mid=max(2,frames//2); end=frames
+          root.location=(-.65,-1.0,0); root.keyframe_insert('location',frame=1)
+          if a.scene in (1,2): root.location.x=1.0
+          elif a.scene in (3,4): root.location.x=-.15
+          else: root.location.x=-2.1
+          root.keyframe_insert('location',frame=end)
+          root.rotation_euler[2]=0; root.keyframe_insert('rotation_euler',frame=1)
+          root.rotation_euler[2]=rng.choice([-.18,.18,math.pi*.85]) if a.scene in (3,4,5,6) else 0
+          root.keyframe_insert('rotation_euler',frame=mid)
+          for arm,leg,side in limbs:
+              for frame in (1,mid,end):
+                  phase=(frame/frames)*math.pi*4 + (0 if side<0 else math.pi)
+                  swing=math.sin(phase)*(.48 if a.scene in (1,5,6) else .12)
+                  arm.rotation_euler[1]=swing if side<0 else -swing
+                  leg.rotation_euler[1]=-swing if side<0 else swing
+                  if a.scene in (4,5,6): arm.rotation_euler[1]+=(-.65 if side<0 else .65)
+                  arm.keyframe_insert('rotation_euler',frame=frame); leg.keyframe_insert('rotation_euler',frame=frame)
+          for obj in (root,):
+              if obj.animation_data and obj.animation_data.action:
+                  for fc in obj.animation_data.action.fcurves:
+                      for kp in fc.keyframe_points: kp.interpolation='BEZIER'
+          
+          # Cinematic portrait camera, depth and lighting.
+          bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
+          cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
+          cam.data.dof.use_dof=True; cam.data.dof.focus_object=root; cam.data.dof.aperture_fstop=5.6
+          for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
+              bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
+          
+          scene=bpy.context.scene
+          scene.render.engine='BLENDER_WORKBENCH'
+          scene.display.shading.light='STUDIO'; scene.display.shading.studio_light='paint.sl'; scene.display.shading.color_type='MATERIAL'
+          scene.display.shading.show_shadows=True; scene.display.shading.show_cavity=True; scene.display.shading.cavity_type='BOTH'
+          scene.display.shading.curvature_ridge_factor=1.25; scene.display.shading.curvature_valley_factor=1.0
+          scene.display.shading.background_type='WORLD'; scene.world.color=(.012,.018,.04)
+          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=100
+          scene.render.fps=a.fps; scene.frame_start=1; scene.frame_end=frames
+          scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='MEDIUM'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
+          scene.render.filepath=a.output; scene.render.use_file_extension=True
+          scene.view_settings.view_transform='Standard'; scene.view_settings.look='Medium High Contrast'; scene.view_settings.exposure=0; scene.view_settings.gamma=1
+          scene.render.film_transparent=False
+          scene.frame_set(1)
+          bpy.ops.render.render(animation=True)
+          BLENDER
+
           cat > create_video.py <<'PY'
           import os, io, json, time, wave, subprocess, random, math, asyncio
           from pathlib import Path
@@ -179,23 +344,23 @@ jobs:
                   (('telefon', 'phone', 'numara'), 'phone'),
                   (('ayna', 'mirror'), 'mirror'),
                   (('tren', 'train', 'istasyon'), 'train'),
-                  (('orman', 'forest', 'ağaç'), 'forest'),
+                  (('orman', 'forest', 'a臒a莽'), 'forest'),
                   (('deniz feneri', 'lighthouse'), 'lighthouse'),
                   (('gemi', 'feribot', 'ferry', 'ship'), 'ship'),
-                  (('otobüs', 'bus', 'durak'), 'bus'),
-                  (('saat', 'clock', 'vuruş'), 'clock'),
-                  (('kapı', 'door', 'zil'), 'door'),
+                  (('otob眉s', 'bus', 'durak'), 'bus'),
+                  (('saat', 'clock', 'vuru艧'), 'clock'),
+                  (('kap谋', 'door', 'zil'), 'door'),
                   (('pencere', 'window'), 'window'),
-                  (('kitap', 'kütüphane', 'book'), 'book'),
-                  (('fotoğraf', 'foto', 'camera'), 'photo'),
+                  (('kitap', 'k眉t眉phane', 'book'), 'book'),
+                  (('foto臒raf', 'foto', 'camera'), 'photo'),
                   (('radyo', 'radio'), 'radio'),
                   (('kaset', 'cassette'), 'cassette'),
-                  (('salıncak', 'playground'), 'swing'),
-                  (('göl', 'lake'), 'lake'),
+                  (('sal谋ncak', 'playground'), 'swing'),
+                  (('g枚l', 'lake'), 'lake'),
                   (('sisli yol', 'road'), 'road'),
                   (('anahtar', 'key'), 'key'),
                   (('hastane', 'hospital'), 'hospital'),
-                  (('asansör', 'elevator', 'kat'), 'elevator'),
+                  (('asans枚r', 'elevator', 'kat'), 'elevator'),
               )
               for keywords, kind in rules:
                   if any(word in text_value for word in keywords):
@@ -203,365 +368,365 @@ jobs:
               return 'haunted_room'
 
           TOPICS = [
-            ["paranormal-0317-phone", "Gece 03.17’de Çalan Telefon", "Paranormal", [
-              "Telefon her gece tam 03.17’de çalıyordu.",
-              "Arayan numara, yıllar önce kapatılmış eski evlerine aitti.",
-              "Bir gece cevap verdi; karşıdan kendi sesi duyuldu.",
-              "Ses yalnızca şunu fısıldadı: Sakın kapıyı açma."
+            ["paranormal-0317-phone", "Gece 03.17鈥檇e 脟alan Telefon", "Paranormal", [
+              "Telefon her gece tam 03.17鈥檇e 莽al谋yordu.",
+              "Arayan numara, y谋llar 枚nce kapat谋lm谋艧 eski evlerine aitti.",
+              "Bir gece cevap verdi; kar艧谋dan kendi sesi duyuldu.",
+              "Ses yaln谋zca 艧unu f谋s谋ldad谋: Sak谋n kap谋y谋 a莽ma."
             ]],
-            ["paranormal-thirteenth-room", "Oteldeki On Üçüncü Oda", "Paranormal", [
-              "Eski otelin koridorunda on iki oda görünüyordu.",
-              "Gece görevli, duvarda yeni bir kapı fark etti.",
-              "Kapının ardında kendi odasının birebir aynısı vardı.",
-              "Yatağın üzerinde ise henüz çekilmemiş bir valiz duruyordu."
+            ["paranormal-thirteenth-room", "Oteldeki On 脺莽眉nc眉 Oda", "Paranormal", [
+              "Eski otelin koridorunda on iki oda g枚r眉n眉yordu.",
+              "Gece g枚revli, duvarda yeni bir kap谋 fark etti.",
+              "Kap谋n谋n ard谋nda kendi odas谋n谋n birebir ayn谋s谋 vard谋.",
+              "Yata臒谋n 眉zerinde ise hen眉z 莽ekilmemi艧 bir valiz duruyordu."
             ]],
-            ["paranormal-late-mirror", "Aynadaki Yansıma Bir Saniye Geç Kaldı", "Paranormal", [
-              "Genç adam aynaya baktığında yansıması gülümsedi.",
-              "Ama kendisi hiç gülümsememişti.",
-              "Elini kaldırdı; aynadaki el birkaç saniye sonra kalktı.",
-              "O gece aynayı duvara çevirdi, sabah yine karşısındaydı."
+            ["paranormal-late-mirror", "Aynadaki Yans谋ma Bir Saniye Ge莽 Kald谋", "Paranormal", [
+              "Gen莽 adam aynaya bakt谋臒谋nda yans谋mas谋 g眉l眉msedi.",
+              "Ama kendisi hi莽 g眉l眉msememi艧ti.",
+              "Elini kald谋rd谋; aynadaki el birka莽 saniye sonra kalkt谋.",
+              "O gece aynay谋 duvara 莽evirdi, sabah yine kar艧谋s谋ndayd谋."
             ]],
-            ["paranormal-three-knocks", "Ormandan Gelen Üç Vuruş", "Paranormal", [
-              "Kampçılar gece çadırlarının çevresinde üç vuruş duydu.",
-              "Ses her seferinde biraz daha yakından geliyordu.",
-              "Dışarı çıktıklarında ağaçların arasında kimseyi göremediler.",
-              "Sabah çadırın üzerinde içeriden atılmış gibi üç iz vardı."
+            ["paranormal-three-knocks", "Ormandan Gelen 脺莽 Vuru艧", "Paranormal", [
+              "Kamp莽谋lar gece 莽ad谋rlar谋n谋n 莽evresinde 眉莽 vuru艧 duydu.",
+              "Ses her seferinde biraz daha yak谋ndan geliyordu.",
+              "D谋艧ar谋 莽谋kt谋klar谋nda a臒a莽lar谋n aras谋nda kimseyi g枚remediler.",
+              "Sabah 莽ad谋r谋n 眉zerinde i莽eriden at谋lm谋艧 gibi 眉莽 iz vard谋."
             ]],
             ["paranormal-ghost-train", "Son Seferini Yapan Hayalet Tren", "Paranormal", [
-              "Kasabanın eski istasyonu yıllardır kapalıydı.",
-              "Buna rağmen her cuma gece yarısı tren sesi duyuluyordu.",
-              "Bir bekçi raylarda ışıkları yaklaşan eski bir tren gördü.",
-              "Tren durdu; pencerelerde yıllar önce kaybolan yolcular vardı."
+              "Kasaban谋n eski istasyonu y谋llard谋r kapal谋yd谋.",
+              "Buna ra臒men her cuma gece yar谋s谋 tren sesi duyuluyordu.",
+              "Bir bek莽i raylarda 谋艧谋klar谋 yakla艧an eski bir tren g枚rd眉.",
+              "Tren durdu; pencerelerde y谋llar 枚nce kaybolan yolcular vard谋."
             ]],
-            ["paranormal-lighthouse", "Sis İçindeki Deniz Feneri", "Paranormal", [
-              "Fırtınalı gecede terk edilmiş fener yeniden ışık verdi.",
-              "Balıkçılar ışığın denize değil, kıyıdaki kayalıklara döndüğünü gördü.",
-              "Fenerin kapısı içeriden kilitliydi.",
-              "Ertesi sabah camda ıslak bir el izi belirdi."
+            ["paranormal-lighthouse", "Sis 陌莽indeki Deniz Feneri", "Paranormal", [
+              "F谋rt谋nal谋 gecede terk edilmi艧 fener yeniden 谋艧谋k verdi.",
+              "Bal谋k莽谋lar 谋艧谋臒谋n denize de臒il, k谋y谋daki kayal谋klara d枚nd眉臒眉n眉 g枚rd眉.",
+              "Fenerin kap谋s谋 i莽eriden kilitliydi.",
+              "Ertesi sabah camda 谋slak bir el izi belirdi."
             ]],
-            ["paranormal-attic-steps", "Kilitli Tavan Arasındaki Adımlar", "Paranormal", [
-              "Aile her gece tavandan ağır adımlar duyuyordu.",
-              "Tavan arasının anahtarı yıllardır aynı çekmecedeydi.",
-              "Kapıyı açtıklarında içeride yalnızca eski bir sandalye buldular.",
-              "Aşağı indiklerinde sandalye merdivenin başında onları bekliyordu."
+            ["paranormal-attic-steps", "Kilitli Tavan Aras谋ndaki Ad谋mlar", "Paranormal", [
+              "Aile her gece tavandan a臒谋r ad谋mlar duyuyordu.",
+              "Tavan aras谋n谋n anahtar谋 y谋llard谋r ayn谋 莽ekmecedeydi.",
+              "Kap谋y谋 a莽t谋klar谋nda i莽eride yaln谋zca eski bir sandalye buldular.",
+              "A艧a臒谋 indiklerinde sandalye merdivenin ba艧谋nda onlar谋 bekliyordu."
             ]],
-            ["paranormal-stranger-photo", "Fotoğrafta Beliren Yabancı", "Paranormal", [
-              "Arkadaşlar eski evin önünde toplu fotoğraf çekti.",
-              "Fotoğrafta grubun arkasında tanımadıkları biri duruyordu.",
-              "Görüntüyü büyüttüler; yabancı evin penceresinden bakıyordu.",
-              "Evin içinde aynı fotoğrafın daha eski bir kopyası bulundu."
+            ["paranormal-stranger-photo", "Foto臒rafta Beliren Yabanc谋", "Paranormal", [
+              "Arkada艧lar eski evin 枚n眉nde toplu foto臒raf 莽ekti.",
+              "Foto臒rafta grubun arkas谋nda tan谋mad谋klar谋 biri duruyordu.",
+              "G枚r眉nt眉y眉 b眉y眉tt眉ler; yabanc谋 evin penceresinden bak谋yordu.",
+              "Evin i莽inde ayn谋 foto臒raf谋n daha eski bir kopyas谋 bulundu."
             ]],
-            ["paranormal-moving-chair", "Her Gece Yer Değiştiren Sandalye", "Paranormal", [
-              "Yaşlı evdeki sandalye her sabah başka yerde bulunuyordu.",
-              "Ev sahibi gece kamerayı açıp odadan çıktı.",
-              "Kayıtta sandalye yavaşça masaya yaklaşıyordu.",
-              "Sonra görünmeyen biri oturmuş gibi minder çöktü."
+            ["paranormal-moving-chair", "Her Gece Yer De臒i艧tiren Sandalye", "Paranormal", [
+              "Ya艧l谋 evdeki sandalye her sabah ba艧ka yerde bulunuyordu.",
+              "Ev sahibi gece kameray谋 a莽谋p odadan 莽谋kt谋.",
+              "Kay谋tta sandalye yava艧莽a masaya yakla艧谋yordu.",
+              "Sonra g枚r眉nmeyen biri oturmu艧 gibi minder 莽枚kt眉."
             ]],
-            ["paranormal-hospital-hall", "Terk Edilmiş Hastanenin Koridoru", "Paranormal", [
-              "Gece güvenliği kapalı hastaneden bir zil sesi duydu.",
-              "Ses, yıllardır kullanılmayan üçüncü kattaki odadan geliyordu.",
-              "Koridordaki ışıklar sırayla yanıp sönmeye başladı.",
-              "Kapının altından bir gölge geçti, ama oda boştu."
+            ["paranormal-hospital-hall", "Terk Edilmi艧 Hastanenin Koridoru", "Paranormal", [
+              "Gece g眉venli臒i kapal谋 hastaneden bir zil sesi duydu.",
+              "Ses, y谋llard谋r kullan谋lmayan 眉莽眉nc眉 kattaki odadan geliyordu.",
+              "Koridordaki 谋艧谋klar s谋rayla yan谋p s枚nmeye ba艧lad谋.",
+              "Kap谋n谋n alt谋ndan bir g枚lge ge莽ti, ama oda bo艧tu."
             ]],
-            ["paranormal-zero-floor", "Asansördeki Sıfırıncı Kat", "Paranormal", [
-              "Asansör normalde bodrumda durmuyordu.",
-              "Bir gece ekranda daha önce görülmeyen sıfır rakamı yandı.",
-              "Kapılar açılınca aynı binanın karanlık bir kopyası göründü.",
-              "İçerideki duvar saatleri hep aynı dakikayı gösteriyordu."
+            ["paranormal-zero-floor", "Asans枚rdeki S谋f谋r谋nc谋 Kat", "Paranormal", [
+              "Asans枚r normalde bodrumda durmuyordu.",
+              "Bir gece ekranda daha 枚nce g枚r眉lmeyen s谋f谋r rakam谋 yand谋.",
+              "Kap谋lar a莽谋l谋nca ayn谋 binan谋n karanl谋k bir kopyas谋 g枚r眉nd眉.",
+              "陌莽erideki duvar saatleri hep ayn谋 dakikay谋 g枚steriyordu."
             ]],
-            ["paranormal-village-bell", "Kayıp Köyün Gece Çanı", "Paranormal", [
-              "Haritalarda görünmeyen köyden geceleri çan sesi yükseliyordu.",
-              "Meraklı gezgin sesi takip ederek sisli yola girdi.",
-              "Taş evlerin pencerelerinde solgun ışıklar yanıyordu.",
-              "Sabah aynı yerde yalnızca boş bir tarla vardı."
+            ["paranormal-village-bell", "Kay谋p K枚y眉n Gece 脟an谋", "Paranormal", [
+              "Haritalarda g枚r眉nmeyen k枚yden geceleri 莽an sesi y眉kseliyordu.",
+              "Merakl谋 gezgin sesi takip ederek sisli yola girdi.",
+              "Ta艧 evlerin pencerelerinde solgun 谋艧谋klar yan谋yordu.",
+              "Sabah ayn谋 yerde yaln谋zca bo艧 bir tarla vard谋."
             ]],
-            ["paranormal-door-light", "Kapının Altından Sızan Işık", "Paranormal", [
-              "Evde kimse yokken bodrum kapısının altı aydınlandı.",
-              "Ev sahibi ışığı kapattı, fakat parıltı geri geldi.",
-              "Kapıyı açınca aşağıda eski bir koridor uzanıyordu.",
-              "Koridorun sonunda kendi evinin kapısı görünüyordu."
+            ["paranormal-door-light", "Kap谋n谋n Alt谋ndan S谋zan I艧谋k", "Paranormal", [
+              "Evde kimse yokken bodrum kap谋s谋n谋n alt谋 ayd谋nland谋.",
+              "Ev sahibi 谋艧谋臒谋 kapatt谋, fakat par谋lt谋 geri geldi.",
+              "Kap谋y谋 a莽谋nca a艧a臒谋da eski bir koridor uzan谋yordu.",
+              "Koridorun sonunda kendi evinin kap谋s谋 g枚r眉n眉yordu."
             ]],
-            ["paranormal-piano", "Gece Yarısı Çalan Piyano", "Paranormal", [
-              "Terk edilmiş konaktan her gece aynı melodi duyuluyordu.",
-              "Mahalleli piyanonun tuşlarının kendi kendine hareket ettiğini anlattı.",
-              "Bir müzisyen melodiyi kaydetmek için içeri girdi.",
-              "Kayıtta ikinci bir piyano daha ona eşlik ediyordu."
+            ["paranormal-piano", "Gece Yar谋s谋 脟alan Piyano", "Paranormal", [
+              "Terk edilmi艧 konaktan her gece ayn谋 melodi duyuluyordu.",
+              "Mahalleli piyanonun tu艧lar谋n谋n kendi kendine hareket etti臒ini anlatt谋.",
+              "Bir m眉zisyen melodiyi kaydetmek i莽in i莽eri girdi.",
+              "Kay谋tta ikinci bir piyano daha ona e艧lik ediyordu."
             ]],
-            ["paranormal-wall-whisper", "Duvarın İçindeki Fısıltı", "Paranormal", [
-              "Yeni taşındıkları evde duvarlardan fısıltılar geliyordu.",
-              "Sesler yalnızca ev tamamen sessizken duyuluyordu.",
-              "Bir gece fısıltı, odadaki eşyaların yerini tek tek söyledi.",
-              "Sabah bütün eşyalar anlatıldığı gibi dizilmişti."
+            ["paranormal-wall-whisper", "Duvar谋n 陌莽indeki F谋s谋lt谋", "Paranormal", [
+              "Yeni ta艧谋nd谋klar谋 evde duvarlardan f谋s谋lt谋lar geliyordu.",
+              "Sesler yaln谋zca ev tamamen sessizken duyuluyordu.",
+              "Bir gece f谋s谋lt谋, odadaki e艧yalar谋n yerini tek tek s枚yledi.",
+              "Sabah b眉t眉n e艧yalar anlat谋ld谋臒谋 gibi dizilmi艧ti."
             ]],
-            ["paranormal-ghost-ship", "Kıyıya Dönen Hayalet Gemi", "Paranormal", [
-              "Balıkçılar sisin içinden eski bir yelkenli çıktığını gördü.",
-              "Geminin yelkenleri rüzgâr yokken şişiyordu.",
-              "Güvertede kimse yoktu, ama bir fener sallanıyordu.",
-              "Şafakta gemi sisle birlikte gözden kayboldu."
+            ["paranormal-ghost-ship", "K谋y谋ya D枚nen Hayalet Gemi", "Paranormal", [
+              "Bal谋k莽谋lar sisin i莽inden eski bir yelkenli 莽谋kt谋臒谋n谋 g枚rd眉.",
+              "Geminin yelkenleri r眉zg芒r yokken 艧i艧iyordu.",
+              "G眉vertede kimse yoktu, ama bir fener sallan谋yordu.",
+              "艦afakta gemi sisle birlikte g枚zden kayboldu."
             ]],
-            ["paranormal-red-window", "Kırmızı Işıklı Pencere", "Paranormal", [
-              "Kasabanın boş evinde her gece kırmızı bir pencere yanıyordu.",
-              "Elektrik bağlantısı yıllar önce kesilmişti.",
-              "Bir komşu yaklaştığında içeride perde arkasında bir siluet gördü.",
-              "Ertesi gece evin bütün pencereleri duvarla örülmüştü."
+            ["paranormal-red-window", "K谋rm谋z谋 I艧谋kl谋 Pencere", "Paranormal", [
+              "Kasaban谋n bo艧 evinde her gece k谋rm谋z谋 bir pencere yan谋yordu.",
+              "Elektrik ba臒lant谋s谋 y谋llar 枚nce kesilmi艧ti.",
+              "Bir kom艧u yakla艧t谋臒谋nda i莽eride perde arkas谋nda bir siluet g枚rd眉.",
+              "Ertesi gece evin b眉t眉n pencereleri duvarla 枚r眉lm眉艧t眉."
             ]],
-            ["paranormal-shared-dream", "Aynı Rüyayı Gören Komşular", "Paranormal", [
-              "Aynı sokaktaki üç kişi aynı gece aynı rüyayı gördü.",
-              "Rüyalarında kapısız uzun bir koridorda yürüyorlardı.",
-              "Koridorun sonunda kendi sokaklarının tabelası duruyordu.",
-              "Sabah üçü de aynı saatte kapı zilini duydu."
+            ["paranormal-shared-dream", "Ayn谋 R眉yay谋 G枚ren Kom艧ular", "Paranormal", [
+              "Ayn谋 sokaktaki 眉莽 ki艧i ayn谋 gece ayn谋 r眉yay谋 g枚rd眉.",
+              "R眉yalar谋nda kap谋s谋z uzun bir koridorda y眉r眉yorlard谋.",
+              "Koridorun sonunda kendi sokaklar谋n谋n tabelas谋 duruyordu.",
+              "Sabah 眉莽眉 de ayn谋 saatte kap谋 zilini duydu."
             ]],
             ["paranormal-missing-passenger", "Son Duraktaki Yolcu", "Paranormal", [
-              "Gece otobüs şoförü son durakta tek yolcu aldı.",
-              "Yolcu hiç konuşmadan arka koltuğa oturdu.",
-              "Aynadan baktığında koltuk boş görünüyordu.",
-              "Bilet makinesinde ise yeni basılmış bir bilet vardı."
+              "Gece otob眉s 艧of枚r眉 son durakta tek yolcu ald谋.",
+              "Yolcu hi莽 konu艧madan arka koltu臒a oturdu.",
+              "Aynadan bakt谋臒谋nda koltuk bo艧 g枚r眉n眉yordu.",
+              "Bilet makinesinde ise yeni bas谋lm谋艧 bir bilet vard谋."
             ]],
-            ["paranormal-umbrella", "Mezarlıkta Açılan Şemsiye", "Paranormal", [
-              "Yağmursuz bir gecede mezarlıkta siyah şemsiye belirdi.",
-              "Bekçi şemsiyeyi kapatıp kulübeye götürdü.",
-              "Sabah şemsiye yine aynı mezarın başındaydı.",
-              "Toprağın üzerinde bu kez iki çift ayak izi vardı."
+            ["paranormal-umbrella", "Mezarl谋kta A莽谋lan 艦emsiye", "Paranormal", [
+              "Ya臒mursuz bir gecede mezarl谋kta siyah 艧emsiye belirdi.",
+              "Bek莽i 艧emsiyeyi kapat谋p kul眉beye g枚t眉rd眉.",
+              "Sabah 艧emsiye yine ayn谋 mezar谋n ba艧谋ndayd谋.",
+              "Topra臒谋n 眉zerinde bu kez iki 莽ift ayak izi vard谋."
             ]],
-            ["paranormal-last-cassette", "Eski Kasetin Son Kaydı", "Paranormal", [
-              "Bit pazarından alınan kasette evin eski sakinleri konuşuyordu.",
-              "Kayıt yıllar önce yapılmış görünüyordu.",
-              "Son bölümde biri bugünün tarihini fısıldadı.",
-              "Ardından kayıttaki ses, dinleyenin adını söyledi."
+            ["paranormal-last-cassette", "Eski Kasetin Son Kayd谋", "Paranormal", [
+              "Bit pazar谋ndan al谋nan kasette evin eski sakinleri konu艧uyordu.",
+              "Kay谋t y谋llar 枚nce yap谋lm谋艧 g枚r眉n眉yordu.",
+              "Son b枚l眉mde biri bug眉n眉n tarihini f谋s谋ldad谋.",
+              "Ard谋ndan kay谋ttaki ses, dinleyenin ad谋n谋 s枚yledi."
             ]],
-            ["paranormal-empty-class", "Boş Sınıfta Yapılan Yoklama", "Paranormal", [
-              "Okul kapandıktan sonra sınıftan öğretmen sesi geliyordu.",
-              "Güvenlik kamerasında sıralar boş görünüyordu.",
+            ["paranormal-empty-class", "Bo艧 S谋n谋fta Yap谋lan Yoklama", "Paranormal", [
+              "Okul kapand谋ktan sonra s谋n谋ftan 枚臒retmen sesi geliyordu.",
+              "G眉venlik kameras谋nda s谋ralar bo艧 g枚r眉n眉yordu.",
               "Tahtada her gece yeni bir isim beliriyordu.",
-              "Son yazılan isim, ertesi gün okula gelen bekçinindi."
+              "Son yaz谋lan isim, ertesi g眉n okula gelen bek莽inindi."
             ]],
-            ["paranormal-night-shop", "Gece Açılan Dükkân", "Paranormal", [
-              "Sokaktaki terk edilmiş dükkân yalnızca gece yarısı açılıyordu.",
-              "Vitrinde yıllar önce kaybolan eşyalar sergileniyordu.",
-              "Bir kadın içeri girince çocukluğundaki oyuncağını gördü.",
-              "Dışarı çıktığında dükkânın yerinde boş bir duvar vardı."
+            ["paranormal-night-shop", "Gece A莽谋lan D眉kk芒n", "Paranormal", [
+              "Sokaktaki terk edilmi艧 d眉kk芒n yaln谋zca gece yar谋s谋 a莽谋l谋yordu.",
+              "Vitrinde y谋llar 枚nce kaybolan e艧yalar sergileniyordu.",
+              "Bir kad谋n i莽eri girince 莽ocuklu臒undaki oyunca臒谋n谋 g枚rd眉.",
+              "D谋艧ar谋 莽谋kt谋臒谋nda d眉kk芒n谋n yerinde bo艧 bir duvar vard谋."
             ]],
-            ["paranormal-bridge-shadow", "Köprüdeki İkinci Gölge", "Paranormal", [
-              "Bisikletli genç köprüden geçerken iki gölge fark etti.",
-              "Ay ışığında yalnızca kendisi görünüyordu.",
-              "İkinci gölge korkuluğa doğru yürüyüp durdu.",
-              "Genç arkasına baktığında köprü tamamen boştu."
+            ["paranormal-bridge-shadow", "K枚pr眉deki 陌kinci G枚lge", "Paranormal", [
+              "Bisikletli gen莽 k枚pr眉den ge莽erken iki g枚lge fark etti.",
+              "Ay 谋艧谋臒谋nda yaln谋zca kendisi g枚r眉n眉yordu.",
+              "陌kinci g枚lge korkulu臒a do臒ru y眉r眉y眉p durdu.",
+              "Gen莽 arkas谋na bakt谋臒谋nda k枚pr眉 tamamen bo艧tu."
             ]],
-            ["paranormal-thirteen-clock", "On Üçüncü Kez Çalan Saat", "Paranormal", [
-              "Eski duvar saati gece yarısı on iki kez vurdu.",
-              "Ev halkı ses kesildi sanırken bir vuruş daha geldi.",
-              "Saatin akrebi geriye doğru dönmeye başladı.",
-              "Sabah takvimde bir günün eksildiğini fark ettiler."
+            ["paranormal-thirteen-clock", "On 脺莽眉nc眉 Kez 脟alan Saat", "Paranormal", [
+              "Eski duvar saati gece yar谋s谋 on iki kez vurdu.",
+              "Ev halk谋 ses kesildi san谋rken bir vuru艧 daha geldi.",
+              "Saatin akrebi geriye do臒ru d枚nmeye ba艧lad谋.",
+              "Sabah takvimde bir g眉n眉n eksildi臒ini fark ettiler."
             ]],
-            ["paranormal-snow-cabin", "Karlı Ormandaki Kulübe", "Paranormal", [
-              "Dağcılar kar fırtınasında terk edilmiş bir kulübeye sığındı.",
-              "Şömine kendi kendine yanmaya başladı.",
-              "Duvara asılı fotoğraftaki kişiler her bakışta değişiyordu.",
-              "Sabah fotoğrafta dağcıların kendileri vardı."
+            ["paranormal-snow-cabin", "Karl谋 Ormandaki Kul眉be", "Paranormal", [
+              "Da臒c谋lar kar f谋rt谋nas谋nda terk edilmi艧 bir kul眉beye s谋臒谋nd谋.",
+              "艦枚mine kendi kendine yanmaya ba艧lad谋.",
+              "Duvara as谋l谋 foto臒raftaki ki艧iler her bak谋艧ta de臒i艧iyordu.",
+              "Sabah foto臒rafta da臒c谋lar谋n kendileri vard谋."
             ]],
-            ["paranormal-lost-number", "Telefon Rehberindeki Kayıp Numara", "Paranormal", [
-              "Eski telefonda kayıtlı olmayan bir numara belirdi.",
-              "Arandığında karşıdan evin içindeki sesler duyuldu.",
-              "Telefon kapalı olmasına rağmen konuşma sürdü.",
-              "Son cümle, arayan kişinin arkasından geliyordu."
+            ["paranormal-lost-number", "Telefon Rehberindeki Kay谋p Numara", "Paranormal", [
+              "Eski telefonda kay谋tl谋 olmayan bir numara belirdi.",
+              "Arand谋臒谋nda kar艧谋dan evin i莽indeki sesler duyuldu.",
+              "Telefon kapal谋 olmas谋na ra臒men konu艧ma s眉rd眉.",
+              "Son c眉mle, arayan ki艧inin arkas谋ndan geliyordu."
             ]],
-            ["paranormal-bus-stop-woman", "Her Gece Aynı Durakta Bekleyen Kadın", "Paranormal", [
-              "Şoför her gece boş durakta aynı kadını görüyordu.",
-              "Kadın hep aynı saatte aynı yere bakıyordu.",
-              "Bir gece şoför durdu, fakat durakta kimse yoktu.",
-              "Otobüsün arka camında kadının silueti belirdi."
+            ["paranormal-bus-stop-woman", "Her Gece Ayn谋 Durakta Bekleyen Kad谋n", "Paranormal", [
+              "艦of枚r her gece bo艧 durakta ayn谋 kad谋n谋 g枚r眉yordu.",
+              "Kad谋n hep ayn谋 saatte ayn谋 yere bak谋yordu.",
+              "Bir gece 艧of枚r durdu, fakat durakta kimse yoktu.",
+              "Otob眉s眉n arka cam谋nda kad谋n谋n silueti belirdi."
             ]],
-            ["paranormal-museum-steps", "Kapalı Müzedeki Ayak Sesleri", "Paranormal", [
-              "Müze kapandıktan sonra mermer salonda adımlar duyuluyordu.",
-              "Güvenlik görevlisi sesleri eski zırhların yanından takip etti.",
-              "Zırhlardan birinin vizörü yavaşça açıldı.",
-              "Kamera kaydında koridor boyunca yürüyen boş bir zırh vardı."
+            ["paranormal-museum-steps", "Kapal谋 M眉zedeki Ayak Sesleri", "Paranormal", [
+              "M眉ze kapand谋ktan sonra mermer salonda ad谋mlar duyuluyordu.",
+              "G眉venlik g枚revlisi sesleri eski z谋rhlar谋n yan谋ndan takip etti.",
+              "Z谋rhlardan birinin viz枚r眉 yava艧莽a a莽谋ld谋.",
+              "Kamera kayd谋nda koridor boyunca y眉r眉yen bo艧 bir z谋rh vard谋."
             ]],
-            ["paranormal-lantern", "Karanlıkta Yanıp Sönen Fener", "Paranormal", [
-              "Dağ yolunda uzakta küçük bir fener görünüyordu.",
-              "Yolcu yaklaştıkça ışık daha uzağa taşındı.",
-              "Sonunda fenerin eski bir kuyunun üzerinde durduğunu gördü.",
-              "Işık söndüğünde arkasında bir ayak sesi duydu."
+            ["paranormal-lantern", "Karanl谋kta Yan谋p S枚nen Fener", "Paranormal", [
+              "Da臒 yolunda uzakta k眉莽眉k bir fener g枚r眉n眉yordu.",
+              "Yolcu yakla艧t谋k莽a 谋艧谋k daha uza臒a ta艧谋nd谋.",
+              "Sonunda fenerin eski bir kuyunun 眉zerinde durdu臒unu g枚rd眉.",
+              "I艧谋k s枚nd眉臒眉nde arkas谋nda bir ayak sesi duydu."
             ]],
-            ["paranormal-rain-house", "Yalnızca Yağmurda Görünen Ev", "Paranormal", [
-              "Köylüler sisli tepede yalnızca yağmur yağınca bir ev görüyordu.",
-              "Güneş açtığında ev tamamen kayboluyordu.",
-              "Bir fotoğrafçı yağmurda tepeye çıktı ve kapıyı buldu.",
-              "Fotoğrafta ev görünüyordu, fakat fotoğrafçı görünmüyordu."
+            ["paranormal-rain-house", "Yaln谋zca Ya臒murda G枚r眉nen Ev", "Paranormal", [
+              "K枚yl眉ler sisli tepede yaln谋zca ya臒mur ya臒谋nca bir ev g枚r眉yordu.",
+              "G眉ne艧 a莽t谋臒谋nda ev tamamen kayboluyordu.",
+              "Bir foto臒raf莽谋 ya臒murda tepeye 莽谋kt谋 ve kap谋y谋 buldu.",
+              "Foto臒rafta ev g枚r眉n眉yordu, fakat foto臒raf莽谋 g枚r眉nm眉yordu."
             ]],
-            ["paranormal-empty-playground", "Gece Yarısı Dönen Salıncak", "Paranormal", [
-              "Parktaki salıncak rüzgârsız gecelerde kendi kendine sallanıyordu.",
-              "Güvenlik kamerasında salıncağın yanında küçük bir gölge belirdi.",
-              "Gölge bir süre boş salıncağa baktı.",
-              "Sonra salıncak durdu ve kamera aniden karardı."
+            ["paranormal-empty-playground", "Gece Yar谋s谋 D枚nen Sal谋ncak", "Paranormal", [
+              "Parktaki sal谋ncak r眉zg芒rs谋z gecelerde kendi kendine sallan谋yordu.",
+              "G眉venlik kameras谋nda sal谋nca臒谋n yan谋nda k眉莽眉k bir g枚lge belirdi.",
+              "G枚lge bir s眉re bo艧 sal谋nca臒a bakt谋.",
+              "Sonra sal谋ncak durdu ve kamera aniden karard谋."
             ]],
-            ["paranormal-last-bus", "Eski Otobüsün Son Yolcusu", "Paranormal", [
-              "Şehir dışındaki eski otobüs her gece garaja dönüyordu.",
-              "Şoför koltukta kimse olmadığını söylüyordu.",
-              "Temizlikçi arka koltukta ıslak bir bilet buldu.",
-              "Biletin üzerinde yarının tarihi yazıyordu."
+            ["paranormal-last-bus", "Eski Otob眉s眉n Son Yolcusu", "Paranormal", [
+              "艦ehir d谋艧谋ndaki eski otob眉s her gece garaja d枚n眉yordu.",
+              "艦of枚r koltukta kimse olmad谋臒谋n谋 s枚yl眉yordu.",
+              "Temizlik莽i arka koltukta 谋slak bir bilet buldu.",
+              "Biletin 眉zerinde yar谋n谋n tarihi yaz谋yordu."
             ]],
-            ["paranormal-rooftop-steps", "Çatıdaki Ayak Sesleri", "Paranormal", [
-              "Apartman sakinleri her gece çatıda koşan birini duyuyordu.",
-              "Kapı kilitliydi ve anahtar yöneticideydi.",
-              "Bir gece herkes merdivene çıktı; ses üstlerinde devam etti.",
-              "Çatıya ulaştıklarında ayak sesleri dairenin içinden geldi."
+            ["paranormal-rooftop-steps", "脟at谋daki Ayak Sesleri", "Paranormal", [
+              "Apartman sakinleri her gece 莽at谋da ko艧an birini duyuyordu.",
+              "Kap谋 kilitliydi ve anahtar y枚neticideydi.",
+              "Bir gece herkes merdivene 莽谋kt谋; ses 眉stlerinde devam etti.",
+              "脟at谋ya ula艧t谋klar谋nda ayak sesleri dairenin i莽inden geldi."
             ]],
-            ["paranormal-street-silhouette", "Sokağın Sonundaki Siluet", "Paranormal", [
-              "Gece yürüyen adam sokağın sonunda uzun bir siluet gördü.",
-              "Her adım attığında siluet de yaklaşıyordu.",
-              "Adam koştu, ama gölge aynı yerde kaldı.",
-              "Eve vardığında gölgenin kapı önünde beklediğini gördü."
+            ["paranormal-street-silhouette", "Soka臒谋n Sonundaki Siluet", "Paranormal", [
+              "Gece y眉r眉yen adam soka臒谋n sonunda uzun bir siluet g枚rd眉.",
+              "Her ad谋m att谋臒谋nda siluet de yakla艧谋yordu.",
+              "Adam ko艧tu, ama g枚lge ayn谋 yerde kald谋.",
+              "Eve vard谋臒谋nda g枚lgenin kap谋 枚n眉nde bekledi臒ini g枚rd眉."
             ]],
-            ["paranormal-self-opening-door", "Kendi Kendine Açılan Kapı", "Paranormal", [
-              "Evdeki bütün kapılar kilitlenmişti.",
-              "Buna rağmen koridorun sonundaki kapı her gece açılıyordu.",
-              "Ailenin koyduğu mühür sabaha kadar bozulmadan kalıyordu.",
-              "Bir sabah kapının ardında yeni bir oda belirdi."
+            ["paranormal-self-opening-door", "Kendi Kendine A莽谋lan Kap谋", "Paranormal", [
+              "Evdeki b眉t眉n kap谋lar kilitlenmi艧ti.",
+              "Buna ra臒men koridorun sonundaki kap谋 her gece a莽谋l谋yordu.",
+              "Ailenin koydu臒u m眉h眉r sabaha kadar bozulmadan kal谋yordu.",
+              "Bir sabah kap谋n谋n ard谋nda yeni bir oda belirdi."
             ]],
-            ["paranormal-carousel", "Boş Lunaparkta Dönen Atlıkarınca", "Paranormal", [
-              "Terk edilmiş lunaparkta atlıkarınca geceleri dönmeye başladı.",
-              "Elektrik bağlantısı yıllar önce sökülmüştü.",
-              "Hoparlörden eski bir çocuk şarkısı duyuldu.",
-              "Sabah atlardan birinin üzerinde taze bir el izi vardı."
+            ["paranormal-carousel", "Bo艧 Lunaparkta D枚nen Atl谋kar谋nca", "Paranormal", [
+              "Terk edilmi艧 lunaparkta atl谋kar谋nca geceleri d枚nmeye ba艧lad谋.",
+              "Elektrik ba臒lant谋s谋 y谋llar 枚nce s枚k眉lm眉艧t眉.",
+              "Hoparl枚rden eski bir 莽ocuk 艧ark谋s谋 duyuldu.",
+              "Sabah atlardan birinin 眉zerinde taze bir el izi vard谋."
             ]],
-            ["paranormal-lake-light", "Gölün Üstündeki Işık", "Paranormal", [
-              "Balıkçılar gölün ortasında suya değmeyen bir ışık gördü.",
-              "Işık kıyıya yaklaşınca mavi renge dönüştü.",
-              "Su yüzeyinde hiçbir dalga oluşmadı.",
-              "Sabah aynı noktada eski bir pusula bulundu."
+            ["paranormal-lake-light", "G枚l眉n 脺st眉ndeki I艧谋k", "Paranormal", [
+              "Bal谋k莽谋lar g枚l眉n ortas谋nda suya de臒meyen bir 谋艧谋k g枚rd眉.",
+              "I艧谋k k谋y谋ya yakla艧谋nca mavi renge d枚n眉艧t眉.",
+              "Su y眉zeyinde hi莽bir dalga olu艧mad谋.",
+              "Sabah ayn谋 noktada eski bir pusula bulundu."
             ]],
-            ["paranormal-station-announcement", "İstasyondaki İsimsiz Anons", "Paranormal", [
+            ["paranormal-station-announcement", "陌stasyondaki 陌simsiz Anons", "Paranormal", [
               "Son tren gittikten sonra istasyonda anons sesi duyuldu.",
-              "Anons, yıllardır kullanılmayan bir peronu tarif ediyordu.",
-              "Görevli perona indiğinde raylarda taze ayak izleri gördü.",
-              "Hoparlör son kez konuştu: Treniniz geldi."
+              "Anons, y谋llard谋r kullan谋lmayan bir peronu tarif ediyordu.",
+              "G枚revli perona indi臒inde raylarda taze ayak izleri g枚rd眉.",
+              "Hoparl枚r son kez konu艧tu: Treniniz geldi."
             ]],
-            ["paranormal-basement-door", "Kapanmayan Bodrum Kapısı", "Paranormal", [
-              "Bodrum kapısı her kilitlendiğinde yeniden aralanıyordu.",
-              "Aile kapının önüne ağır bir dolap koydu.",
-              "Gece dolap sessizce duvardan uzaklaşmış bulundu.",
-              "Kapının arkasından merdiven değil, uzun bir koridor görünüyordu."
+            ["paranormal-basement-door", "Kapanmayan Bodrum Kap谋s谋", "Paranormal", [
+              "Bodrum kap谋s谋 her kilitlendi臒inde yeniden aralan谋yordu.",
+              "Aile kap谋n谋n 枚n眉ne a臒谋r bir dolap koydu.",
+              "Gece dolap sessizce duvardan uzakla艧m谋艧 bulundu.",
+              "Kap谋n谋n arkas谋ndan merdiven de臒il, uzun bir koridor g枚r眉n眉yordu."
             ]],
-            ["paranormal-village-map", "Haritada Olmayan Kasabanın Haritası", "Paranormal", [
-              "Antikacıdan alınan haritada kasabanın yakınında başka bir yer işaretliydi.",
-              "İşaretli yere giden yol eski bir taş köprüye çıktı.",
-              "Köprünün ötesinde evlerin ışıkları yanıyordu.",
-              "Dönüşte haritadaki kasaba silinmişti."
+            ["paranormal-village-map", "Haritada Olmayan Kasaban谋n Haritas谋", "Paranormal", [
+              "Antikac谋dan al谋nan haritada kasaban谋n yak谋n谋nda ba艧ka bir yer i艧aretliydi.",
+              "陌艧aretli yere giden yol eski bir ta艧 k枚pr眉ye 莽谋kt谋.",
+              "K枚pr眉n眉n 枚tesinde evlerin 谋艧谋klar谋 yan谋yordu.",
+              "D枚n眉艧te haritadaki kasaba silinmi艧ti."
             ]],
-            ["paranormal-night-photo", "Gece Fotoğrafındaki Fazladan Işık", "Paranormal", [
-              "Fotoğrafçı gece ormanını çektiğinde görüntüde fazladan ışık belirdi.",
-              "Işık her karede kameraya biraz daha yaklaşıyordu.",
-              "Son fotoğrafta ışığın içinde bir yüz seçiliyordu.",
-              "Fotoğrafçı makinesini kapattı; flaş kendi kendine patladı."
+            ["paranormal-night-photo", "Gece Foto臒raf谋ndaki Fazladan I艧谋k", "Paranormal", [
+              "Foto臒raf莽谋 gece orman谋n谋 莽ekti臒inde g枚r眉nt眉de fazladan 谋艧谋k belirdi.",
+              "I艧谋k her karede kameraya biraz daha yakla艧谋yordu.",
+              "Son foto臒rafta 谋艧谋臒谋n i莽inde bir y眉z se莽iliyordu.",
+              "Foto臒raf莽谋 makinesini kapatt谋; fla艧 kendi kendine patlad谋."
             ]],
             ["paranormal-cold-spot", "Odadaki Buz Gibi Nokta", "Paranormal", [
-              "Eski evin tek bir köşesi yazın bile buz gibiydi.",
-              "Termometre o noktada aniden düşüyordu.",
-              "Bir gece soğuk alan odanın ortasına doğru ilerledi.",
-              "Sabah duvarda içeriden çizilmiş gibi bir el izi vardı."
+              "Eski evin tek bir k枚艧esi yaz谋n bile buz gibiydi.",
+              "Termometre o noktada aniden d眉艧眉yordu.",
+              "Bir gece so臒uk alan odan谋n ortas谋na do臒ru ilerledi.",
+              "Sabah duvarda i莽eriden 莽izilmi艧 gibi bir el izi vard谋."
             ]],
-            ["paranormal-window-fingerprints", "Camın Dışındaki Parmak İzleri", "Paranormal", [
-              "Üçüncü kattaki pencerenin dışında her sabah izler beliriyordu.",
-              "Yağmur izleri siliyor, ertesi gün yeniden ortaya çıkarıyordu.",
-              "Bir gece ev sahibi camın önünde gölge gördü.",
-              "Gölge içeriden değil, dışarıdan el sallıyordu."
+            ["paranormal-window-fingerprints", "Cam谋n D谋艧谋ndaki Parmak 陌zleri", "Paranormal", [
+              "脺莽眉nc眉 kattaki pencerenin d谋艧谋nda her sabah izler beliriyordu.",
+              "Ya臒mur izleri siliyor, ertesi g眉n yeniden ortaya 莽谋kar谋yordu.",
+              "Bir gece ev sahibi cam谋n 枚n眉nde g枚lge g枚rd眉.",
+              "G枚lge i莽eriden de臒il, d谋艧ar谋dan el sall谋yordu."
             ]],
-            ["paranormal-old-key", "Eski Otelin Anahtarı", "Paranormal", [
-              "Resepsiyonda üzerinde numara olmayan eski bir anahtar bulundu.",
-              "Anahtar hiçbir kapıyı açmıyordu.",
-              "Gece otelin duvarından hafif bir kilit sesi geldi.",
-              "Sabah anahtarın üzerinde yeni bir oda numarası yazıyordu."
+            ["paranormal-old-key", "Eski Otelin Anahtar谋", "Paranormal", [
+              "Resepsiyonda 眉zerinde numara olmayan eski bir anahtar bulundu.",
+              "Anahtar hi莽bir kap谋y谋 a莽m谋yordu.",
+              "Gece otelin duvar谋ndan hafif bir kilit sesi geldi.",
+              "Sabah anahtar谋n 眉zerinde yeni bir oda numaras谋 yaz谋yordu."
             ]],
-            ["paranormal-third-floor", "Asansörün Durduğu Üçüncü Kat", "Paranormal", [
-              "Binada yalnızca iki kat vardı.",
-              "Yine de asansör her gece üçüncü katta duruyordu.",
-              "Kapılar açılınca karanlıkta bir koridor görünüyordu.",
-              "Bir gece koridorun sonunda asansörün kendisi belirdi."
+            ["paranormal-third-floor", "Asans枚r眉n Durdu臒u 脺莽眉nc眉 Kat", "Paranormal", [
+              "Binada yaln谋zca iki kat vard谋.",
+              "Yine de asans枚r her gece 眉莽眉nc眉 katta duruyordu.",
+              "Kap谋lar a莽谋l谋nca karanl谋kta bir koridor g枚r眉n眉yordu.",
+              "Bir gece koridorun sonunda asans枚r眉n kendisi belirdi."
             ]],
-            ["paranormal-pine-forest", "Çam Ormanındaki Yüzen Işıklar", "Paranormal", [
-              "Köylüler çamların arasında yerden yükselen ışıklar görüyordu.",
-              "Işıklar birbirini takip ederek ormanın derinine gidiyordu.",
-              "Bir araştırmacı onları kameraya almak için yaklaştı.",
-              "Kayıtta ışıkların arkasında kendisini izleyen bir siluet vardı."
+            ["paranormal-pine-forest", "脟am Orman谋ndaki Y眉zen I艧谋klar", "Paranormal", [
+              "K枚yl眉ler 莽amlar谋n aras谋nda yerden y眉kselen 谋艧谋klar g枚r眉yordu.",
+              "I艧谋klar birbirini takip ederek orman谋n derinine gidiyordu.",
+              "Bir ara艧t谋rmac谋 onlar谋 kameraya almak i莽in yakla艧t谋.",
+              "Kay谋tta 谋艧谋klar谋n arkas谋nda kendisini izleyen bir siluet vard谋."
             ]],
-            ["paranormal-empty-cinema", "Terk Edilmiş Sinemadaki Son Gösterim", "Paranormal", [
-              "Kapalı sinemadan geceleri projektör sesi geliyordu.",
-              "Perdede yıllar önce çekilmiş boş bir salon görünüyordu.",
-              "Bir gece koltuklarda yavaşça beliren siluetler sayıldı.",
-              "Son karede salondaki tek kişi kameraya baktı."
+            ["paranormal-empty-cinema", "Terk Edilmi艧 Sinemadaki Son G枚sterim", "Paranormal", [
+              "Kapal谋 sinemadan geceleri projekt枚r sesi geliyordu.",
+              "Perdede y谋llar 枚nce 莽ekilmi艧 bo艧 bir salon g枚r眉n眉yordu.",
+              "Bir gece koltuklarda yava艧莽a beliren siluetler say谋ld谋.",
+              "Son karede salondaki tek ki艧i kameraya bakt谋."
             ]],
-            ["paranormal-library-book", "Kütüphanedeki Kendi Kendine Açılan Kitap", "Paranormal", [
-              "Kapalı kütüphanede her sabah aynı kitap açık bulunuyordu.",
-              "Kitabın sayfalarında henüz yaşanmamış olaylar yazıyordu.",
-              "Görevli son sayfayı çevirdiğinde kendi adını gördü.",
-              "Altında o gece eve dönmemesi gerektiği yazıyordu."
+            ["paranormal-library-book", "K眉t眉phanedeki Kendi Kendine A莽谋lan Kitap", "Paranormal", [
+              "Kapal谋 k眉t眉phanede her sabah ayn谋 kitap a莽谋k bulunuyordu.",
+              "Kitab谋n sayfalar谋nda hen眉z ya艧anmam谋艧 olaylar yaz谋yordu.",
+              "G枚revli son sayfay谋 莽evirdi臒inde kendi ad谋n谋 g枚rd眉.",
+              "Alt谋nda o gece eve d枚nmemesi gerekti臒i yaz谋yordu."
             ]],
-            ["paranormal-window-face", "Pencerede Beliren Yüz", "Paranormal", [
-              "Aynı evin penceresinde her gece solgun bir yüz beliriyordu.",
-              "Ev aylardır boştu ve perdeleri içeriden kapalıydı.",
-              "Bir komşu fotoğraf çektiğinde pencere tamamen karanlıktı.",
-              "Telefon ekranında ise yüz hemen arkasında görünüyordu."
+            ["paranormal-window-face", "Pencerede Beliren Y眉z", "Paranormal", [
+              "Ayn谋 evin penceresinde her gece solgun bir y眉z beliriyordu.",
+              "Ev aylard谋r bo艧tu ve perdeleri i莽eriden kapal谋yd谋.",
+              "Bir kom艧u foto臒raf 莽ekti臒inde pencere tamamen karanl谋kt谋.",
+              "Telefon ekran谋nda ise y眉z hemen arkas谋nda g枚r眉n眉yordu."
             ]],
-            ["paranormal-doorbell", "Gece Yarısı Çalan Kapı Zili", "Paranormal", [
-              "Kapı zili her gece tam on ikide çalıyordu.",
-              "Dürbünden bakıldığında merdiven boş görünüyordu.",
-              "Bir gece zil çalarken kapının önüne kamera koydular.",
-              "Kayıtta kapı açılmadan içeri giren bir gölge vardı."
+            ["paranormal-doorbell", "Gece Yar谋s谋 脟alan Kap谋 Zili", "Paranormal", [
+              "Kap谋 zili her gece tam on ikide 莽al谋yordu.",
+              "D眉rb眉nden bak谋ld谋臒谋nda merdiven bo艧 g枚r眉n眉yordu.",
+              "Bir gece zil 莽alarken kap谋n谋n 枚n眉ne kamera koydular.",
+              "Kay谋tta kap谋 a莽谋lmadan i莽eri giren bir g枚lge vard谋."
             ]],
-            ["paranormal-fog-road", "Sisli Yolda İlerleyen Işık", "Paranormal", [
-              "Sürücü sisli yolda önünde ilerleyen tek bir ışık gördü.",
-              "Işık virajları tam onun hızında dönüyordu.",
-              "Yol bittiğinde ışık eski bir tabelanın üzerinde durdu.",
-              "Tabelada sürücünün henüz gitmediği evin adresi yazıyordu."
+            ["paranormal-fog-road", "Sisli Yolda 陌lerleyen I艧谋k", "Paranormal", [
+              "S眉r眉c眉 sisli yolda 枚n眉nde ilerleyen tek bir 谋艧谋k g枚rd眉.",
+              "I艧谋k virajlar谋 tam onun h谋z谋nda d枚n眉yordu.",
+              "Yol bitti臒inde 谋艧谋k eski bir tabelan谋n 眉zerinde durdu.",
+              "Tabelada s眉r眉c眉n眉n hen眉z gitmedi臒i evin adresi yaz谋yordu."
             ]],
-            ["paranormal-dancing-shadow", "Karanlıkta Dans Eden Gölge", "Paranormal", [
-              "Boş salonda duvardaki gölge müzik olmadan dans ediyordu.",
-              "Işıklar açılınca odada kimse bulunamadı.",
-              "Işıklar kapandığında gölge bu kez tavanda belirdi.",
-              "Sabah duvarda eski bir balo fotoğrafı asılıydı."
+            ["paranormal-dancing-shadow", "Karanl谋kta Dans Eden G枚lge", "Paranormal", [
+              "Bo艧 salonda duvardaki g枚lge m眉zik olmadan dans ediyordu.",
+              "I艧谋klar a莽谋l谋nca odada kimse bulunamad谋.",
+              "I艧谋klar kapand谋臒谋nda g枚lge bu kez tavanda belirdi.",
+              "Sabah duvarda eski bir balo foto臒raf谋 as谋l谋yd谋."
             ]],
-            ["paranormal-radio-time", "Her Gece Aynı Saate Dönen Radyo", "Paranormal", [
-              "Eski radyo her gece kendiliğinden açılıyordu.",
-              "Aynı haber bülteni ve aynı tarih okunuyordu.",
-              "Bir gece spiker dinleyenin adını söyledi.",
-              "Ardından yayın, evin içinden gelen bir sesle kesildi."
+            ["paranormal-radio-time", "Her Gece Ayn谋 Saate D枚nen Radyo", "Paranormal", [
+              "Eski radyo her gece kendili臒inden a莽谋l谋yordu.",
+              "Ayn谋 haber b眉lteni ve ayn谋 tarih okunuyordu.",
+              "Bir gece spiker dinleyenin ad谋n谋 s枚yledi.",
+              "Ard谋ndan yay谋n, evin i莽inden gelen bir sesle kesildi."
             ]],
-            ["paranormal-clock-thirteen", "Kule Saatinin On Üçüncü Vuruşu", "Paranormal", [
-              "Kasaba kulesi gece yarısı on üç kez çaldı.",
-              "Saat ustası mekanizmayı kontrol etti; her şey normaldi.",
-              "Ertesi gece on üçüncü vuruş daha yakından duyuldu.",
-              "Kulenin kapısında içeriden çevrilmiş bir anahtar bulundu."
+            ["paranormal-clock-thirteen", "Kule Saatinin On 脺莽眉nc眉 Vuru艧u", "Paranormal", [
+              "Kasaba kulesi gece yar谋s谋 on 眉莽 kez 莽ald谋.",
+              "Saat ustas谋 mekanizmay谋 kontrol etti; her 艧ey normaldi.",
+              "Ertesi gece on 眉莽眉nc眉 vuru艧 daha yak谋ndan duyuldu.",
+              "Kulenin kap谋s谋nda i莽eriden 莽evrilmi艧 bir anahtar bulundu."
             ]],
-            ["paranormal-warm-tea", "Boş Evdeki Sıcak Çay", "Paranormal", [
-              "Terk edilmiş evde masanın üzerinde sıcak bir fincan vardı.",
-              "Pencereler kapalı, şömine soğuktu.",
-              "Araştırmacı fincana dokununca üst kattaki lamba yandı.",
-              "Merdivenden biri yavaşça aşağı inmeye başladı."
+            ["paranormal-warm-tea", "Bo艧 Evdeki S谋cak 脟ay", "Paranormal", [
+              "Terk edilmi艧 evde masan谋n 眉zerinde s谋cak bir fincan vard谋.",
+              "Pencereler kapal谋, 艧枚mine so臒uktu.",
+              "Ara艧t谋rmac谋 fincana dokununca 眉st kattaki lamba yand谋.",
+              "Merdivenden biri yava艧莽a a艧a臒谋 inmeye ba艧lad谋."
             ]],
-            ["paranormal-photo-album", "Kayıp Fotoğraf Albümü", "Paranormal", [
-              "Pazardan alınan albümde aynı evin fotoğrafları bulunuyordu.",
-              "Her fotoğrafta penceredeki yabancı biraz daha yaklaşıyordu.",
-              "Son fotoğrafta yabancı kameranın hemen önündeydi.",
-              "Albümün arkasında yeni sahibinin çekilmiş bir fotoğrafı vardı."
+            ["paranormal-photo-album", "Kay谋p Foto臒raf Alb眉m眉", "Paranormal", [
+              "Pazardan al谋nan alb眉mde ayn谋 evin foto臒raflar谋 bulunuyordu.",
+              "Her foto臒rafta penceredeki yabanc谋 biraz daha yakla艧谋yordu.",
+              "Son foto臒rafta yabanc谋 kameran谋n hemen 枚n眉ndeydi.",
+              "Alb眉m眉n arkas谋nda yeni sahibinin 莽ekilmi艧 bir foto臒raf谋 vard谋."
             ]],
-            ["paranormal-hidden-room", "Duvarın Ardındaki Gizli Oda", "Paranormal", [
-              "Tadilat sırasında duvarın arkasında boş bir oda bulundu.",
-              "Odanın içinde tozlanmamış bir masa ve saat vardı.",
-              "Saat çalışmıyor, ama tik tak sesi duvarlardan geliyordu.",
-              "Kapı kapatılınca odanın içeriden kilitlendiği duyuldu."
+            ["paranormal-hidden-room", "Duvar谋n Ard谋ndaki Gizli Oda", "Paranormal", [
+              "Tadilat s谋ras谋nda duvar谋n arkas谋nda bo艧 bir oda bulundu.",
+              "Odan谋n i莽inde tozlanmam谋艧 bir masa ve saat vard谋.",
+              "Saat 莽al谋艧m谋yor, ama tik tak sesi duvarlardan geliyordu.",
+              "Kap谋 kapat谋l谋nca odan谋n i莽eriden kilitlendi臒i duyuldu."
             ]],
             ["paranormal-last-ferry", "Son Feribotun Yolcusu", "Paranormal", [
-              "Gece son feribotta güvertede tek yolcu oturuyordu.",
-              "Görevli bilet sorduğunda yolcu eski bir tarih gösterdi.",
-              "Feribot kıyıya yanaşınca koltuk boş kaldı.",
-              "Bilet defterinde yolcunun adı yıllar önce silinmişti."
+              "Gece son feribotta g眉vertede tek yolcu oturuyordu.",
+              "G枚revli bilet sordu臒unda yolcu eski bir tarih g枚sterdi.",
+              "Feribot k谋y谋ya yana艧谋nca koltuk bo艧 kald谋.",
+              "Bilet defterinde yolcunun ad谋 y谋llar 枚nce silinmi艧ti."
             ]],
-            ["paranormal-footprints", "Sabah Kaybolan Ayak İzleri", "Paranormal", [
-              "Kar yağınca evin kapısına kadar ayak izleri oluştu.",
-              "İzler dışarıdan gelmiyor, evin içinden başlıyordu.",
-              "Aile bütün gece kapıları kilitli tuttu.",
-              "Sabah izler yatak odasının önünde aniden sona erdi."
+            ["paranormal-footprints", "Sabah Kaybolan Ayak 陌zleri", "Paranormal", [
+              "Kar ya臒谋nca evin kap谋s谋na kadar ayak izleri olu艧tu.",
+              "陌zler d谋艧ar谋dan gelmiyor, evin i莽inden ba艧l谋yordu.",
+              "Aile b眉t眉n gece kap谋lar谋 kilitli tuttu.",
+              "Sabah izler yatak odas谋n谋n 枚n眉nde aniden sona erdi."
             ]],
           ]
           topic_ids = [item[0] for item in TOPICS]
@@ -603,16 +768,16 @@ jobs:
           visual_theme = paranormal_visual_kind(topic_id, title)
           print(f'Konu: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
           scenes = [
-              ('Her şey sıradan görünüyordu... ta ki ilk işaret ortaya çıkana kadar.', ''),
+              ('Her 艧ey s谋radan g枚r眉n眉yordu... ta ki ilk i艧aret ortaya 莽谋kana kadar.', ''),
               *((story_beat, '') for story_beat in facts),
-              ('Sence bu olayın açıklaması ne? Videoyu beğenmeyi ve kanalımıza abone olmayı unutmayın!', '')
+              ('Sence bu olay谋n a莽谋klamas谋 ne? Videoyu be臒enmeyi ve kanal谋m谋za abone olmay谋 unutmay谋n!', '')
           ]
           assert len(scenes) == SCENE_COUNT
           (OUT / 'video-plani.json').write_text(json.dumps({
               'topic_id': topic_id, 'title': title, 'category': category,
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
               'visual_theme': visual_theme,
-              'style': 'original topic-specific procedural 2D animation; moving story objects and characters; scene visuals follow narration; no static-image slideshow',
+              'style': 'original procedural 3D cartoon animation rendered with Blender; story-specific generated character; animated props and character actions; scene visuals follow narration; no static-image slideshow',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
               'voice': TTS_VOICE, 'duration_seconds': 30
           }, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -1354,7 +1519,7 @@ jobs:
 
           def draw_subtitles(draw, text_value, progress, category, scene_no):
               draw.rounded_rectangle((24, 24, WIDTH-24, 67), radius=17, fill=(5, 10, 24, 175))
-              draw.text((WIDTH//2, 45), f'GİZEMLİ DÜNYA  •  {category.upper()}', font=FONT_SMALL,
+              draw.text((WIDTH//2, 45), f'G陌ZEML陌 D脺NYA  鈥�  {category.upper()}', font=FONT_SMALL,
                         anchor='mm', fill=(238, 245, 255, 255))
               draw.rounded_rectangle((24, 82, WIDTH-24, 89), radius=4, fill=(255, 255, 255, 55))
               draw.rounded_rectangle((24, 82, 24+(WIDTH-48)*progress, 89), radius=4, fill=(255, 194, 75, 255))
@@ -1405,28 +1570,67 @@ jobs:
 
 
           def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
-              frames=frame_count if frame_count is not None else max(1,round(duration*FPS))
-              bg=make_background(topic_id,category,scene_no,seed)
-              cmd=['ffmpeg','-hide_banner','-loglevel','error','-y',
-                   '-f','rawvideo','-pix_fmt','rgb24','-s',f'{WIDTH}x{HEIGHT}','-r',str(FPS),'-i','-',
-                   '-an','-vf',f'scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,format=yuv420p',
-                   '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
-                   '-movflags','+faststart',str(output)]
-              proc=subprocess.Popen(cmd,stdin=subprocess.PIPE)
+              """Render a genuine animated 3D scene in Blender, then add the established subtitles."""
+              frames = frame_count if frame_count is not None else max(1, round(duration * FPS))
+              temp_video = CLIPS / f'blender_raw_{scene_no:02d}.mp4'
+              theme = paranormal_visual_kind(topic_id, title)
+              command = [
+                  'blender', '--background', '--threads', '2', '--python',
+                  str(ROOT / 'render_3d.py'), '--',
+                  '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
+                  '--duration', f'{duration:.6f}', '--output', str(temp_video),
+                  '--width', str(WIDTH), '--height', str(HEIGHT), '--fps', str(FPS)
+              ]
+              print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
+              subprocess.run(command, check=True, timeout=max(900, int(duration * 180)))
+              if not temp_video.exists() or temp_video.stat().st_size < 10000:
+                  raise RuntimeError(f'Blender {scene_no}. sahne icin gecerli video olusturamadi.')
+
+              # Keep the existing Turkish subtitle design and progress bar over the 3D render.
+              decode = subprocess.Popen([
+                  'ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', str(temp_video),
+                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-vsync', '0', '-'
+              ], stdout=subprocess.PIPE)
+              encode = subprocess.Popen([
+                  'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
+                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{WIDTH}x{HEIGHT}',
+                  '-r', str(FPS), '-i', '-', '-an',
+                  '-vf', f'scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,format=yuv420p',
+                  '-frames:v', str(frames), '-c:v', 'libx264', '-preset', 'veryfast',
+                  '-crf', '21', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)
+              ], stdin=subprocess.PIPE)
+              frame_bytes = WIDTH * HEIGHT * 3
               try:
                   for frame_no in range(frames):
-                      frame=render_frame(bg,topic_id,category,scene_no,frame_no,frames,caption,seed)
-                      proc.stdin.write(frame.tobytes())
-                  proc.stdin.close()
-                  code=proc.wait()
-                  if code:
-                      raise RuntimeError(f'FFmpeg animasyon kodu: {code}')
+                      raw = decode.stdout.read(frame_bytes)
+                      if len(raw) != frame_bytes:
+                          raise RuntimeError(
+                              f'Blender sahnesi eksik kare uretti: {scene_no}. sahne, '
+                              f'{frame_no}/{frames}. kare'
+                          )
+                      frame = Image.frombytes('RGB', (WIDTH, HEIGHT), raw)
+                      draw = ImageDraw.Draw(frame, 'RGBA')
+                      draw_subtitles(draw, caption, (frame_no + 1) / max(1, frames), category, scene_no)
+                      encode.stdin.write(frame.tobytes())
+                  encode.stdin.close()
+                  decode.stdout.close()
+                  enc_code = encode.wait()
+                  dec_code = decode.wait()
+                  if enc_code or dec_code:
+                      raise RuntimeError(f'3D altyazi birlestirme hatasi: encode={enc_code}, decode={dec_code}')
               except Exception:
-                  if proc.stdin and not proc.stdin.closed: proc.stdin.close()
-                  proc.kill(); proc.wait()
+                  for proc in (decode, encode):
+                      try:
+                          if proc.poll() is None: proc.kill()
+                          proc.wait(timeout=10)
+                      except Exception:
+                          pass
                   raise
+              finally:
+                  temp_video.unlink(missing_ok=True)
               if not output.exists() or output.stat().st_size < 10000:
-                  raise RuntimeError(f'{scene_no}. animasyon klibi olusturulamadi.')
+                  raise RuntimeError(f'{scene_no}. 3D animasyon klibi olusturulamadi.')
+
 
 
           def make_soundtrack(path):
@@ -1456,13 +1660,13 @@ jobs:
               creds.refresh(Request())
               youtube=build('youtube','v3',credentials=creds,cache_discovery=False)
               description=(f'{title}\n\n'
-                'Gizemli Dünya’da bu kez kısa bir paranormal hikâye anlatıyoruz. '
-                'Bu video, özgün 2D hareketli animasyon ve Türkçe seslendirme ile hazırlanmıştır. '
-                'Hikâye kurgu ve şehir efsanesi atmosferinde anlatılmıştır; gerçek olduğu iddia edilmez.\n'
-                'Sence bu olayın açıklaması ne? Yorumlarda paylaş. Videoyu beğenmeyi ve kanalımıza abone olmayı unutma!\n\n'
+                'Gizemli D眉nya鈥檇a bu kez k谋sa bir paranormal hik芒ye anlat谋yoruz. '
+                'Bu video, 枚zg眉n 2D hareketli animasyon ve T眉rk莽e seslendirme ile haz谋rlanm谋艧t谋r. '
+                'Hik芒ye kurgu ve 艧ehir efsanesi atmosferinde anlat谋lm谋艧t谋r; ger莽ek oldu臒u iddia edilmez.\n'
+                'Sence bu olay谋n a莽谋klamas谋 ne? Yorumlarda payla艧. Videoyu be臒enmeyi ve kanal谋m谋za abone olmay谋 unutma!\n\n'
                 '#Shorts #Paranormal #GizemliHikayeler #KorkuHikayeleri #Gizem')
-              body={'snippet':{'title':f'{title} | Paranormal Hikâye #Shorts'[:100],
-                'description':description,'tags':['Shorts','Gizemli Dünya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','Şehir Efsaneleri'],
+              body={'snippet':{'title':f'{title} | Paranormal Hik芒ye #Shorts'[:100],
+                'description':description,'tags':['Shorts','Gizemli D眉nya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','艦ehir Efsaneleri'],
                 'categoryId':'24','defaultLanguage':'tr'},
                 'status':{'privacyStatus':YOUTUBE_PRIVACY,'selfDeclaredMadeForKids':False,'containsSyntheticMedia':True}}
               media=MediaFileUpload(str(path),mimetype='video/mp4',chunksize=-1,resumable=True)
@@ -1482,8 +1686,8 @@ jobs:
               return youtube_id
 
 
-          # Üretim: sabit görsel slayt gösterisi yok; her kare Python ile yeniden çizilir.
-          print('1/5 Hareketli 2D sahneler ve Türkçe seslendirme hazırlanıyor...')
+          # 脺retim: sabit g枚rsel slayt g枚sterisi yok; her kare Python ile yeniden 莽izilir.
+          print('1/5 Blender ile ger莽ek 3D sahneler ve T眉rk莽e seslendirme haz谋rlan谋yor...')
           voice,scene_durations=make_voice_tracks()
           # Yuvarlama farklarini duzelterek toplam kare sayisini tam 750 yap.
           frame_counts=[max(1,round(d*FPS)) for d in scene_durations]
@@ -1493,9 +1697,9 @@ jobs:
           clips=[]
           for i,((caption,visual),duration,frame_count) in enumerate(zip(scenes,scene_durations,frame_counts),1):
               clip=CLIPS/f'clip_{i:02d}.mp4'
-              render_animated_clip(i,caption,duration,category,topic_id,seed+i*97,clip,frame_count)
+              render_animated_clip(i,caption,duration,category,topic_id,seed,clip,frame_count)
               clips.append(clip)
-              print(f'Hareketli sahne {i}/6 hazir: {duration:.2f} saniye')
+              print(f'Blender 3D sahne {i}/6 hazir: {duration:.2f} saniye')
 
           print('2/5 Fon muzigi hazirlaniyor...')
           sound=OUT/'soundtrack.wav'
