@@ -1,7 +1,16 @@
-name: Gizemli Dunya - Kaliteli Shorts
+name: Gizemli Dunya - Ucretsiz Paranormal Hikayeler
 
 on:
   workflow_dispatch:
+    inputs:
+      privacy:
+        description: 'Ilk deneme icin unlisted sec; yayinlamak istersen public sec.'
+        required: true
+        type: choice
+        options:
+          - unlisted
+          - public
+        default: unlisted
   schedule:
     - cron: '23 9,20 * * *'
       timezone: 'Europe/Istanbul'
@@ -10,7 +19,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: youtube-shorts-publisher
+  group: youtube-paranormal-shorts-publisher
   cancel-in-progress: false
 
 jobs:
@@ -32,12 +41,12 @@ jobs:
       - name: FFmpeg ve font kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
 
-      - name: Python paketlerini kur
+      - name: Ucretsiz Python paketlerini kur
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow numpy google-api-python-client google-auth
+          pip install requests pillow numpy edge-tts google-api-python-client google-auth
 
       - name: YouTube OAuth baglantisini onceden denetle
         env:
@@ -63,371 +72,424 @@ jobs:
           if not r.ok or not info.get('access_token'):
               raise SystemExit('YouTube OAuth hatasi: ' + str(info.get('error'))
                   + ' (' + str(info.get('error_description'))[:160] + ')')
-          print('YouTube OAuth testi basarili; gorsel uretimi baslayabilir.')
+          print('YouTube OAuth testi basarili; animasyon uretimi baslayabilir.')
           PY
 
-      - name: Video uret ve YouTube'a yukle
+      - name: Hareketli videoyu uret ve YouTube'a yukle
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_PRIVACY: public
+          YOUTUBE_PRIVACY: ${{ github.event.inputs.privacy || 'public' }}
         run: |
           cat > create_video.py <<'PY'
-          import os, io, json, base64, time, wave, subprocess, random, hashlib
+          import os, io, json, time, wave, subprocess, random, math, asyncio
           from pathlib import Path
           from datetime import datetime
           from zoneinfo import ZoneInfo
           import requests
           import numpy as np
-          from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+          from PIL import Image, ImageDraw, ImageFont
+          import edge_tts
           from google.oauth2.credentials import Credentials
           from google.auth.transport.requests import Request
           from googleapiclient.discovery import build
           from googleapiclient.http import MediaFileUpload
           from googleapiclient.errors import HttpError
-
+          
           ROOT = Path.cwd()
           OUT = ROOT / 'output'
-          IMAGES = OUT / 'images'
           CAPTIONS = OUT / 'captions'
           CLIPS = OUT / 'clips'
+          VOICE_DIR = OUT / 'voice'
           HISTORY_FILE = ROOT / 'data' / 'youtube_history.json'
-          WIDTH, HEIGHT, FPS = 1080, 1920, 25
-          SCENE_COUNT, SCENE_SECONDS = 6, 5
+          WIDTH, HEIGHT, FPS = 540, 960, 25
+          OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
+          TARGET_SECONDS = 30.0
+          SCENE_COUNT = 6
           SAMPLE_RATE = 22050
-          CF_TOKEN = os.environ.get('CLOUDFLARE_API_TOKEN', '').strip()
-          CF_ACCOUNT = os.environ.get('CLOUDFLARE_ACCOUNT_ID', '').strip()
+          TTS_VOICE = 'tr-TR-EmelNeural'
           YOUTUBE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID', '').strip()
           YOUTUBE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET', '').strip()
           YOUTUBE_REFRESH_TOKEN = os.environ.get('YOUTUBE_REFRESH_TOKEN', '').strip()
           YOUTUBE_PRIVACY = os.environ.get('YOUTUBE_PRIVACY', 'public').strip()
           RUN_EVENT = os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch')
           RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
-
-          # Toplam 60 farkli video konusu; her video 6 sahne ve 30 saniye.
-          # Alti basit gercek / belgesel kadraji sabit hazirlanir.
-          # Kaynak iddialari yayin oncesi editoryal kontrolden gecirilmelidir.
-          # Format: id, baslik, kategori, ana gorsel, (4 ara bilgi + sahne gorseli).
+          
           TOPICS = [
-              ('giza-void','Piramitlerin Gizli Boşluğu','Tarih','Great Pyramid of Giza, Egyptian desert, sunrise',[
-                  ('Büyük Piramit yaklaşık 4.500 yıllık.','Great Pyramid weathered limestone blocks close view'),
-                  ('Kozmik parçacıklarla iç yapı incelendi.','cosmic muon detectors studying Egyptian pyramid'),
-                  ('2017 yılında büyük bir boşluk duyuruldu.','scientific cutaway of Great Pyramid unknown void'),
-                  ('Boşluğun işlevi henüz kesin bilinmiyor.','plausible empty internal limestone space, no artifacts')]),
-              ('europa-ocean','Europa’nın Buz Altındaki Okyanusu','Uzay','Jupiter icy moon Europa in space',[
-                  ('Europa, Jüpiter’in buzlu uydularından biri.','Jupiter and Europa scientifically accurate appearance'),
-                  ('Yüzeyinde uzun kırık çizgileri görülüyor.','Europa surface reddish ice fractures'),
-                  ('Buzun altında sıvı su okyanusu düşünülüyor.','scientific cutaway Europa ice shell ocean'),
-                  ('Orada yaşam olup olmadığı bilinmiyor.','Europa dark subsurface ocean speculative empty water')]),
-              ('nazca-lines','Nazca Çizgilerinin Sırrı','Tarih','Peru Nazca desert aerial geoglyphs',[
-                  ('Dev çizimler Peru’nun çölünde yer alıyor.','Peru desert Nazca lines authentic aerial'),
-                  ('Bazıları hayvan figürlerini betimliyor.','Nazca hummingbird geoglyph aerial'),
-                  ('Bunları eski Nazca toplulukları yaptı.','historical people creating Nazca lines desert reconstruction'),
-                  ('Ne amaçla yapıldıkları hâlâ araştırılıyor.','archaeologists measuring Nazca geoglyphs')]),
-              ('hydrothermal','Güneşsiz Okyanus Yaşamı','Dünya','deep ocean hydrothermal vents scientific documentary',[
-                  ('Deniz dibine güneş ışığı ulaşmıyor.','dark abyss underwater ocean landscape'),
-                  ('Hidrotermal bacalar sıcak sıvılar çıkarıyor.','black smoker hydrothermal vent ocean floor'),
-                  ('Bazı mikroplar kimyasal enerji kullanıyor.','deep sea microbial mats near vent scientific'),
-                  ('Burada karmaşık yaşam toplulukları var.','tube worms and crabs hydrothermal vent ecosystem')]),
-              ('moai','Moai Heykelleri Nasıl Taşındı?','Tarih','Rapa Nui Moai statues Pacific island',[
-                  ('Moai heykellerini Rapa Nui halkı yaptı.','historical Rapa Nui carving stone Moai'),
-                  ('Birçok heykel tonlarca ağırlığında.','massive weathered Moai statue scale'),
-                  ('Taşınmaları üzerine farklı görüşler var.','archaeologists studying Moai pathways'),
-                  ('Araştırmacılar hareket yöntemlerini deniyor.','experimental walking Moai using ropes reconstruction')]),
-              ('mars-olympus','Mars’ın Dev Yanardağı','Uzay','Olympus Mons volcano on Mars orbital visualization',[
-                  ('Olympus Mons, Mars’ta bulunuyor.','Mars Olympus Mons huge shield volcano'),
-                  ('Güneş Sistemi’nin en büyük yanardağlarından.','wide Olympus Mons caldera orbital perspective'),
-                  ('Yüksekliği yaklaşık 22 kilometreye ulaşıyor.','Olympus Mons volcanic slopes scale illustration'),
-                  ('Mars’ın geçmişi hakkında ipuçları veriyor.','Mars landscape ancient lava flows scientific')]),
-              ('stonehenge','Stonehenge Taşlarının Yolculuğu','Tarih','Stonehenge standing stones sunrise England',[
-                  ('Stonehenge binlerce yıl önce inşa edildi.','Stonehenge ancient stone circle misty sunrise'),
-                  ('Bazı taşlar uzak bölgelerden taşındı.','prehistoric bluestones at Stonehenge landscape'),
-                  ('Yapı gündönümüyle ilişkilendiriliyor.','Stonehenge solstice sunrise between stones'),
-                  ('İnşası hâlâ arkeoloji araştırmalarına konu.','archaeologists examining Stonehenge landscape')]),
-              ('saturn-rings','Satürn’ün Halkaları','Uzay','Saturn rings close space documentary',[
-                  ('Halkalar sayısız buz ve kaya parçasından oluşur.','Saturn rings individual ice particles visualization'),
-                  ('Parçaların boyutları birbirinden farklıdır.','detailed scientific rings debris and Saturn'),
-                  ('Halkalar son derece ince bir sistemdir.','edge on Saturn rings realistic scientific render'),
-                  ('Satürn’ün uyduları halkaları etkileyebilir.','Saturn moon shepherd near rings illustration')]),
-              ('bioluminescence','Denizin Karanlık Işıkları','Dünya','bioluminescent plankton glowing blue ocean waves',[
-                  ('Bazı deniz canlıları ışık üretebilir.','glowing bioluminescent marine organisms underwater'),
-                  ('Bu olaya biyolüminesans denir.','scientific macro plankton emitting blue light'),
-                  ('Işık iletişim veya savunmada kullanılabilir.','bioluminescent deep sea squid natural behavior'),
-                  ('Parlayan kıyılar bu canlılarla ilişkilidir.','bioluminescent shoreline blue waves at night')]),
-              ('gobeklitepe','Göbeklitepe’nin Dev Taşları','Tarih','Gobekli Tepe archaeological T pillars Turkey',[
-                  ('Göbeklitepe günümüz Türkiye’sinde yer alır.','Gobekli Tepe aerial archaeological site Turkey'),
-                  ('Büyük taş dikmeler üzerinde figürler var.','Gobekli Tepe carved T pillars animal reliefs'),
-                  ('Yapı Neolitik döneme uzanıyor.','prehistoric Gobekli Tepe reconstruction realistic'),
-                  ('Tarihöncesi toplulukları anlamamızı sağlıyor.','archaeologists documenting Gobekli Tepe pillars')]),
-              ('titan-lakes','Titan’daki Metan Gölleri','Uzay','Saturn moon Titan orange hazy atmosphere',[
-                  ('Titan, Satürn’ün büyük bir uydusudur.','Saturn Titan orange haze in space'),
-                  ('Yüzeyinde sıvı metan gölleri bulunur.','Titan methane lakes radar inspired visualization'),
-                  ('Atmosferi yoğun ve pusludur.','Titan surface hazy orange atmosphere realistic'),
-                  ('Titan için yeni keşif görevleri planlanıyor.','NASA Dragonfly rotorcraft Titan scientific concept')]),
-              ('giant-crystals','Yer Altındaki Dev Kristaller','Dünya','Naica cave giant selenite crystals Mexico',[
-                  ('Meksika’da dev kristaller keşfedildi.','Naica cave giant selenite crystals realistic'),
-                  ('Kristallerin bazıları metrelerce uzanıyor.','person scale beside huge Naica cave crystals'),
-                  ('Sıcak ve nemli koşullar dikkat çekiyor.','Naica cave humid sparkling crystal environment'),
-                  ('Oluşumları çok özel jeolojik koşullara bağlı.','geological mineral growth crystalline closeup')]),
-              ('antarctic-lake','Antarktika Buzunun Altı','Dünya','Antarctica vast ice sheet mountain cinematic',[
-                  ('Antarktika kalın buz tabakalarıyla kaplı.','Antarctic ice sheet aerial'),
-                  ('Buzun altında sıvı su gölleri bulunabiliyor.','scientific Antarctic subglacial lake cutaway'),
-                  ('Bu göller buzla çevrili kalabiliyor.','Antarctic ice depth geology scientific illustration'),
-                  ('Araştırmacılar örnekleme yöntemlerini geliştiriyor.','polar scientists studying Antarctic ice cores')]),
-              ('black-holes','Kara Delikler Nasıl Görülür?','Uzay','black hole accretion disk scientifically inspired',[
-                  ('Kara deliklerden ışık kaçamaz.','dark black hole event horizon gravitational lensing'),
-                  ('Yakınındaki sıcak gazlar ışık yayabilir.','bright accretion disk around black hole'),
-                  ('Radyo teleskoplar gölgelerini görüntüledi.','global radio telescope array under night sky'),
-                  ('Olay ufku çevresi bilim insanlarını şaşırtıyor.','black hole shadow scientific visualization')]),
-              ('cappadocia','Kapadokya’nın Yer Altı Şehirleri','Tarih','Cappadocia cave settlements Turkey cinematic',[
-                  ('Kapadokya’da yer altı şehirleri var.','Cappadocia underground city stone tunnels'),
-                  ('Kayalara oyulmuş çok katlı bölümler bulunuyor.','Derinkuyu underground city corridors floors'),
-                  ('Havalandırma kanalları da kullanılmış.','ancient stone ventilation shaft underground city'),
-                  ('Bu alanlar tarih boyunca çeşitli amaçlara hizmet etti.','Cappadocia rock cut underground rooms historic')]),
-              ('moon-farside','Ay’ın Uzak Yüzü','Uzay','Moon farside crater landscape NASA inspired',[
-                  ('Ay’ın bir yüzünü Dünya’dan göremeyiz.','Earth rising beyond Moon farside landscape'),
-                  ('Bunun nedeni eşzamanlı dönmedir.','Earth Moon synchronous rotation science diagram visual no text'),
-                  ('Uzak yüzde çok sayıda krater bulunur.','Moon far side cratered terrain orbital photo'),
-                  ('Uzay araçları bu bölgeyi inceledi.','lunar robotic probe above far side')]),
-              ('deep-sea-giants','Okyanusun Dev Kalamarları','Dünya','giant squid deep ocean natural history',[
-                  ('Dev kalamarlar okyanusun derinliklerinde yaşar.','giant squid swimming in deep sea realistic'),
-                  ('Çok büyük gözleriyle bilinirler.','giant squid eye macro underwater natural history'),
-                  ('Canlı görüntülerini elde etmek zordur.','deep sea research camera observing squid'),
-                  ('Bu canlılar hâlâ araştırılıyor.','marine scientists exploring deep sea squid habitat')]),
-              ('machu-picchu','Machu Picchu’nun Taş İşçiliği','Tarih','Machu Picchu Peru mountain ruins cinematic',[
-                  ('Machu Picchu, İnka uygarlığına aittir.','Machu Picchu ancient Inca terraces mountains'),
-                  ('Yüksek bir dağ sırtında kurulmuştur.','Machu Picchu aerial mountain ridge cloud'),
-                  ('Taş işçiliği dikkat çekici bir özelliktir.','precision fitted Inca stone masonry closeup'),
-                  ('Yapı bugün korunması gereken bir mirastır.','Machu Picchu archaeological preservation landscape')]),
-              ('neptune-winds','Neptün’ün Güçlü Rüzgârları','Uzay','planet Neptune blue atmosphere realistic',[
-                  ('Neptün çok soğuk ve uzak bir gezegendir.','Neptune blue planet distant sun'),
-                  ('Atmosferinde çok hızlı rüzgârlar esebilir.','Neptune atmospheric storms scientific illustration'),
-                  ('Metan, mavi görünümünde rol oynar.','Neptune atmospheric layers blue scientific visual'),
-                  ('Uzay araçları onu yakından inceledi.','Voyager spacecraft near Neptune scientific scene')]),
-              ('salar','Dünyanın Dev Tuz Düzlüğü','Dünya','Salar de Uyuni Bolivia mirror landscape',[
-                  ('Salar de Uyuni, Bolivya’da bulunuyor.','Salar de Uyuni Bolivia aerial salt flat'),
-                  ('Dünya’nın en geniş tuz düzlüklerinden biridir.','vast geometric salt polygons Salar de Uyuni'),
-                  ('Yağmur sonrası ayna gibi görünebilir.','mirror reflection Salar de Uyuni sunset'),
-                  ('Bu manzara doğa koşullarıyla oluşuyor.','Bolivia salar salt crust close geologic photo')]),
-              ('pulsar','Uzayın Düzenli Sinyalleri','Uzay','pulsar neutron star beams astronomy visualization',[
-                  ('Pulsarlar hızla dönen nötron yıldızlarıdır.','rotating neutron star pulsar space visualization'),
-                  ('Düzenli aralıklarla sinyal algılanabilir.','radio telescope observing pulsing stellar signals'),
-                  ('Bunlar doğal gök cisimleridir.','neutron star magnetic beams scientific visualization'),
-                  ('Pulsarlar astronomiye önemli bilgiler sağlar.','radio astronomy dish under starry sky')]),
-              ('petra','Petra’nın Kayalara Oyulmuş Şehri','Tarih','Petra Treasury sandstone rock Jordan cinematic',[
-                  ('Petra, Ürdün’deki tarihî bir kenttir.','Petra Treasury Jordan rose sandstone facade'),
-                  ('Yapıların bazıları kayaya oyulmuştur.','Petra rock-cut architecture close view'),
-                  ('Nebatiler burada gelişmiş bir kent kurdu.','ancient Nabataean Petra historical reconstruction'),
-                  ('Bölgenin su yönetimi dikkat çekicidir.','Petra ancient water channels carved rock')]),
-              ('volcano-lightning','Yanardağlardaki Şimşekler','Dünya','volcanic eruption lightning dramatic cinematic',[
-                  ('Patlamalar yoğun kül bulutları oluşturabilir.','volcano erupting dense ash column'),
-                  ('Kül bulutlarında elektrik yükleri birikebilir.','volcanic ash particles macro scientific visualization'),
-                  ('Bu durum şimşek oluşumuna yol açabilir.','volcanic lightning illuminating ash cloud'),
-                  ('Olay volkanoloji araştırmalarında incelenir.','scientists observing volcano eruption at safe distance')]),
-              ('venus-day','Venüs’ün Tuhaf Günü','Uzay','Venus planet cloudy atmosphere astronomical',[
-                  ('Venüs kendi ekseninde çok yavaş döner.','Venus rotating planet thick clouds scientific'),
-                  ('Dönüş süresi bir yılından daha uzundur.','Venus orbit and rotation illustrative no text'),
-                  ('Atmosferi çok yoğun ve sıcaktır.','Venus hot hazy surface rocky scientific'),
-                  ('Venüs, Dünya’dan çok farklı koşullara sahiptir.','Venus compared with Earth in space image')]),
-              ('pamukkale','Pamukkale’nin Beyaz Terasları','Dünya','Pamukkale white travertine terraces Turkey',[
-                  ('Pamukkale, Türkiye’de bulunur.','Pamukkale Turkey white mineral pools'),
-                  ('Teraslar mineral çökelmesiyle oluştu.','travertine calcium carbonate textures closeup'),
-                  ('Suyun bileşimi bu görünümü etkiliyor.','thermal water flowing over white travertine'),
-                  ('Bu hassas doğal alan koruma gerektirir.','Pamukkale terraces aerial landscape conservation')]),
-              ('james-webb','Uzayın İlk Galaksilerine Bakış','Uzay','James Webb Space Telescope in space',[
-                  ('James Webb teleskobu kızılötesi ışığı gözler.','James Webb golden mirror space telescope'),
-                  ('Çok uzak galaksileri inceleyebilir.','deep field many distant galaxies astronomy'),
-                  ('Bu ışık bize eski evreni gösterir.','early universe distant galaxy scientific render'),
-                  ('Bulgular galaksi oluşumunu anlamamızı sağlar.','astronomers analyzing distant galaxy telescope images')]),
-              ('angkor','Ormanın İçindeki Angkor','Tarih','Angkor Wat Cambodia temple jungle sunrise',[
-                  ('Angkor, Kamboçya’da yer alır.','Angkor Wat temple Cambodia sunrise'),
-                  ('Geniş bir tarihî yerleşim alanıdır.','Angkor complex aerial forest temples'),
-                  ('Büyük su altyapılarıyla ilişkilidir.','Angkor ancient reservoir and waterworks'),
-                  ('Arkeologlar kenti yeni tekniklerle inceliyor.','lidar archaeological survey Angkor jungle')]),
-              ('axolotl','Kendini Yenileyebilen Semender','Dünya','axolotl freshwater salamander natural habitat',[
-                  ('Aksolotl, Meksika kökenli bir semenderdir.','axolotl aquatic salamander realistic macro'),
-                  ('Bazı vücut yapılarını yenileyebilir.','axolotl limbs anatomy science visual no text'),
-                  ('Bu özellik bilimsel araştırmalara konu olur.','scientists studying axolotl in aquarium lab'),
-                  ('Doğal yaşam alanı korunma tehdidi altındadır.','Xochimilco wetlands canals Mexico habitat')]),
-              ('enki-bilal','Dünyanın En Uzun Mağara Sistemleri','Dünya','Mammoth Cave vast limestone passage Kentucky',[
-                  ('Mağara sistemleri çok uzun olabilir.','huge limestone cave chamber natural formation'),
-                  ('Mammoth Cave çok geniş bir ağdır.','Mammoth Cave Kentucky underground passage'),
-                  ('Yer altı suları bu yapıları biçimlendirir.','limestone karst cave water erosion'),
-                  ('Yeni geçitler araştırmalarla haritalanır.','cave explorers mapping passage with headlamps')]),
-              ('aurora','Kutup Işıkları Nasıl Oluşur?','Uzay','aurora borealis over Arctic landscape',[
-                  ('Güneş’ten gelen parçacıklar rol oynar.','solar wind particles approaching Earth space'),
-                  ('Dünya’nın manyetik alanı onları yönlendirir.','Earth magnetic field aurora scientific visual'),
-                  ('Atmosferde renkli ışımalar oluşur.','green purple aurora over snowy mountains'),
-                  ('Kutup ışıkları kuzeyde ve güneyde görülebilir.','aurora australis Antarctica night sky')]),
-              ('pyramids-nubia','Mısır Dışındaki Piramitler','Tarih','Meroe Nubian pyramids Sudan desert',[
-                  ('Sudan’da da çok sayıda piramit bulunur.','Meroe pyramids Sudan aerial desert'),
-                  ('Bunlar Kuş Krallığı ile ilişkilidir.','Kushite Nubian pyramids archaeology'),
-                  ('Biçimleri Mısır piramitlerinden farklı olabilir.','narrow steep Nubian pyramid closeup'),
-                  ('Bu yapılar Afrika tarihinin önemli parçasıdır.','Meroe archaeological site sunrise')]),
-              ('mars-water','Mars’ta Su İzleri','Uzay','Mars ancient dried river valley orbital',[
-                  ('Mars’ta eski akarsu izleri bulundu.','Mars dried river channels satellite view'),
-                  ('Bazı kayaçlar suyla etkileşim göstermiştir.','Mars sedimentary rocks rover close view'),
-                  ('Bugünkü Mars çok daha kurudur.','Mars arid desert dunes and mountains'),
-                  ('Gezgin robotlar geçmiş koşulları araştırıyor.','Mars rover exploring ancient lakebed')]),
-              ('dragon-blood','Kırmızı Reçineli Ejder Ağacı','Dünya','Socotra dragon blood tree Yemen island',[
-                  ('Ejder kanı ağaçları Sokotra’da yetişir.','Socotra dragon blood trees island landscape'),
-                  ('Şemsiye benzeri tepeleriyle tanınırlar.','dragon blood tree umbrella silhouette details'),
-                  ('Kırmızı renkli reçineleriyle de bilinirler.','dragon blood tree red resin closeup'),
-                  ('Sokotra eşsiz canlı çeşitliliğine sahiptir.','Socotra island endemic plants landscape')]),
-              ('methane-bubbles','Buz Altındaki Metan Kabarcıkları','Dünya','frozen lake methane bubbles layered ice',[
-                  ('Bazı donmuş göllerde kabarcıklar görülür.','frozen lake trapped white gas bubbles'),
-                  ('Bunların bir bölümü metan içerir.','methane bubbles stacked under clear lake ice'),
-                  ('Gaz dipteki organik maddelerden oluşabilir.','lake sediment decomposition scientific visual'),
-                  ('Bu görüntü iklim araştırmalarına da konu olur.','scientists examining icy lake gas bubbles')]),
-              ('exoplanet','Başka Yıldızların Gezegenleri','Uzay','exoplanet orbiting distant star space science',[
-                  ('Güneş dışındaki yıldızların da gezegenleri var.','star with orbiting exoplanets scientific render'),
-                  ('Binlerce ötegezegen doğrulandı.','distant exoplanet system variety science'),
-                  ('Bazıları yıldızının önünden geçerken bulunuyor.','exoplanet transit silhouette star'),
-                  ('Bu dünyaların koşulları çok farklı olabilir.','different rocky and gas exoplanets visualization')]),
-              ('bacteria-rock','Taşların İçindeki Yaşam','Dünya','endolithic microbial life desert rock macro scientific',[
-                  ('Bazı mikroorganizmalar kaya içinde yaşayabilir.','microbial colonies inside rock microscopic view'),
-                  ('Böyle ortamlar sert koşullardan koruyabilir.','desert rock layers biology scientific illustration'),
-                  ('Araştırmacılar aşırı koşullardaki yaşamı inceliyor.','microbiologists sampling desert rocks'),
-                  ('Bu çalışmalar başka dünyaları anlamaya yardım eder.','Mars-like desert rock astrobiology investigation')]),
-              ('enceladus-geysers','Satürn’ün Uydusundan Su Fışkırıyor','Uzay','Enceladus icy moon Saturn water vapor geysers space documentary',[
-                  ('Enceladus, Satürn’ün buzlu uydularından biri.','Saturn and icy moon Enceladus in deep space'),
-                  ('Güney kutbundan su buharı ve buz püskürüyor.','Enceladus south pole water ice plumes close view'),
-                  ('Cassini uzay aracı bu püskürmelerin içinden geçti.','Cassini spacecraft flying through Enceladus plume'),
-                  ('Buz altındaki okyanusun özellikleri araştırılıyor.','scientific cutaway of Enceladus subsurface ocean')]),
-              ('io-volcanoes','Jüpiter’in Volkanlarla Kaplı Uydusu','Uzay','Jupiter moon Io active volcanoes space documentary',[
-                  ('Io, Jüpiter’in en dikkat çekici uydularından biri.','Jupiter and volcanic moon Io in space'),
-                  ('Yüzeyinde çok sayıda aktif yanardağ bulunur.','Io moon erupting volcano sulfur plume'),
-                  ('Jüpiter’in gelgit etkisi içini sürekli ısıtır.','Io tidal heating scientific cutaway Jupiter'),
-                  ('Bu yüzden Güneş Sistemi’nin en hareketli volkanik dünyasıdır.','Io colorful volcanic landscape from orbit')]),
-              ('mercury-extremes','Merkür’de Gündüz ve Gece Uçurum Gibi','Uzay','Mercury planet extreme temperature rocky surface',[
-                  ('Merkür, Güneş’e en yakın gezegendir.','Mercury planet close to the Sun'),
-                  ('Gündüz yüzeyi yaklaşık 430 dereceye ulaşabilir.','Mercury sunlit rocky surface intense sunlight'),
-                  ('Gece sıcaklık çok daha düşük seviyelere iner.','Mercury dark night side cold crater landscape'),
-                  ('Kutuplardaki gölgeli kraterlerde buz bulunabilir.','Mercury permanently shadowed polar crater water ice')]),
-              ('asteroid-bennu','Bir Asteroitten Dünya’ya Gelen Örnek','Uzay','asteroid Bennu OSIRIS REx spacecraft sample return',[
-                  ('Bennu, Dünya’ya yakın bir asteroittir.','asteroid Bennu rugged rocky surface in space'),
-                  ('NASA’nın OSIRIS-REx aracı ondan örnek topladı.','OSIRIS REx spacecraft collecting asteroid sample'),
-                  ('Örnek kapsülü 2023’te Dünya’ya ulaştı.','asteroid sample return capsule landing desert'),
-                  ('Numuneler Güneş Sistemi’nin geçmişini araştırmaya yardım ediyor.','scientists examining pristine asteroid grains laboratory')]),
-              ('cosmic-background','Evrenin Bebeklik Fotoğrafı','Uzay','cosmic microwave background early universe scientific visualization',[
-                  ('Uzayda Büyük Patlama’dan kalan bir ışınım var.','cosmic microwave background all sky map visualization'),
-                  ('Bu ışık evren yaklaşık 380 bin yaşındayken yayıldı.','early universe glowing plasma scientific illustration'),
-                  ('Bugün mikrodalga ışınımı olarak algılanıyor.','microwave background radiation scientific space visualization'),
-                  ('Küçük sıcaklık farkları evrenin geçmişini anlatıyor.','CMB tiny temperature variations scientific map')]),
-              ('magnetar','Evrenin En Güçlü Mıknatıslarından Biri','Uzay','magnetar neutron star magnetic field space visualization',[
-                  ('Magnetarlar, nötron yıldızlarının özel bir türüdür.','dense neutron star magnetar in deep space'),
-                  ('Manyetik alanları olağanüstü güçlüdür.','magnetar intense magnetic field scientific visualization'),
-                  ('Bazen uzaya güçlü X ışını patlamaları yayarlar.','magnetar high energy flare in space'),
-                  ('Bu yıldız kalıntıları hâlâ araştırılıyor.','astronomers observing neutron star with space telescope')]),
-              ('neutron-collision','İki Yıldız Çarpışınca Uzay Nasıl Sarsılır?','Uzay','binary neutron star collision gravitational waves kilonova',[
-                  ('Bazı nötron yıldızları çift sistemlerde dolanır.','two neutron stars orbiting each other space'),
-                  ('Birleşmeleri uzay-zamanda dalgalar oluşturur.','gravitational waves from neutron star merger visualization'),
-                  ('2017’de böyle bir olayın ışığı da gözlendi.','kilonova glow after neutron star collision'),
-                  ('Bu birleşmeler ağır elementlerin oluşumunu açıklamaya yardım ediyor.','heavy elements forming in neutron star merger')]),
-              ('magnetic-reversal','Dünya’nın Manyetik Kutupları Değişebilir mi?','Dünya','Earth magnetic field poles reversal scientific visualization',[
-                  ('Dünya’nın manyetik alanı zamanla değişir.','Earth magnetic field lines from space'),
-                  ('Jeolojik geçmişte kutuplar birçok kez yer değiştirdi.','geological magnetic polarity reversal science visual'),
-                  ('Son tam terslenme yaklaşık 780 bin yıl önceydi.','Earth ancient magnetic field scientific illustration'),
-                  ('Bu olay düzenli aralıklarla gerçekleşmez.','scientist studying paleomagnetism rock samples')]),
-              ('tectonic-plates','Kıtalar Neden Hareket Ediyor?','Dünya','Earth tectonic plates continents scientific 3D visualization',[
-                  ('Dünya’nın dış katmanı büyük levhalara ayrılmıştır.','Earth crust tectonic plates cutaway'),
-                  ('Bu levhalar yılda birkaç santimetre ilerleyebilir.','tectonic plate movement slow geological visualization'),
-                  ('Çarpışmaları dağları ve depremleri oluşturabilir.','mountain building tectonic plate collision'),
-                  ('Bilim insanları hareketi GPS ile ölçebiliyor.','GPS geodesy station measuring tectonic movement')]),
-              ('lake-baikal','Dünyanın En Derin Gölü','Dünya','Lake Baikal Siberia deep blue freshwater aerial',[
-                  ('Baykal Gölü Sibirya’da bulunur.','Lake Baikal Siberia aerial winter landscape'),
-                  ('En derin noktası yaklaşık 1.642 metredir.','deep blue Lake Baikal underwater depth visualization'),
-                  ('Dünyanın en büyük tatlı su rezervlerinden biridir.','vast Lake Baikal shoreline aerial panorama'),
-                  ('Yalnızca burada yaşayan fok türü de bulunur.','Baikal seal nerpa swimming underwater')]),
-              ('danakil','Dünyanın En Sert Coğrafyalarından Biri','Dünya','Danakil Depression Ethiopia colorful hydrothermal landscape',[
-                  ('Danakil Çöküntüsü Etiyopya’da yer alır.','Danakil Depression Ethiopia aerial landscape'),
-                  ('Bazı bölümleri deniz seviyesinin altındadır.','Danakil salt flats below sea level landscape'),
-                  ('Volkanik etkinlik ve mineraller sıra dışı renkler oluşturur.','Dallol colorful mineral hydrothermal formations'),
-                  ('Burası Dünya’nın jeolojik açıdan hareketli bölgelerindendir.','Afar Rift volcanic geology dramatic landscape')]),
-              ('giants-causeway','Denizdeki Kusursuz Altıgen Taşlar','Dünya','Giant Causeway Northern Ireland basalt columns coast',[
-                  ('Devler Kaldırımı Kuzey İrlanda kıyısındadır.','Giant Causeway Northern Ireland aerial coast'),
-                  ('Binlerce bazalt sütun yan yana uzanır.','hexagonal basalt columns close up coastal view'),
-                  ('Sütunlar soğuyan lavın çatlamasıyla oluştu.','cooling basalt lava column formation scientific visual'),
-                  ('Bazı kesitler neredeyse kusursuz altıgen görünür.','geometric hexagonal basalt rock formations')]),
-              ('antikythera','Antik Çağın Gizemli Dişli Makinesi','Tarih','Antikythera mechanism ancient Greek bronze gears museum',[
-                  ('Düzenek 1901’de bir batıktan çıkarıldı.','Antikythera mechanism recovered ancient shipwreck'),
-                  ('İçinde birbirine bağlı çok sayıda dişli var.','ancient Greek bronze astronomical gears macro'),
-                  ('Gök cisimlerinin hareketlerini hesaplamakta kullanılıyordu.','Antikythera mechanism astronomical dial reconstruction'),
-                  ('Nasıl üretildiği bugün bile hayranlık uyandırıyor.','Antikythera mechanism museum detailed reconstruction')]),
-              ('terracotta-army','Toprağın Altındaki Binlerce Asker','Tarih','Terracotta Army Qin Shi Huang warriors excavation China',[
-                  ('Terrakotta Ordusu Çin’de keşfedildi.','Terracotta Army rows of clay soldiers China'),
-                  ('Askerler ilk Çin imparatorunun mezar kompleksiyle bağlantılı.','Qin Shi Huang mausoleum terracotta warriors'),
-                  ('Binlerce gerçek boyutlu heykel bulundu.','close up terracotta warrior faces and armor'),
-                  ('Heykellerin ayrıntıları arkeologlarca inceleniyor.','archaeologists documenting terracotta army excavation')]),
-              ('roman-concrete','Roma Betonu Neden Hâlâ Araştırılıyor?','Tarih','ancient Roman concrete Pantheon ruins close up',[
-                  ('Roma’dan kalan bazı beton yapılar hâlâ ayakta.','Pantheon Rome ancient concrete architecture'),
-                  ('Antik karışımlar modern betondan farklıydı.','Roman concrete mineral aggregate close up'),
-                  ('Kireç parçacıklarının çatlakları onarmaya yardım ettiği düşünülüyor.','Roman concrete lime clasts scientific macro'),
-                  ('Araştırmacılar bu dayanıklılığın sırlarını inceliyor.','scientists testing ancient Roman concrete sample')]),
-              ('cahokia','Kuzey Amerika’daki Büyük Antik Kent','Tarih','Cahokia Mounds Monks Mound Illinois aerial',[
-                  ('Cahokia, Mississippi Nehri yakınında gelişti.','Cahokia Mounds Illinois aerial landscape'),
-                  ('Kolomb öncesi Kuzey Amerika’nın büyük merkezlerindendi.','ancient Cahokia settlement historical reconstruction'),
-                  ('Monks Mound adlı dev toprak höyük burada bulunur.','Monks Mound Cahokia large earthen mound'),
-                  ('Kentteki nüfus değişiminin nedenleri araştırılıyor.','archaeologists surveying Cahokia ancient site')]),
-              ('akrotiri','Volkan Külünün Koruduğu Antik Şehir','Tarih','Akrotiri Santorini Bronze Age archaeological ruins',[
-                  ('Akrotiri, Santorini Adası’nda bulunur.','Akrotiri Santorini archaeological site aerial'),
-                  ('Bronz Çağı’nda volkanik kül altında kaldı.','ancient Akrotiri buried by volcanic ash reconstruction'),
-                  ('Bazı binalar ve duvar resimleri korundu.','Akrotiri preserved fresco ancient rooms'),
-                  ('Kazılar Ege’nin eski yaşamına ışık tutuyor.','archaeologists excavating Akrotiri ancient settlement')]),
-              ('tardigrades','Mikroskobik Ama Olağanüstü Dayanıklı Canlı','Dünya','tardigrade water bear microscope macro scientific',[
-                  ('Tardigradlar mikroskobik canlılardır.','tardigrade water bear macro microscope image'),
-                  ('Zor koşullarda etkinliklerini çok azaltabilirler.','tardigrade cryptobiosis scientific illustration'),
-                  ('Kuruma ve aşırı soğuğa şaşırtıcı direnç gösterebilirler.','tardigrade under microscope detailed body'),
-                  ('Ama yenilmez değiller; koşulların da sınırları var.','tardigrade scientific laboratory microscope research')]),
-              ('octopus-camouflage','Ahtapotlar Nasıl Anında Renk Değiştiriyor?','Dünya','octopus camouflage changing color coral reef underwater',[
-                  ('Ahtapotların derisinde özel renk hücreleri bulunur.','octopus chromatophores skin macro scientific'),
-                  ('Bu hücreler farklı desenler oluşturmalarını sağlar.','octopus rapidly changing skin color underwater'),
-                  ('Bazı türler derilerinin dokusunu da değiştirebilir.','octopus textured skin mimicking coral rocks'),
-                  ('Kamuflaj hem saklanmaya hem iletişime yardım eder.','camouflaged octopus blending into reef')]),
-              ('honeybee-dance','Arılar Birbirine Yön Tarifi Veriyor','Dünya','honeybee waggle dance inside beehive macro',[
-                  ('Bal arıları besin kaynaklarını dansla anlatabilir.','honeybee waggle dance on honeycomb close view'),
-                  ('Dansın açısı yön hakkında bilgi verir.','bee waggle dance direction sun scientific visual'),
-                  ('Hareketin süresi uzaklığı işaret edebilir.','honeybee communicating food distance hive'),
-                  ('Diğer işçiler bu bilgiyi yiyecek bulmakta kullanır.','worker honeybees flying toward flower field')]),
-              ('monarch-migration','Minik Kelebeklerin Binlerce Kilometrelik Yolculuğu','Dünya','monarch butterfly migration Mexico forest orange butterflies',[
-                  ('Monark kelebekleri Kuzey Amerika’da göç eder.','monarch butterflies migration in autumn sky'),
-                  ('Bazıları kışı Meksika’daki ormanlarda geçirir.','monarch butterfly overwintering Mexico oyamel forest'),
-                  ('Kuzeye dönüş yolculuğu birkaç nesle yayılır.','monarch butterfly generations migration map visual no text'),
-                  ('Yön bulma biçimleri bilim insanlarını etkiliyor.','monarch butterfly close up on milkweed')]),
-              ('zombie-ant-fungus','Karıncaları Etkileyen Parazit Mantar','Dünya','cordyceps fungus infected ant rainforest macro documentary',[
-                  ('Bazı mantarlar karıncaları enfekte edebilir.','Ophiocordyceps fungus ant on tropical leaf macro'),
-                  ('Enfeksiyon karıncanın davranışını değiştirebilir.','infected ant climbing vegetation scientific macro'),
-                  ('Mantar uygun bir noktada gelişimini sürdürür.','cordyceps fungus growing from ant natural history'),
-                  ('Sonunda sporlarını çevreye yayar.','fungal spores release rainforest macro scientific')]),
-              ('archerfish','Suyla Avlanan Balık','Dünya','archerfish shooting water jet insect mangrove',[
-                  ('Okçu balıkları suyun üstündeki böcekleri hedef alır.','archerfish aiming at insect above water'),
-                  ('Ağızlarından güçlü bir su jeti fırlatırlar.','archerfish water jet striking insect slow motion'),
-                  ('Işığın sudaki kırılmasını hesaba katmaları gerekir.','archerfish underwater view refraction target'),
-                  ('Bu yöntem avlanmada şaşırtıcı bir beceridir.','archerfish catching insect mangrove water surface')]),
-              ('cuttlefish-display','Mürekkep Balığının Renkli Derisi','Dünya','cuttlefish changing colors underwater close up',[
-                  ('Mürekkep balıkları ahtapotlarla akraba kafadanbacaklılardır.','cuttlefish swimming over sandy seabed'),
-                  ('Derilerindeki hücrelerle renkli desenler oluştururlar.','cuttlefish chromatophore color patterns macro'),
-                  ('Desenler saklanmaya ve iletişime yardımcı olur.','cuttlefish camouflage coral reef underwater'),
-                  ('Bazı türler derilerinin görünümünü saniyeler içinde değiştirir.','cuttlefish rapid color display close up')]),
+            ["paranormal-0317-phone", "Gece 03.17’de Çalan Telefon", "Paranormal", [
+              "Telefon her gece tam 03.17’de çalıyordu.",
+              "Arayan numara, yıllar önce kapatılmış eski evlerine aitti.",
+              "Bir gece cevap verdi; karşıdan kendi sesi duyuldu.",
+              "Ses yalnızca şunu fısıldadı: Sakın kapıyı açma."
+            ]],
+            ["paranormal-thirteenth-room", "Oteldeki On Üçüncü Oda", "Paranormal", [
+              "Eski otelin koridorunda on iki oda görünüyordu.",
+              "Gece görevli, duvarda yeni bir kapı fark etti.",
+              "Kapının ardında kendi odasının birebir aynısı vardı.",
+              "Yatağın üzerinde ise henüz çekilmemiş bir valiz duruyordu."
+            ]],
+            ["paranormal-late-mirror", "Aynadaki Yansıma Bir Saniye Geç Kaldı", "Paranormal", [
+              "Genç adam aynaya baktığında yansıması gülümsedi.",
+              "Ama kendisi hiç gülümsememişti.",
+              "Elini kaldırdı; aynadaki el birkaç saniye sonra kalktı.",
+              "O gece aynayı duvara çevirdi, sabah yine karşısındaydı."
+            ]],
+            ["paranormal-three-knocks", "Ormandan Gelen Üç Vuruş", "Paranormal", [
+              "Kampçılar gece çadırlarının çevresinde üç vuruş duydu.",
+              "Ses her seferinde biraz daha yakından geliyordu.",
+              "Dışarı çıktıklarında ağaçların arasında kimseyi göremediler.",
+              "Sabah çadırın üzerinde içeriden atılmış gibi üç iz vardı."
+            ]],
+            ["paranormal-ghost-train", "Son Seferini Yapan Hayalet Tren", "Paranormal", [
+              "Kasabanın eski istasyonu yıllardır kapalıydı.",
+              "Buna rağmen her cuma gece yarısı tren sesi duyuluyordu.",
+              "Bir bekçi raylarda ışıkları yaklaşan eski bir tren gördü.",
+              "Tren durdu; pencerelerde yıllar önce kaybolan yolcular vardı."
+            ]],
+            ["paranormal-lighthouse", "Sis İçindeki Deniz Feneri", "Paranormal", [
+              "Fırtınalı gecede terk edilmiş fener yeniden ışık verdi.",
+              "Balıkçılar ışığın denize değil, kıyıdaki kayalıklara döndüğünü gördü.",
+              "Fenerin kapısı içeriden kilitliydi.",
+              "Ertesi sabah camda ıslak bir el izi belirdi."
+            ]],
+            ["paranormal-attic-steps", "Kilitli Tavan Arasındaki Adımlar", "Paranormal", [
+              "Aile her gece tavandan ağır adımlar duyuyordu.",
+              "Tavan arasının anahtarı yıllardır aynı çekmecedeydi.",
+              "Kapıyı açtıklarında içeride yalnızca eski bir sandalye buldular.",
+              "Aşağı indiklerinde sandalye merdivenin başında onları bekliyordu."
+            ]],
+            ["paranormal-stranger-photo", "Fotoğrafta Beliren Yabancı", "Paranormal", [
+              "Arkadaşlar eski evin önünde toplu fotoğraf çekti.",
+              "Fotoğrafta grubun arkasında tanımadıkları biri duruyordu.",
+              "Görüntüyü büyüttüler; yabancı evin penceresinden bakıyordu.",
+              "Evin içinde aynı fotoğrafın daha eski bir kopyası bulundu."
+            ]],
+            ["paranormal-moving-chair", "Her Gece Yer Değiştiren Sandalye", "Paranormal", [
+              "Yaşlı evdeki sandalye her sabah başka yerde bulunuyordu.",
+              "Ev sahibi gece kamerayı açıp odadan çıktı.",
+              "Kayıtta sandalye yavaşça masaya yaklaşıyordu.",
+              "Sonra görünmeyen biri oturmuş gibi minder çöktü."
+            ]],
+            ["paranormal-hospital-hall", "Terk Edilmiş Hastanenin Koridoru", "Paranormal", [
+              "Gece güvenliği kapalı hastaneden bir zil sesi duydu.",
+              "Ses, yıllardır kullanılmayan üçüncü kattaki odadan geliyordu.",
+              "Koridordaki ışıklar sırayla yanıp sönmeye başladı.",
+              "Kapının altından bir gölge geçti, ama oda boştu."
+            ]],
+            ["paranormal-zero-floor", "Asansördeki Sıfırıncı Kat", "Paranormal", [
+              "Asansör normalde bodrumda durmuyordu.",
+              "Bir gece ekranda daha önce görülmeyen sıfır rakamı yandı.",
+              "Kapılar açılınca aynı binanın karanlık bir kopyası göründü.",
+              "İçerideki duvar saatleri hep aynı dakikayı gösteriyordu."
+            ]],
+            ["paranormal-village-bell", "Kayıp Köyün Gece Çanı", "Paranormal", [
+              "Haritalarda görünmeyen köyden geceleri çan sesi yükseliyordu.",
+              "Meraklı gezgin sesi takip ederek sisli yola girdi.",
+              "Taş evlerin pencerelerinde solgun ışıklar yanıyordu.",
+              "Sabah aynı yerde yalnızca boş bir tarla vardı."
+            ]],
+            ["paranormal-door-light", "Kapının Altından Sızan Işık", "Paranormal", [
+              "Evde kimse yokken bodrum kapısının altı aydınlandı.",
+              "Ev sahibi ışığı kapattı, fakat parıltı geri geldi.",
+              "Kapıyı açınca aşağıda eski bir koridor uzanıyordu.",
+              "Koridorun sonunda kendi evinin kapısı görünüyordu."
+            ]],
+            ["paranormal-piano", "Gece Yarısı Çalan Piyano", "Paranormal", [
+              "Terk edilmiş konaktan her gece aynı melodi duyuluyordu.",
+              "Mahalleli piyanonun tuşlarının kendi kendine hareket ettiğini anlattı.",
+              "Bir müzisyen melodiyi kaydetmek için içeri girdi.",
+              "Kayıtta ikinci bir piyano daha ona eşlik ediyordu."
+            ]],
+            ["paranormal-wall-whisper", "Duvarın İçindeki Fısıltı", "Paranormal", [
+              "Yeni taşındıkları evde duvarlardan fısıltılar geliyordu.",
+              "Sesler yalnızca ev tamamen sessizken duyuluyordu.",
+              "Bir gece fısıltı, odadaki eşyaların yerini tek tek söyledi.",
+              "Sabah bütün eşyalar anlatıldığı gibi dizilmişti."
+            ]],
+            ["paranormal-ghost-ship", "Kıyıya Dönen Hayalet Gemi", "Paranormal", [
+              "Balıkçılar sisin içinden eski bir yelkenli çıktığını gördü.",
+              "Geminin yelkenleri rüzgâr yokken şişiyordu.",
+              "Güvertede kimse yoktu, ama bir fener sallanıyordu.",
+              "Şafakta gemi sisle birlikte gözden kayboldu."
+            ]],
+            ["paranormal-red-window", "Kırmızı Işıklı Pencere", "Paranormal", [
+              "Kasabanın boş evinde her gece kırmızı bir pencere yanıyordu.",
+              "Elektrik bağlantısı yıllar önce kesilmişti.",
+              "Bir komşu yaklaştığında içeride perde arkasında bir siluet gördü.",
+              "Ertesi gece evin bütün pencereleri duvarla örülmüştü."
+            ]],
+            ["paranormal-shared-dream", "Aynı Rüyayı Gören Komşular", "Paranormal", [
+              "Aynı sokaktaki üç kişi aynı gece aynı rüyayı gördü.",
+              "Rüyalarında kapısız uzun bir koridorda yürüyorlardı.",
+              "Koridorun sonunda kendi sokaklarının tabelası duruyordu.",
+              "Sabah üçü de aynı saatte kapı zilini duydu."
+            ]],
+            ["paranormal-missing-passenger", "Son Duraktaki Yolcu", "Paranormal", [
+              "Gece otobüs şoförü son durakta tek yolcu aldı.",
+              "Yolcu hiç konuşmadan arka koltuğa oturdu.",
+              "Aynadan baktığında koltuk boş görünüyordu.",
+              "Bilet makinesinde ise yeni basılmış bir bilet vardı."
+            ]],
+            ["paranormal-umbrella", "Mezarlıkta Açılan Şemsiye", "Paranormal", [
+              "Yağmursuz bir gecede mezarlıkta siyah şemsiye belirdi.",
+              "Bekçi şemsiyeyi kapatıp kulübeye götürdü.",
+              "Sabah şemsiye yine aynı mezarın başındaydı.",
+              "Toprağın üzerinde bu kez iki çift ayak izi vardı."
+            ]],
+            ["paranormal-last-cassette", "Eski Kasetin Son Kaydı", "Paranormal", [
+              "Bit pazarından alınan kasette evin eski sakinleri konuşuyordu.",
+              "Kayıt yıllar önce yapılmış görünüyordu.",
+              "Son bölümde biri bugünün tarihini fısıldadı.",
+              "Ardından kayıttaki ses, dinleyenin adını söyledi."
+            ]],
+            ["paranormal-empty-class", "Boş Sınıfta Yapılan Yoklama", "Paranormal", [
+              "Okul kapandıktan sonra sınıftan öğretmen sesi geliyordu.",
+              "Güvenlik kamerasında sıralar boş görünüyordu.",
+              "Tahtada her gece yeni bir isim beliriyordu.",
+              "Son yazılan isim, ertesi gün okula gelen bekçinindi."
+            ]],
+            ["paranormal-night-shop", "Gece Açılan Dükkân", "Paranormal", [
+              "Sokaktaki terk edilmiş dükkân yalnızca gece yarısı açılıyordu.",
+              "Vitrinde yıllar önce kaybolan eşyalar sergileniyordu.",
+              "Bir kadın içeri girince çocukluğundaki oyuncağını gördü.",
+              "Dışarı çıktığında dükkânın yerinde boş bir duvar vardı."
+            ]],
+            ["paranormal-bridge-shadow", "Köprüdeki İkinci Gölge", "Paranormal", [
+              "Bisikletli genç köprüden geçerken iki gölge fark etti.",
+              "Ay ışığında yalnızca kendisi görünüyordu.",
+              "İkinci gölge korkuluğa doğru yürüyüp durdu.",
+              "Genç arkasına baktığında köprü tamamen boştu."
+            ]],
+            ["paranormal-thirteen-clock", "On Üçüncü Kez Çalan Saat", "Paranormal", [
+              "Eski duvar saati gece yarısı on iki kez vurdu.",
+              "Ev halkı ses kesildi sanırken bir vuruş daha geldi.",
+              "Saatin akrebi geriye doğru dönmeye başladı.",
+              "Sabah takvimde bir günün eksildiğini fark ettiler."
+            ]],
+            ["paranormal-snow-cabin", "Karlı Ormandaki Kulübe", "Paranormal", [
+              "Dağcılar kar fırtınasında terk edilmiş bir kulübeye sığındı.",
+              "Şömine kendi kendine yanmaya başladı.",
+              "Duvara asılı fotoğraftaki kişiler her bakışta değişiyordu.",
+              "Sabah fotoğrafta dağcıların kendileri vardı."
+            ]],
+            ["paranormal-lost-number", "Telefon Rehberindeki Kayıp Numara", "Paranormal", [
+              "Eski telefonda kayıtlı olmayan bir numara belirdi.",
+              "Arandığında karşıdan evin içindeki sesler duyuldu.",
+              "Telefon kapalı olmasına rağmen konuşma sürdü.",
+              "Son cümle, arayan kişinin arkasından geliyordu."
+            ]],
+            ["paranormal-bus-stop-woman", "Her Gece Aynı Durakta Bekleyen Kadın", "Paranormal", [
+              "Şoför her gece boş durakta aynı kadını görüyordu.",
+              "Kadın hep aynı saatte aynı yere bakıyordu.",
+              "Bir gece şoför durdu, fakat durakta kimse yoktu.",
+              "Otobüsün arka camında kadının silueti belirdi."
+            ]],
+            ["paranormal-museum-steps", "Kapalı Müzedeki Ayak Sesleri", "Paranormal", [
+              "Müze kapandıktan sonra mermer salonda adımlar duyuluyordu.",
+              "Güvenlik görevlisi sesleri eski zırhların yanından takip etti.",
+              "Zırhlardan birinin vizörü yavaşça açıldı.",
+              "Kamera kaydında koridor boyunca yürüyen boş bir zırh vardı."
+            ]],
+            ["paranormal-lantern", "Karanlıkta Yanıp Sönen Fener", "Paranormal", [
+              "Dağ yolunda uzakta küçük bir fener görünüyordu.",
+              "Yolcu yaklaştıkça ışık daha uzağa taşındı.",
+              "Sonunda fenerin eski bir kuyunun üzerinde durduğunu gördü.",
+              "Işık söndüğünde arkasında bir ayak sesi duydu."
+            ]],
+            ["paranormal-rain-house", "Yalnızca Yağmurda Görünen Ev", "Paranormal", [
+              "Köylüler sisli tepede yalnızca yağmur yağınca bir ev görüyordu.",
+              "Güneş açtığında ev tamamen kayboluyordu.",
+              "Bir fotoğrafçı yağmurda tepeye çıktı ve kapıyı buldu.",
+              "Fotoğrafta ev görünüyordu, fakat fotoğrafçı görünmüyordu."
+            ]],
+            ["paranormal-empty-playground", "Gece Yarısı Dönen Salıncak", "Paranormal", [
+              "Parktaki salıncak rüzgârsız gecelerde kendi kendine sallanıyordu.",
+              "Güvenlik kamerasında salıncağın yanında küçük bir gölge belirdi.",
+              "Gölge bir süre boş salıncağa baktı.",
+              "Sonra salıncak durdu ve kamera aniden karardı."
+            ]],
+            ["paranormal-last-bus", "Eski Otobüsün Son Yolcusu", "Paranormal", [
+              "Şehir dışındaki eski otobüs her gece garaja dönüyordu.",
+              "Şoför koltukta kimse olmadığını söylüyordu.",
+              "Temizlikçi arka koltukta ıslak bir bilet buldu.",
+              "Biletin üzerinde yarının tarihi yazıyordu."
+            ]],
+            ["paranormal-rooftop-steps", "Çatıdaki Ayak Sesleri", "Paranormal", [
+              "Apartman sakinleri her gece çatıda koşan birini duyuyordu.",
+              "Kapı kilitliydi ve anahtar yöneticideydi.",
+              "Bir gece herkes merdivene çıktı; ses üstlerinde devam etti.",
+              "Çatıya ulaştıklarında ayak sesleri dairenin içinden geldi."
+            ]],
+            ["paranormal-street-silhouette", "Sokağın Sonundaki Siluet", "Paranormal", [
+              "Gece yürüyen adam sokağın sonunda uzun bir siluet gördü.",
+              "Her adım attığında siluet de yaklaşıyordu.",
+              "Adam koştu, ama gölge aynı yerde kaldı.",
+              "Eve vardığında gölgenin kapı önünde beklediğini gördü."
+            ]],
+            ["paranormal-self-opening-door", "Kendi Kendine Açılan Kapı", "Paranormal", [
+              "Evdeki bütün kapılar kilitlenmişti.",
+              "Buna rağmen koridorun sonundaki kapı her gece açılıyordu.",
+              "Ailenin koyduğu mühür sabaha kadar bozulmadan kalıyordu.",
+              "Bir sabah kapının ardında yeni bir oda belirdi."
+            ]],
+            ["paranormal-carousel", "Boş Lunaparkta Dönen Atlıkarınca", "Paranormal", [
+              "Terk edilmiş lunaparkta atlıkarınca geceleri dönmeye başladı.",
+              "Elektrik bağlantısı yıllar önce sökülmüştü.",
+              "Hoparlörden eski bir çocuk şarkısı duyuldu.",
+              "Sabah atlardan birinin üzerinde taze bir el izi vardı."
+            ]],
+            ["paranormal-lake-light", "Gölün Üstündeki Işık", "Paranormal", [
+              "Balıkçılar gölün ortasında suya değmeyen bir ışık gördü.",
+              "Işık kıyıya yaklaşınca mavi renge dönüştü.",
+              "Su yüzeyinde hiçbir dalga oluşmadı.",
+              "Sabah aynı noktada eski bir pusula bulundu."
+            ]],
+            ["paranormal-station-announcement", "İstasyondaki İsimsiz Anons", "Paranormal", [
+              "Son tren gittikten sonra istasyonda anons sesi duyuldu.",
+              "Anons, yıllardır kullanılmayan bir peronu tarif ediyordu.",
+              "Görevli perona indiğinde raylarda taze ayak izleri gördü.",
+              "Hoparlör son kez konuştu: Treniniz geldi."
+            ]],
+            ["paranormal-basement-door", "Kapanmayan Bodrum Kapısı", "Paranormal", [
+              "Bodrum kapısı her kilitlendiğinde yeniden aralanıyordu.",
+              "Aile kapının önüne ağır bir dolap koydu.",
+              "Gece dolap sessizce duvardan uzaklaşmış bulundu.",
+              "Kapının arkasından merdiven değil, uzun bir koridor görünüyordu."
+            ]],
+            ["paranormal-village-map", "Haritada Olmayan Kasabanın Haritası", "Paranormal", [
+              "Antikacıdan alınan haritada kasabanın yakınında başka bir yer işaretliydi.",
+              "İşaretli yere giden yol eski bir taş köprüye çıktı.",
+              "Köprünün ötesinde evlerin ışıkları yanıyordu.",
+              "Dönüşte haritadaki kasaba silinmişti."
+            ]],
+            ["paranormal-night-photo", "Gece Fotoğrafındaki Fazladan Işık", "Paranormal", [
+              "Fotoğrafçı gece ormanını çektiğinde görüntüde fazladan ışık belirdi.",
+              "Işık her karede kameraya biraz daha yaklaşıyordu.",
+              "Son fotoğrafta ışığın içinde bir yüz seçiliyordu.",
+              "Fotoğrafçı makinesini kapattı; flaş kendi kendine patladı."
+            ]],
+            ["paranormal-cold-spot", "Odadaki Buz Gibi Nokta", "Paranormal", [
+              "Eski evin tek bir köşesi yazın bile buz gibiydi.",
+              "Termometre o noktada aniden düşüyordu.",
+              "Bir gece soğuk alan odanın ortasına doğru ilerledi.",
+              "Sabah duvarda içeriden çizilmiş gibi bir el izi vardı."
+            ]],
+            ["paranormal-window-fingerprints", "Camın Dışındaki Parmak İzleri", "Paranormal", [
+              "Üçüncü kattaki pencerenin dışında her sabah izler beliriyordu.",
+              "Yağmur izleri siliyor, ertesi gün yeniden ortaya çıkarıyordu.",
+              "Bir gece ev sahibi camın önünde gölge gördü.",
+              "Gölge içeriden değil, dışarıdan el sallıyordu."
+            ]],
+            ["paranormal-old-key", "Eski Otelin Anahtarı", "Paranormal", [
+              "Resepsiyonda üzerinde numara olmayan eski bir anahtar bulundu.",
+              "Anahtar hiçbir kapıyı açmıyordu.",
+              "Gece otelin duvarından hafif bir kilit sesi geldi.",
+              "Sabah anahtarın üzerinde yeni bir oda numarası yazıyordu."
+            ]],
+            ["paranormal-third-floor", "Asansörün Durduğu Üçüncü Kat", "Paranormal", [
+              "Binada yalnızca iki kat vardı.",
+              "Yine de asansör her gece üçüncü katta duruyordu.",
+              "Kapılar açılınca karanlıkta bir koridor görünüyordu.",
+              "Bir gece koridorun sonunda asansörün kendisi belirdi."
+            ]],
+            ["paranormal-pine-forest", "Çam Ormanındaki Yüzen Işıklar", "Paranormal", [
+              "Köylüler çamların arasında yerden yükselen ışıklar görüyordu.",
+              "Işıklar birbirini takip ederek ormanın derinine gidiyordu.",
+              "Bir araştırmacı onları kameraya almak için yaklaştı.",
+              "Kayıtta ışıkların arkasında kendisini izleyen bir siluet vardı."
+            ]],
+            ["paranormal-empty-cinema", "Terk Edilmiş Sinemadaki Son Gösterim", "Paranormal", [
+              "Kapalı sinemadan geceleri projektör sesi geliyordu.",
+              "Perdede yıllar önce çekilmiş boş bir salon görünüyordu.",
+              "Bir gece koltuklarda yavaşça beliren siluetler sayıldı.",
+              "Son karede salondaki tek kişi kameraya baktı."
+            ]],
+            ["paranormal-library-book", "Kütüphanedeki Kendi Kendine Açılan Kitap", "Paranormal", [
+              "Kapalı kütüphanede her sabah aynı kitap açık bulunuyordu.",
+              "Kitabın sayfalarında henüz yaşanmamış olaylar yazıyordu.",
+              "Görevli son sayfayı çevirdiğinde kendi adını gördü.",
+              "Altında o gece eve dönmemesi gerektiği yazıyordu."
+            ]],
+            ["paranormal-window-face", "Pencerede Beliren Yüz", "Paranormal", [
+              "Aynı evin penceresinde her gece solgun bir yüz beliriyordu.",
+              "Ev aylardır boştu ve perdeleri içeriden kapalıydı.",
+              "Bir komşu fotoğraf çektiğinde pencere tamamen karanlıktı.",
+              "Telefon ekranında ise yüz hemen arkasında görünüyordu."
+            ]],
+            ["paranormal-doorbell", "Gece Yarısı Çalan Kapı Zili", "Paranormal", [
+              "Kapı zili her gece tam on ikide çalıyordu.",
+              "Dürbünden bakıldığında merdiven boş görünüyordu.",
+              "Bir gece zil çalarken kapının önüne kamera koydular.",
+              "Kayıtta kapı açılmadan içeri giren bir gölge vardı."
+            ]],
+            ["paranormal-fog-road", "Sisli Yolda İlerleyen Işık", "Paranormal", [
+              "Sürücü sisli yolda önünde ilerleyen tek bir ışık gördü.",
+              "Işık virajları tam onun hızında dönüyordu.",
+              "Yol bittiğinde ışık eski bir tabelanın üzerinde durdu.",
+              "Tabelada sürücünün henüz gitmediği evin adresi yazıyordu."
+            ]],
+            ["paranormal-dancing-shadow", "Karanlıkta Dans Eden Gölge", "Paranormal", [
+              "Boş salonda duvardaki gölge müzik olmadan dans ediyordu.",
+              "Işıklar açılınca odada kimse bulunamadı.",
+              "Işıklar kapandığında gölge bu kez tavanda belirdi.",
+              "Sabah duvarda eski bir balo fotoğrafı asılıydı."
+            ]],
+            ["paranormal-radio-time", "Her Gece Aynı Saate Dönen Radyo", "Paranormal", [
+              "Eski radyo her gece kendiliğinden açılıyordu.",
+              "Aynı haber bülteni ve aynı tarih okunuyordu.",
+              "Bir gece spiker dinleyenin adını söyledi.",
+              "Ardından yayın, evin içinden gelen bir sesle kesildi."
+            ]],
+            ["paranormal-clock-thirteen", "Kule Saatinin On Üçüncü Vuruşu", "Paranormal", [
+              "Kasaba kulesi gece yarısı on üç kez çaldı.",
+              "Saat ustası mekanizmayı kontrol etti; her şey normaldi.",
+              "Ertesi gece on üçüncü vuruş daha yakından duyuldu.",
+              "Kulenin kapısında içeriden çevrilmiş bir anahtar bulundu."
+            ]],
+            ["paranormal-warm-tea", "Boş Evdeki Sıcak Çay", "Paranormal", [
+              "Terk edilmiş evde masanın üzerinde sıcak bir fincan vardı.",
+              "Pencereler kapalı, şömine soğuktu.",
+              "Araştırmacı fincana dokununca üst kattaki lamba yandı.",
+              "Merdivenden biri yavaşça aşağı inmeye başladı."
+            ]],
+            ["paranormal-photo-album", "Kayıp Fotoğraf Albümü", "Paranormal", [
+              "Pazardan alınan albümde aynı evin fotoğrafları bulunuyordu.",
+              "Her fotoğrafta penceredeki yabancı biraz daha yaklaşıyordu.",
+              "Son fotoğrafta yabancı kameranın hemen önündeydi.",
+              "Albümün arkasında yeni sahibinin çekilmiş bir fotoğrafı vardı."
+            ]],
+            ["paranormal-hidden-room", "Duvarın Ardındaki Gizli Oda", "Paranormal", [
+              "Tadilat sırasında duvarın arkasında boş bir oda bulundu.",
+              "Odanın içinde tozlanmamış bir masa ve saat vardı.",
+              "Saat çalışmıyor, ama tik tak sesi duvarlardan geliyordu.",
+              "Kapı kapatılınca odanın içeriden kilitlendiği duyuldu."
+            ]],
+            ["paranormal-last-ferry", "Son Feribotun Yolcusu", "Paranormal", [
+              "Gece son feribotta güvertede tek yolcu oturuyordu.",
+              "Görevli bilet sorduğunda yolcu eski bir tarih gösterdi.",
+              "Feribot kıyıya yanaşınca koltuk boş kaldı.",
+              "Bilet defterinde yolcunun adı yıllar önce silinmişti."
+            ]],
+            ["paranormal-footprints", "Sabah Kaybolan Ayak İzleri", "Paranormal", [
+              "Kar yağınca evin kapısına kadar ayak izleri oluştu.",
+              "İzler dışarıdan gelmiyor, evin içinden başlıyordu.",
+              "Aile bütün gece kapıları kilitli tuttu.",
+              "Sabah izler yatak odasının önünde aniden sona erdi."
+            ]],
           ]
-
           topic_ids = [item[0] for item in TOPICS]
           if len(TOPICS) != 60:
               raise RuntimeError(f'TOPICS listesi tam 60 konu olmali; bulunan: {len(TOPICS)}')
           if len(set(topic_ids)) != len(topic_ids):
               raise RuntimeError('TOPICS listesinde tekrar eden konu IDsi var.')
-          if any(len(item[4]) != 4 for item in TOPICS):
+          if any(len(item[3]) != 4 for item in TOPICS):
               raise RuntimeError('Her konu tam 4 bilgi sahnesi icermeli.')
-
-          for folder in (OUT, IMAGES, CAPTIONS, CLIPS, HISTORY_FILE.parent):
+          
+          for folder in (OUT, CAPTIONS, CLIPS, VOICE_DIR, HISTORY_FILE.parent):
               folder.mkdir(parents=True, exist_ok=True)
-
+          
           required = {
-              'CLOUDFLARE_API_TOKEN': CF_TOKEN,
-              'CLOUDFLARE_ACCOUNT_ID': CF_ACCOUNT,
               'YOUTUBE_CLIENT_ID': YOUTUBE_CLIENT_ID,
               'YOUTUBE_CLIENT_SECRET': YOUTUBE_CLIENT_SECRET,
               'YOUTUBE_REFRESH_TOKEN': YOUTUBE_REFRESH_TOKEN,
@@ -437,7 +499,7 @@ jobs:
               raise RuntimeError('GitHub Secrets eksik: ' + ', '.join(missing))
           if YOUTUBE_PRIVACY not in ('public', 'private', 'unlisted'):
               raise RuntimeError('YOUTUBE_PRIVACY public/private/unlisted olmali.')
-
+          
           now = datetime.now(ZoneInfo('Europe/Istanbul'))
           slot = (f'{now:%Y-%m-%d}-' + ('sabah' if now.hour < 15 else 'aksam')
                   if RUN_EVENT == 'schedule' else f'manuel-{RUN_ID}')
@@ -450,303 +512,593 @@ jobs:
           used_ids = {item.get('topic_id') for item in history}
           available = [item for item in TOPICS if item[0] not in used_ids]
           if not available:
-              raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin TOPICS havuzuna yeni konular ekleyin.')
-          topic_id, title, category, hero, facts = available[0]
+              raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin durduruldu; TOPICS havuzuna yeni konular ekleyin.')
+          topic_id, title, category, facts = available[0]
           print(f'Konu: {title} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
           scenes = [
-              (f'{title}: bilmeniz gerekenler!', hero + ', wide establishing shot'),
-              *facts,
-              ('Sence hangisi şaşırttı? Beğen, yorum yap ve abone ol!', hero + ', breathtaking cinematic closing shot')
+              (f'Bu gece anlatacağımız kurgusal paranormal hikâye: {title}.', ''),
+              *((story_beat, '') for story_beat in facts),
+              ('Sence bu olayın açıklaması ne? Videoyu beğenmeyi ve kanalımıza abone olmayı unutmayın!', '')
           ]
           assert len(scenes) == SCENE_COUNT
-          (OUT / 'video-plani.json').write_text(json.dumps({'topic_id': topic_id, 'title': title, 'scenes': scenes}, ensure_ascii=False, indent=2), encoding='utf-8')
-
-          session = requests.Session()
-          PRIMARY_MODEL = '@cf/black-forest-labs/flux-2-klein-4b'
-          BACKUP_MODEL = '@cf/lykon/dreamshaper-8-lcm'
-
-          class DailyQuotaExhausted(Exception):
-              pass
-
-          # FLUX.2 klein 4B: gercekci belgesel fotograflarina benzer goruntuler.
-          # Modelin dogrudan dikey oran uretmesini sagliyoruz (kirpma minimum).
-          style = (
-              'Photorealistic premium documentary still frame, highly detailed realistic photograph, '
-              'credible natural materials, true-to-life textures, authentic historical or astronomical subject, '
-              'physically believable illumination, balanced exposure, fine detail, natural contrast, '
-              'professional editorial color grading, clear strong foreground subject, '
-              'portrait 9:16 framing, generous safe margins on every side, subject within central 70 percent, '
-              'no captions, no letters, no diagrams, no logos, no watermarks. '
-          )
-
-          def image_from_response(response):
-              ctype = response.headers.get('content-type', '').lower()
-              if 'json' not in ctype and response.content[:1] != b'{':
-                  return response.content
-              payload = response.json()
-              if payload.get('success') is False:
-                  raise RuntimeError(str(payload.get('errors', payload))[:500])
-              data = payload.get('result', payload)
-              encoded = (data.get('image') or data.get('data')) if isinstance(data, dict) else None
-              if isinstance(encoded, list):
-                  return bytes(encoded)
-              if isinstance(encoded, str):
-                  return base64.b64decode(encoded.split(',')[-1])
-              raise RuntimeError('Gorsel baytlari alinamadi.')
-
-          def call_image(model, prompt, seed):
-              url = f'https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/ai/run/{model}'
-              headers = {'Authorization': f'Bearer {CF_TOKEN}'}
-              if model == PRIMARY_MODEL:
-                  # Klein 4B, JSON degil multipart/form-data ister.
-                  # Content-Type headerini requests otomatik olusturur.
-                  response = session.post(url, headers=headers, files={
-                      'prompt': (None, prompt[:2000]),
-                      'width': (None, '768'),
-                      'height': (None, '1344'),
-                      'guidance': (None, '4.0'),
-                      'seed': (None, str(seed)),
-                  }, timeout=180)
-              else:
-                  response = session.post(url, headers=headers, json={
-                      'prompt': prompt[:1800],
-                      'width': 768,
-                      'height': 1344,
-                      'num_steps': 14,
-                      'guidance': 7.5,
-                      'seed': seed,
-                      'negative_prompt': (
-                          'blurry, soft focus, warped shapes, floating artifacts, painting, '
-                          'cartoon, oversaturated, incorrect architecture, text, watermark'
-                      ),
-                  }, timeout=180)
-              if response.status_code == 429:
-                  body = response.text.lower()
-                  if ('daily free allocation' in body or '10,000 neurons' in body
-                          or '4006' in body or '3036' in body):
-                      raise DailyQuotaExhausted('Cloudflare gunluk neuron kotasi doldu.')
-              if not response.ok:
-                  raise RuntimeError(f'{model} HTTP {response.status_code}: {response.text[:350]}')
-              return image_from_response(response)
-
-          def crop_and_save(raw, path):
-              img = Image.open(io.BytesIO(raw)).convert('RGB')
-              if min(img.size) < 256:
-                  raise RuntimeError('Gorsel cok kucuk.')
-              desired = WIDTH / HEIGHT
-              if img.width / img.height > desired:
-                  new_w = round(img.height * desired)
-                  left = (img.width - new_w) // 2
-                  img = img.crop((left, 0, left + new_w, img.height))
-              else:
-                  new_h = round(img.width / desired)
-                  top = (img.height - new_h) // 2
-                  img = img.crop((0, top, img.width, top + new_h))
-              img = img.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
-              img = ImageEnhance.Contrast(img).enhance(1.06)
-              img = ImageEnhance.Color(img).enhance(1.03)
-              img = img.filter(ImageFilter.UnsharpMask(radius=1.0, percent=90, threshold=3))
-              img.save(path, format='PNG', optimize=True)
-
-          def make_caption(text_value, path):
-              overlay = Image.new('RGBA', (WIDTH, HEIGHT), (0, 0, 0, 0))
-              draw = ImageDraw.Draw(overlay)
-              font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-              font = ImageFont.truetype(font_path, 54)
-              words, lines, current = text_value.split(), [], ''
-              for word in words:
-                  test = f'{current} {word}'.strip()
-                  bbox = draw.textbbox((0, 0), test, font=font)
-                  if bbox[2] - bbox[0] <= WIDTH - 140 or not current:
-                      current = test
-                  else:
-                      lines.append(current)
-                      current = word
-              if current:
-                  lines.append(current)
-              line_height = 80
-              start = HEIGHT - 300 - len(lines) * line_height
-              draw.rounded_rectangle((45, start - 30, WIDTH - 45, start + len(lines) * line_height + 40),
-                                     radius=30, fill=(0, 0, 0, 185))
-              for i, line in enumerate(lines):
-                  draw.text((WIDTH // 2, start + i * line_height), line, font=font,
-                            anchor='mt', fill='white', stroke_width=2, stroke_fill='black')
-              overlay.save(path)
-
+          (OUT / 'video-plani.json').write_text(json.dumps({
+              'topic_id': topic_id, 'title': title, 'category': category,
+              'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
+              'style': 'original procedural 2D paranormal story animation; moving characters; no static-image slideshow',
+              'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
+              'voice': TTS_VOICE, 'duration_seconds': 30
+          }, ensure_ascii=False, indent=2), encoding='utf-8')
+          
+          FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          FONT_REGULAR = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+          FONT_TITLE = ImageFont.truetype(FONT_PATH, 29)
+          FONT_CAPTION = ImageFont.truetype(FONT_PATH, 27)
+          FONT_SMALL = ImageFont.truetype(FONT_PATH, 18)
+          
+          
           def run_ffmpeg(args):
               subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', *args], check=True)
-
-          def make_clip(img, caption, result, number):
-              frames = SCENE_SECONDS * FPS
-              if number % 3 == 1:
-                  z, x, y = 'min(1.0+0.00065*on,1.08)', 'iw/2-(iw/zoom/2)', 'ih/2-(ih/zoom/2)'
-              elif number % 3 == 2:
-                  z, x, y = '1.07', f'max(0,min(iw-iw/zoom,(iw-iw/zoom)*on/{frames}))', 'ih/2-(ih/zoom/2)'
+          
+          
+          def probe_duration(path):
+              return float(subprocess.check_output([
+                  'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                  '-of', 'default=noprint_wrappers=1:nokey=1', str(path)
+              ], text=True).strip())
+          
+          
+          async def create_tts(text_value, path):
+              last_error = None
+              for attempt in range(3):
+                  try:
+                      communicator = edge_tts.Communicate(
+                          text_value, TTS_VOICE, rate='+15%', volume='+0%', pitch='+0Hz'
+                      )
+                      await communicator.save(str(path))
+                      if path.exists() and path.stat().st_size > 1000:
+                          return
+                      raise RuntimeError('TTS bos ses dosyasi olusturdu.')
+                  except Exception as exc:
+                      last_error = exc
+                      print(f'TTS denemesi {attempt+1}/3: {str(exc)[:220]}')
+                      if attempt < 2:
+                          await asyncio.sleep(3 * (attempt + 1))
+              # Internet tabanli ucretsiz TTS erisilemezse, tamamen yerel espeak-ng yedegi.
+              fallback_wav = path.with_suffix('.fallback.wav')
+              try:
+                  subprocess.run(['espeak-ng','-v','tr','-s','160','-p','48','-a','170',
+                                  '-w',str(fallback_wav),text_value],check=True)
+                  subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(fallback_wav),
+                                  '-codec:a','libmp3lame','-q:a','4',str(path)],check=True)
+                  if path.exists() and path.stat().st_size > 1000:
+                      print('Bilgi: Edge TTS erisilemedi; ucretsiz cevrimdisi Turkce ses kullanildi.')
+                      return
+              except Exception as fallback_error:
+                  raise RuntimeError('Ucretsiz Turkce seslendirme olusturulamadi: '
+                                     + str(last_error) + ' | cevrimdisi yedek: ' + str(fallback_error))
+              raise RuntimeError('Ucretsiz Turkce seslendirme bos dosya olusturdu: ' + str(last_error))
+          
+          
+          def make_voice_tracks():
+              print('1/5 Ucretsiz Turkce seslendirme olusturuluyor...')
+              raw_files, raw_durations = [], []
+              for i, (caption, _) in enumerate(scenes, 1):
+                  mp3 = VOICE_DIR / f'voice_{i:02d}.mp3'
+                  asyncio.run(create_tts(caption, mp3))
+                  duration = probe_duration(mp3)
+                  if duration <= 0.2:
+                      raise RuntimeError(f'{i}. sahnenin seslendirmesi gecersiz.')
+                  raw_files.append(mp3)
+                  raw_durations.append(duration)
+                  print(f'Ses {i}/6: {duration:.2f} saniye')
+          
+              total = sum(raw_durations)
+              speed_factor = max(1.0, total / (TARGET_SECONDS - 0.15))
+              if speed_factor > 1.65:
+                  raise RuntimeError('Seslendirme 30 saniyeye sigmiyor; metinler kisaltilmali.')
+              spoken_durations = [d / speed_factor for d in raw_durations]
+              extra_each = max(0.0, (TARGET_SECONDS - sum(spoken_durations)) / SCENE_COUNT)
+              scene_durations = [d + extra_each for d in spoken_durations]
+              # Son klipte kayan nokta farkini kapat; toplam tam 30 saniye olsun.
+              scene_durations[-1] += TARGET_SECONDS - sum(scene_durations)
+          
+              padded_files = []
+              for i, (mp3, spoken, scene_duration) in enumerate(zip(raw_files, spoken_durations, scene_durations), 1):
+                  wav = VOICE_DIR / f'voice_padded_{i:02d}.wav'
+                  pad = max(0.0, scene_duration - spoken)
+                  filters = f'atempo={speed_factor:.6f},apad=pad_dur={pad:.6f},atrim=duration={scene_duration:.6f}'
+                  run_ffmpeg(['-i', str(mp3), '-af', filters, '-ar', '44100', '-ac', '2',
+                              '-c:a', 'pcm_s16le', str(wav)])
+                  padded_files.append(wav)
+              concat_list = VOICE_DIR / 'voice_concat.txt'
+              concat_list.write_text(''.join("file '" + p.resolve().as_posix() + "'\n" for p in padded_files), encoding='utf-8')
+              voice = OUT / 'narration.wav'
+              run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat_list),
+                          '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(voice)])
+              actual = probe_duration(voice)
+              if abs(actual - TARGET_SECONDS) > 0.12:
+                  raise RuntimeError(f'Seslendirme zamanlamasi 30 saniyeye oturmadi: {actual:.2f}s')
+              return voice, scene_durations
+          
+          
+          def gradient(top, bottom):
+              arr = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
+              for y in range(HEIGHT):
+                  t = y / max(1, HEIGHT - 1)
+                  arr[y, :, :] = [int(top[k] * (1-t) + bottom[k] * t) for k in range(3)]
+              return Image.fromarray(arr, 'RGB')
+          
+          
+          def make_background(topic_id, category, scene_no, seed):
+              rng = random.Random(seed + scene_no * 101)
+              if category == 'Uzay':
+                  img = gradient((5, 9, 32), (18, 28, 67))
+                  d = ImageDraw.Draw(img, 'RGBA')
+                  for _ in range(95):
+                      x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
+                      r = rng.choice([1, 1, 2, 3])
+                      d.ellipse((x-r, y-r, x+r, y+r), fill=(220, 235, 255, rng.randrange(90, 230)))
+                  if 'black-hole' in topic_id:
+                      cx, cy, radius = 310, 390, 150
+                      d.ellipse((cx-radius-35, cy-radius//2, cx+radius+35, cy+radius//2), outline=(255, 145, 55, 220), width=22)
+                      d.ellipse((cx-radius-15, cy-radius//2-25, cx+radius+15, cy+radius//2+25), outline=(255, 210, 115, 180), width=8)
+                      d.ellipse((cx-radius//2, cy-radius//2, cx+radius//2, cy+radius//2), fill=(2, 3, 10, 255))
+                  else:
+                      if 'saturn' in topic_id or 'titan' in topic_id:
+                          color=(220, 175, 115, 255); cx, cy, radius=345, 390, 145
+                          d.ellipse((cx-radius-95, cy-45, cx+radius+95, cy+55), outline=(205, 180, 145, 230), width=24)
+                          d.ellipse((cx-radius-70, cy-32, cx+radius+70, cy+42), outline=(245, 220, 180, 180), width=8)
+                      elif 'mars' in topic_id:
+                          color=(198, 83, 48, 255); cx, cy, radius=340, 385, 165
+                      elif 'venus' in topic_id:
+                          color=(218, 161, 80, 255); cx, cy, radius=340, 385, 165
+                      elif 'neptune' in topic_id:
+                          color=(65, 105, 220, 255); cx, cy, radius=340, 385, 165
+                      elif 'moon' in topic_id or 'lunar' in topic_id:
+                          color=(160, 165, 177, 255); cx, cy, radius=340, 385, 165
+                      else:
+                          color=(65, 125, 190, 255); cx, cy, radius=340, 385, 165
+                      d.ellipse((cx-radius, cy-radius, cx+radius, cy+radius), fill=color)
+                      for _ in range(16):
+                          x=rng.randint(cx-radius+20,cx+radius-20); y=rng.randint(cy-radius+20,cy+radius-20); rr=rng.randint(5,18)
+                          d.ellipse((x-rr,y-rr,x+rr,y+rr), fill=(20,35,55,35), outline=(255,255,255,25), width=2)
+                  d.polygon([(0,780),(100,730),(210,780),(360,720),(540,785),(540,960),(0,960)], fill=(15,22,45,255))
+              elif category == 'Tarih':
+                  img = gradient((35, 44, 77), (230, 139, 75))
+                  d = ImageDraw.Draw(img, 'RGBA')
+                  d.ellipse((390,130,500,240), fill=(255,215,140,210))
+                  d.polygon([(0,650),(120,580),(240,650),(390,570),(540,650),(540,960),(0,960)], fill=(151,93,55,255))
+                  d.polygon([(0,760),(150,690),(270,770),(420,680),(540,750),(540,960),(0,960)], fill=(190,125,69,255))
+                  if topic_id in ('giza-void','cappadocia','petra','machu-picchu'):
+                      d.polygon([(35,680),(165,360),(295,680)], fill=(195,145,93,255), outline=(238,194,137,255))
+                      d.polygon([(245,680),(365,420),(485,680)], fill=(162,112,72,255), outline=(225,174,118,255))
+                      for yy in range(470,660,35):
+                          d.line((110,yy,205,yy), fill=(115,76,53,120), width=3)
+                  else:
+                      # Monumental stone pillars / ruins, not a static photograph.
+                      for x in (55,145,370,460):
+                          d.rectangle((x,440,x+42,690), fill=(178,157,125,255), outline=(90,75,60,255), width=3)
+                          d.rectangle((x-12,425,x+54,450), fill=(205,181,145,255))
+                      d.rectangle((120,410,425,455), fill=(185,163,130,255), outline=(90,75,60,255), width=3)
+                  # Scattered stone blocks in foreground.
+                  for x in (30,240,455):
+                      d.polygon([(x,760),(x+48,745),(x+82,770),(x+28,790)], fill=(120,88,62,255))
+              elif category == 'Paranormal':
+                  img = gradient((4, 7, 22), (18, 25, 48))
+                  d = ImageDraw.Draw(img, 'RGBA')
+                  # Cold moonlight, distant stars and drifting fog.
+                  d.ellipse((365, 105, 485, 225), fill=(205, 220, 235, 220))
+                  d.ellipse((390, 88, 500, 205), fill=(8, 13, 31, 255))
+                  for _ in range(55):
+                      x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
+                      r = rng.choice([1, 1, 2])
+                      d.ellipse((x-r, y-r, x+r, y+r), fill=(185, 205, 230, rng.randrange(70, 170)))
+                  # A haunted manor with lit windows; its lights flicker in the animation.
+                  d.polygon([(0, 635), (85, 545), (165, 620), (270, 505), (390, 615), (480, 535), (540, 610), (540, 960), (0, 960)], fill=(7, 15, 24, 255))
+                  d.polygon([(105, 715), (105, 430), (170, 360), (235, 430), (235, 715)], fill=(20, 25, 39, 255), outline=(65, 75, 95, 255))
+                  d.polygon([(85, 435), (170, 330), (255, 435)], fill=(13, 18, 32, 255), outline=(80, 86, 105, 255))
+                  d.rectangle((255, 510, 465, 730), fill=(16, 21, 34, 255), outline=(70, 80, 98, 255), width=4)
+                  d.polygon([(235, 515), (360, 405), (485, 515)], fill=(11, 17, 30, 255), outline=(75, 83, 102, 255))
+                  for x, y in ((135, 475), (190, 475), (300, 555), (405, 555)):
+                      d.rectangle((x, y, x+27, y+48), fill=(150, 145, 105, 120), outline=(95, 100, 115, 220), width=2)
+                  d.rectangle((325, 635, 375, 730), fill=(5, 8, 17, 255), outline=(85, 90, 105, 255), width=3)
+                  # Bare trees frame the house.
+                  for x in (35, 500):
+                      d.line((x, 790, x-12, 405), fill=(4, 9, 16, 255), width=13)
+                      for j in range(4):
+                          yy = 470 + j*65
+                          d.line((x-5, yy, x-65+j*8, yy-75), fill=(4, 9, 16, 255), width=8)
+                          d.line((x-5, yy+12, x+52-j*7, yy-70), fill=(4, 9, 16, 255), width=7)
+                  for y in (760, 810, 860):
+                      d.ellipse((-50, y, 590, y+65), fill=(155, 170, 190, 20))
               else:
-                  z, x, y = '1.07', 'iw/2-(iw/zoom/2)', f'max(0,min(ih-ih/zoom,(ih-ih/zoom)*on/{frames}))'
-              filt = (f"[0:v]zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={WIDTH}x{HEIGHT}:fps={FPS},"
-                      'setsar=1,format=yuv420p[bg];[bg][1:v]overlay=0:0:shortest=0:repeatlast=1,format=yuv420p[v]')
-              run_ffmpeg(['-i', str(img), '-i', str(caption), '-filter_complex', filt,
-                          '-map', '[v]', '-frames:v', str(frames), '-an', '-c:v', 'libx264',
-                          '-preset', 'medium', '-crf', '17', '-pix_fmt', 'yuv420p', str(result)])
+                  underwater = any(k in topic_id for k in ('ocean','sea','squid','octopus','cuttlefish','fish','hydrothermal','jelly','coral','archer','bioluminescence'))
+                  if underwater:
+                      img = gradient((2,55,87),(3,15,42))
+                      d=ImageDraw.Draw(img,'RGBA')
+                      for x in range(0,WIDTH,65):
+                          d.line((x,0,x+random.randint(-20,20),HEIGHT), fill=(40,160,190,24), width=2)
+                      d.polygon([(0,810),(110,760),(220,820),(370,755),(540,810),(540,960),(0,960)], fill=(5,39,53,255))
+                      for _ in range(30):
+                          x=rng.randrange(WIDTH); y=rng.randrange(HEIGHT); r=rng.randrange(2,7)
+                          d.ellipse((x-r,y-r,x+r,y+r), outline=(155,230,245,100), width=2)
+                  else:
+                      img=gradient((48,106,142),(224,176,105))
+                      d=ImageDraw.Draw(img,'RGBA')
+                      d.ellipse((385,120,490,225), fill=(255,220,145,220))
+                      d.polygon([(0,690),(90,560),(190,680),(320,510),(450,675),(540,590),(540,960),(0,960)], fill=(44,91,76,255))
+                      d.polygon([(0,800),(150,700),(280,790),(420,690),(540,770),(540,960),(0,960)], fill=(29,68,58,255))
+              return img
+          
+          
+          def draw_ghost(draw, x, y, phase, scale=1.0, alpha=190):
+              # Translucent animated apparition: floating body, waving arms and trailing hem.
+              bob = 11 * math.sin(phase * 1.8) * scale
+              sway = 17 * math.sin(phase * 1.2) * scale
+              x = x + sway
+              y = y + bob
+              fill = (205, 225, 240, int(alpha))
+              edge = (125, 160, 190, min(230, int(alpha + 35)))
+              r = 31 * scale
+              draw.ellipse((x-r, y-r, x+r, y+r), fill=fill, outline=edge, width=max(1, int(3*scale)))
+              draw.rounded_rectangle((x-r, y-3*scale, x+r, y+75*scale), radius=int(20*scale), fill=fill, outline=edge, width=max(1, int(3*scale)))
+              # Wavy lower edge moves from frame to frame.
+              points=[(x-r, y+60*scale)]
+              for j in range(9):
+                  px=x-r+j*(2*r/8)
+                  py=y+72*scale+math.sin(phase*2+j*0.8)*8*scale
+                  points.append((px,py))
+              points.extend([(x+r,y+55*scale),(x+r,y+8*scale)])
+              draw.polygon(points, fill=fill)
+              arm=math.sin(phase*2.1)*20*scale
+              draw.line((x-r+5*scale,y+18*scale,x-r-30*scale,y+40*scale+arm),fill=edge,width=max(3,int(11*scale)))
+              draw.line((x+r-5*scale,y+18*scale,x+r+30*scale,y+40*scale-arm),fill=edge,width=max(3,int(11*scale)))
+              draw.ellipse((x-12*scale,y-4*scale,x-5*scale,y+5*scale),fill=(20,35,55,int(alpha)))
+              draw.ellipse((x+5*scale,y-4*scale,x+12*scale,y+5*scale),fill=(20,35,55,int(alpha)))
+              draw.arc((x-10*scale,y+7*scale,x+10*scale,y+22*scale),10,170,fill=(50,65,85,int(alpha)),width=max(1,int(2*scale)))
 
+
+          def draw_worker(draw, x, ground, phase, scale=1.0, color=(105,69,43,255), carrying=True):
+              # Stylized but fully formed animated ancient worker: tunic, face, arms and legs.
+              bob = math.sin(phase*2) * 3.5 * scale
+              head_y = ground - 132*scale + bob
+              r = 17*scale
+              skin=(183,125,83,255); outline=(61,42,31,255)
+              draw.ellipse((x-r,head_y-r,x+r,head_y+r), fill=skin, outline=outline, width=max(1,int(2.5*scale)))
+              # Hair and linen head wrap.
+              draw.pieslice((x-r-2*scale,head_y-r-3*scale,x+r+2*scale,head_y+5*scale),180,355,fill=(49,35,29,255))
+              draw.arc((x-r,head_y-r-5*scale,x+r,head_y+12*scale),185,355,fill=(238,220,180,255),width=max(2,int(5*scale)))
+              draw.ellipse((x-7*scale,head_y-2*scale,x-3*scale,head_y+2*scale),fill=(30,25,22,255))
+              draw.ellipse((x+4*scale,head_y-2*scale,x+8*scale,head_y+2*scale),fill=(30,25,22,255))
+              draw.line((x,head_y+4*scale,x+2*scale,head_y+9*scale),fill=(105,64,46,255),width=max(1,int(2*scale)))
+              torso_top=head_y+19*scale
+              hip=ground-49*scale+bob
+              # Linen tunic with shoulder shape and waist sash.
+              draw.rounded_rectangle((x-20*scale,torso_top,x+20*scale,hip),radius=int(8*scale),fill=(226,207,162,255),outline=outline,width=max(1,int(2*scale)))
+              draw.polygon([(x-18*scale,torso_top+8*scale),(x-30*scale,torso_top+22*scale),(x-20*scale,torso_top+48*scale),(x-12*scale,torso_top+40*scale)],fill=(226,207,162,255),outline=outline)
+              draw.polygon([(x+18*scale,torso_top+8*scale),(x+30*scale,torso_top+22*scale),(x+20*scale,torso_top+48*scale),(x+12*scale,torso_top+40*scale)],fill=(226,207,162,255),outline=outline)
+              draw.line((x-18*scale,ground-68*scale,x+18*scale,ground-68*scale),fill=(133,79,45,255),width=max(2,int(5*scale)))
+              swing=math.sin(phase*2.2)*19*scale
+              # Arms swing while walking; hands are drawn as rounded fists.
+              left_hand=(x-34*scale,torso_top+46*scale+swing)
+              right_hand=(x+34*scale,torso_top+45*scale-swing)
+              draw.line((x-17*scale,torso_top+13*scale,*left_hand),fill=skin,width=max(4,int(10*scale)))
+              draw.line((x+17*scale,torso_top+13*scale,*right_hand),fill=skin,width=max(4,int(10*scale)))
+              for hx,hy in (left_hand,right_hand):
+                  draw.ellipse((hx-6*scale,hy-6*scale,hx+6*scale,hy+6*scale),fill=skin,outline=outline,width=1)
+              # Alternating stride gives a visible walk cycle.
+              stride=math.sin(phase*2.2)*15*scale
+              draw.line((x-9*scale,hip,x-15*scale+stride,ground-3*scale),fill=skin,width=max(4,int(10*scale)))
+              draw.line((x+9*scale,hip,x+15*scale-stride,ground-3*scale),fill=skin,width=max(4,int(10*scale)))
+              draw.line((x-15*scale+stride,ground-3*scale,x-3*scale+stride,ground),fill=(75,48,32,255),width=max(3,int(9*scale)))
+              draw.line((x+15*scale-stride,ground-3*scale,x+27*scale-stride,ground),fill=(75,48,32,255),width=max(3,int(9*scale)))
+              if carrying:
+                  # A stone block is held at shoulder height and bobs with the worker.
+                  bx=x+27*scale; by=torso_top+3*scale+bob
+                  draw.rounded_rectangle((bx,by,bx+35*scale,by+29*scale),radius=3,fill=(166,128,88,255),outline=(72,55,42,255),width=max(1,int(2*scale)))
+                  draw.line((bx+7*scale,by+8*scale,bx+27*scale,by+8*scale),fill=(218,181,132,180),width=2)
+          
+          
+          def draw_astronaut(draw, x, y, phase, scale=1.0):
+              bob=math.sin(phase*1.8)*15*scale
+              y += bob
+              draw.ellipse((x-25*scale,y-45*scale,x+25*scale,y+5*scale), fill=(225,232,238,255), outline=(35,48,75,255), width=4)
+              draw.ellipse((x-17*scale,y-37*scale,x+17*scale,y-8*scale), fill=(48,95,132,255), outline=(180,220,245,255), width=3)
+              draw.rounded_rectangle((x-29*scale,y+2*scale,x+29*scale,y+75*scale), radius=15, fill=(230,232,225,255), outline=(50,65,90,255), width=4)
+              swing=math.sin(phase*2)*22*scale
+              draw.line((x-20*scale,y+20*scale,x-55*scale,y+45*scale+swing), fill=(225,232,238,255), width=max(4,int(12*scale)))
+              draw.line((x+20*scale,y+20*scale,x+55*scale,y+45*scale-swing), fill=(225,232,238,255), width=max(4,int(12*scale)))
+              draw.line((x-12*scale,y+70*scale,x-25*scale,y+105*scale-swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
+              draw.line((x+12*scale,y+70*scale,x+25*scale,y+105*scale+swing), fill=(225,232,238,255), width=max(4,int(13*scale)))
+          
+          
+          def draw_fish(draw, x, y, phase, scale=1.0, color=(70,200,190,255)):
+              tail=math.sin(phase*3)*16*scale
+              draw.ellipse((x-45*scale,y-24*scale,x+38*scale,y+24*scale), fill=color, outline=(5,50,70,255), width=3)
+              draw.polygon([(x+30*scale,y),(x+60*scale,y-22*scale+tail),(x+60*scale,y+22*scale+tail)], fill=color, outline=(5,50,70,255))
+              draw.ellipse((x-25*scale,y-7*scale,x-17*scale,y+1*scale), fill=(5,20,25,255))
+          
+          
+          def draw_octopus(draw, x, y, phase, scale=1.0):
+              draw.ellipse((x-48*scale,y-70*scale,x+48*scale,y+25*scale), fill=(202,103,145,255), outline=(70,34,75,255), width=4)
+              draw.ellipse((x-22*scale,y-35*scale,x-8*scale,y-21*scale), fill='white')
+              draw.ellipse((x+8*scale,y-35*scale,x+22*scale,y-21*scale), fill='white')
+              draw.ellipse((x-17*scale,y-31*scale,x-11*scale,y-25*scale), fill=(20,20,30,255))
+              draw.ellipse((x+13*scale,y-31*scale,x+19*scale,y-25*scale), fill=(20,20,30,255))
+              for i in range(8):
+                  side=-1 if i%2==0 else 1
+                  base_x=x+side*(25+i//2*5)*scale
+                  end_x=base_x+side*(25+15*math.sin(phase+i))*scale
+                  end_y=y+35*scale+(i//2)*13*scale+20*math.sin(phase*1.5+i)*scale
+                  draw.line((base_x,y+5*scale,end_x,end_y), fill=(178,83,128,255), width=max(3,int(9*scale)))
+          
+          
+          def wrap_text(draw, text_value, font, max_width):
+              words=text_value.split(); lines=[]; current=''
+              for word in words:
+                  test=(current+' '+word).strip()
+                  if draw.textbbox((0,0),test,font=font)[2] <= max_width or not current:
+                      current=test
+                  else:
+                      lines.append(current); current=word
+              if current: lines.append(current)
+              return lines
+          
+          
+          def draw_subtitles(draw, text_value, progress, category, scene_no):
+              # Top editorial label and progress bar.
+              draw.rounded_rectangle((24,24,WIDTH-24,67), radius=17, fill=(5,10,24,175))
+              draw.text((WIDTH//2,45), f'GİZEMLİ DÜNYA  •  {category.upper()}', font=FONT_SMALL,
+                        anchor='mm', fill=(238,245,255,255))
+              draw.rounded_rectangle((24,82,WIDTH-24,89), radius=4, fill=(255,255,255,55))
+              draw.rounded_rectangle((24,82,24+(WIDTH-48)*progress,89), radius=4, fill=(255,194,75,255))
+              lines=wrap_text(draw,text_value,FONT_CAPTION,WIDTH-78)
+              line_h=37
+              panel_h=len(lines)*line_h+34
+              top=HEIGHT-72-panel_h
+              draw.rounded_rectangle((24,top,WIDTH-24,HEIGHT-72), radius=22, fill=(3,8,18,220), outline=(255,255,255,80), width=2)
+              for i,line in enumerate(lines):
+                  draw.text((WIDTH//2,top+18+i*line_h),line,font=FONT_CAPTION,anchor='mt',
+                            fill=(255,255,255,255),stroke_width=1,stroke_fill=(0,0,0,180))
+          
+          
+          def render_frame(bg, topic_id, category, scene_no, frame_no, total_frames, caption, seed):
+              img=bg.copy()
+              d=ImageDraw.Draw(img,'RGBA')
+              t=frame_no/FPS
+              phase=t*2.8+scene_no
+              # Animated atmospheric layers: stars, bubbles, clouds and particles.
+              if category=='Uzay':
+                  for i in range(22):
+                      x=(i*83 + frame_no*(1+i%3)*0.55 + seed%37)%WIDTH
+                      y=(i*137 + frame_no*(1+i%2)*0.7)%HEIGHT
+                      r=2+(i%3)
+                      d.ellipse((x-r,y-r,x+r,y+r),fill=(190,220,255,110))
+                  draw_astronaut(d, 105+25*math.sin(phase*.7), 560+20*math.cos(phase), phase, .72)
+                  if 'saturn' in topic_id or 'titan' in topic_id:
+                      d.arc((190,220,520,560),190,350,fill=(245,218,175,180),width=7)
+              elif category=='Tarih':
+                  for i in range(3):
+                      x=(55+i*185+frame_no*(5+i)*0.18)% (WIDTH+80)-30
+                      draw_worker(d,x,785,phase+i*1.7,.88 if i==1 else .78, carrying=(i!=1))
+                  # Dust motes drift across the construction site.
+                  for i in range(18):
+                      x=(i*53+frame_no*(1+i%2)*.6+seed%31)%WIDTH
+                      y=(i*71-frame_no*.8)%HEIGHT
+                      d.ellipse((x,y,x+3,y+3),fill=(255,218,160,100))
+              elif category=='Paranormal':
+                  # Moving fog bands, flickering windows, a drifting apparition and a sweeping light.
+                  for row in range(4):
+                      yy=700+row*48
+                      pts=[]
+                      for xx in range(0,WIDTH+12,12):
+                          pts.append((xx, yy+9*math.sin(xx/43+phase+row)))
+                      d.line(pts, fill=(170,190,215,55), width=18)
+                  flicker = 85 + int(95 * abs(math.sin(phase*2.4)))
+                  for x,y in ((135,475),(190,475),(300,555),(405,555)):
+                      d.rectangle((x,y,x+27,y+48), fill=(255,205,120,flicker))
+                  # A ghost glides across the scene, changing height and opacity.
+                  gx=270+115*math.sin(phase*.48)
+                  gy=420+38*math.sin(phase*1.1)
+                  alpha=145+int(65*(0.5+0.5*math.sin(phase*1.7)))
+                  draw_ghost(d,gx,gy,phase,1.05,alpha)
+                  # A second shadow briefly appears in a window or behind the house.
+                  if math.sin(phase*0.65+scene_no) > 0.12:
+                      sx=350+18*math.sin(phase*1.3)
+                      d.ellipse((sx-13,500,sx+13,530), fill=(1,3,9,230))
+                      d.rounded_rectangle((sx-17,525,sx+17,610), radius=9, fill=(1,3,9,230))
+                  # A flashlight beam sweeps over the ground like a moving explorer's torch.
+                  beam_x=80+(frame_no*3.2)%(WIDTH+100)-50
+                  d.polygon([(beam_x,650),(beam_x-75,900),(beam_x+115,900)], fill=(210,225,245,22))
+                  d.ellipse((beam_x-7,635,beam_x+7,649), fill=(255,238,185,235))
+                  for i in range(20):
+                      px=(i*47+frame_no*(1+i%3)*.65+seed%31)%WIDTH
+                      py=(i*83-frame_no*(.45+i%2*.4))%HEIGHT
+                      rr=1+(i%3)
+                      d.ellipse((px-rr,py-rr,px+rr,py+rr), fill=(190,210,235,90))
+              else:
+                  if any(k in topic_id for k in ('squid','octopus','cuttlefish','archerfish')):
+                      if 'squid' in topic_id or 'octopus' in topic_id or 'cuttlefish' in topic_id:
+                          draw_octopus(d,270+35*math.sin(phase*.65),535+18*math.sin(phase),phase,1.0)
+                      else:
+                          draw_fish(d,245+45*math.sin(phase*.8),520+15*math.sin(phase*1.4),phase,1.3)
+                          d.line((290,500,370,470+12*math.sin(phase*2)),fill=(160,225,255,220),width=5)
+                  elif any(k in topic_id for k in ('honeybee','monarch','zombie-ant','tardigrade')):
+                      # A clearly visible animated insect/creature with moving legs.
+                      x=270+65*math.sin(phase*.55); y=570+12*math.sin(phase*2)
+                      if 'honeybee' in topic_id:
+                          d.ellipse((x-34,y-19,x+35,y+19),fill=(242,184,45,255),outline=(45,35,15,255),width=3)
+                          d.line((x-5,y-17,x-5,y+17),fill=(45,35,15,255),width=7)
+                          d.line((x+15,y-17,x+15,y+17),fill=(45,35,15,255),width=7)
+                          wing=abs(math.sin(phase*8))*18
+                          d.ellipse((x-22,y-35-wing,x+2,y-12),fill=(210,245,255,160))
+                          d.ellipse((x+2,y-36-wing,x+26,y-12),fill=(210,245,255,160))
+                      else:
+                          d.ellipse((x-42,y-20,x+42,y+20),fill=(100,150,95,255),outline=(25,50,30,255),width=3)
+                          for leg in range(6):
+                              lx=x-25+leg*10
+                              swing=math.sin(phase*3+leg)*12
+                              d.line((lx,y+12,lx-8+swing,y+35),fill=(45,55,35,255),width=4)
+                  else:
+                      # Moving researcher/explorer in landscape and nature scenes.
+                      x=95+((frame_no*2)%330)
+                      draw_worker(d,x,790,phase,.78,(35,48,43,255),False)
+                  for i in range(16):
+                      x=(i*47+frame_no*(1+i%3)*.7)%WIDTH
+                      y=(i*89-frame_no*(.8+i%2))%HEIGHT
+                      r=2+(i%3)
+                      d.ellipse((x-r,y-r,x+r,y+r),outline=(180,235,245,110),width=2)
+              # Animated foreground waves for underwater scenes.
+              if category=='Dünya' and any(k in topic_id for k in ('ocean','sea','squid','octopus','cuttlefish','fish','hydrothermal','archer','bioluminescence')):
+                  for row in range(3):
+                      yy=735+row*28
+                      points=[]
+                      for x in range(0,WIDTH+12,12):
+                          points.append((x,yy+8*math.sin(x/35+phase+row)))
+                      d.line(points,fill=(70,190,215,85),width=3)
+              progress=(frame_no+1)/max(1,total_frames)
+              draw_subtitles(d,caption,progress,category,scene_no)
+              return img
+          
+          
+          def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
+              frames=frame_count if frame_count is not None else max(1,round(duration*FPS))
+              bg=make_background(topic_id,category,scene_no,seed)
+              cmd=['ffmpeg','-hide_banner','-loglevel','error','-y',
+                   '-f','rawvideo','-pix_fmt','rgb24','-s',f'{WIDTH}x{HEIGHT}','-r',str(FPS),'-i','-',
+                   '-an','-vf',f'scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,format=yuv420p',
+                   '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+                   '-movflags','+faststart',str(output)]
+              proc=subprocess.Popen(cmd,stdin=subprocess.PIPE)
+              try:
+                  for frame_no in range(frames):
+                      frame=render_frame(bg,topic_id,category,scene_no,frame_no,frames,caption,seed)
+                      proc.stdin.write(frame.tobytes())
+                  proc.stdin.close()
+                  code=proc.wait()
+                  if code:
+                      raise RuntimeError(f'FFmpeg animasyon kodu: {code}')
+              except Exception:
+                  if proc.stdin and not proc.stdin.closed: proc.stdin.close()
+                  proc.kill(); proc.wait()
+                  raise
+              if not output.exists() or output.stat().st_size < 10000:
+                  raise RuntimeError(f'{scene_no}. animasyon klibi olusturulamadi.')
+          
+          
           def make_soundtrack(path):
-              total = SCENE_COUNT * SCENE_SECONDS * SAMPLE_RATE
-              t = np.arange(total, dtype=np.float32) / SAMPLE_RATE
-              audio = (0.11 * np.sin(2*np.pi*55*t) + 0.055 * np.sin(2*np.pi*82.41*t) +
-                       0.025 * np.sin(2*np.pi*110*t) * (0.5+0.5*np.sin(2*np.pi*0.48*t)))
-              notes = [329.63, 392, 493.88, 440, 392, 293.66]
-              for i, start in enumerate(np.arange(0.5, SCENE_COUNT*SCENE_SECONDS, 2.5)):
-                  first = int(start*SAMPLE_RATE)
-                  size = min(int(2.1*SAMPLE_RATE), total-first)
-                  lt = np.arange(size, dtype=np.float32)/SAMPLE_RATE
-                  audio[first:first+size] += 0.07 * np.sin(2*np.pi*notes[i % len(notes)]*lt) * np.exp(-1.6*lt)
-              rng = np.random.default_rng(987)
-              for sec in range(SCENE_SECONDS, SCENE_COUNT*SCENE_SECONDS, SCENE_SECONDS):
-                  first = int((sec-0.2)*SAMPLE_RATE)
-                  size = min(int(0.4*SAMPLE_RATE), total-first)
-                  noise = rng.normal(0, 1, size).astype(np.float32)
-                  audio[first:first+size] += noise * np.sin(np.linspace(0, np.pi, size)) * 0.03
-              fade = int(SAMPLE_RATE * 1.2)
-              audio[:fade] *= np.linspace(0, 1, fade)
-              audio[-fade:] *= np.linspace(1, 0, fade)
-              peak = float(np.max(np.abs(audio)))
-              if peak > 0:
-                  audio *= 0.7 / peak
-              pcm = (np.clip(np.column_stack((audio, audio)), -1, 1)*32767).astype('<i2')
-              with wave.open(str(path), 'wb') as wav:
-                  wav.setnchannels(2)
-                  wav.setsampwidth(2)
-                  wav.setframerate(SAMPLE_RATE)
-                  wav.writeframes(pcm.tobytes())
-
+              total=int(TARGET_SECONDS*SAMPLE_RATE)
+              t=np.arange(total,dtype=np.float32)/SAMPLE_RATE
+              # Original, generated ambient bed; intentionally quiet under narration.
+              audio=(0.035*np.sin(2*np.pi*55*t)+0.018*np.sin(2*np.pi*82.41*t)+
+                     0.010*np.sin(2*np.pi*110*t)*(0.5+0.5*np.sin(2*np.pi*0.35*t)))
+              notes=[329.63,392,493.88,440,392,293.66]
+              for i,start in enumerate(np.arange(0.5,TARGET_SECONDS,2.5)):
+                  first=int(start*SAMPLE_RATE); size=min(int(1.8*SAMPLE_RATE),total-first)
+                  lt=np.arange(size,dtype=np.float32)/SAMPLE_RATE
+                  audio[first:first+size]+=0.018*np.sin(2*np.pi*notes[i%len(notes)]*lt)*np.exp(-1.8*lt)
+              fade=int(SAMPLE_RATE*1.0)
+              audio[:fade]*=np.linspace(0,1,fade); audio[-fade:]*=np.linspace(1,0,fade)
+              peak=float(np.max(np.abs(audio)))
+              if peak>0: audio*=0.6/peak
+              pcm=(np.clip(np.column_stack((audio,audio)),-1,1)*32767).astype('<i2')
+              with wave.open(str(path),'wb') as wav:
+                  wav.setnchannels(2); wav.setsampwidth(2); wav.setframerate(SAMPLE_RATE); wav.writeframes(pcm.tobytes())
+          
+          
           def youtube_upload(path):
-              creds = Credentials(
-                  token=None, refresh_token=YOUTUBE_REFRESH_TOKEN,
-                  token_uri='https://oauth2.googleapis.com/token',
-                  client_id=YOUTUBE_CLIENT_ID, client_secret=YOUTUBE_CLIENT_SECRET,
-                  scopes=['https://www.googleapis.com/auth/youtube.upload']
-              )
+              creds=Credentials(token=None,refresh_token=YOUTUBE_REFRESH_TOKEN,
+                  token_uri='https://oauth2.googleapis.com/token',client_id=YOUTUBE_CLIENT_ID,
+                  client_secret=YOUTUBE_CLIENT_SECRET,scopes=['https://www.googleapis.com/auth/youtube.upload'])
               creds.refresh(Request())
-              youtube = build('youtube', 'v3', credentials=creds, cache_discovery=False)
-              description = (f'{title}\n\nDünya, tarih ve uzaydan ilginç bilgiler. '
-                             'Görseller yapay zekâ destekli temsili canlandırmalardır; '
-                             'özellikle bilimsel ve tarihsel sahneler gerçek görüntüler değildir.\n'
-                             'Sence en şaşırtıcı bilgi hangisi? Yorumlarda paylaş; yeni videolar için abone ol!\n\n'
-                             '#Shorts #Bilim #Tarih #Uzay #Gizem')
-              body = {
-                  'snippet': {
-                      'title': f'{title} | Gizemli Dünya #Shorts'[:100],
-                      'description': description,
-                      'tags': ['Shorts', 'Gizemli Dünya', 'Bilim', 'Tarih', 'Uzay', category],
-                      'categoryId': '27',
-                      'defaultLanguage': 'tr'
-                  },
-                  'status': {
-                      'privacyStatus': YOUTUBE_PRIVACY,
-                      'selfDeclaredMadeForKids': False,
-                      'containsSyntheticMedia': True
-                  }
-              }
-              media = MediaFileUpload(str(path), mimetype='video/mp4', chunksize=-1, resumable=True)
-              request = youtube.videos().insert(part='snippet,status', body=body, media_body=media)
-              result = None
-              retry = 0
+              youtube=build('youtube','v3',credentials=creds,cache_discovery=False)
+              description=(f'{title}\n\n'
+                'Gizemli Dünya’da bu kez kısa bir paranormal hikâye anlatıyoruz. '
+                'Bu video, özgün 2D hareketli animasyon ve Türkçe seslendirme ile hazırlanmıştır. '
+                'Hikâye kurgu ve şehir efsanesi atmosferinde anlatılmıştır; gerçek olduğu iddia edilmez.\n'
+                'Sence bu olayın açıklaması ne? Yorumlarda paylaş. Videoyu beğenmeyi ve kanalımıza abone olmayı unutma!\n\n'
+                '#Shorts #Paranormal #GizemliHikayeler #KorkuHikayeleri #Gizem')
+              body={'snippet':{'title':f'{title} | Paranormal Hikâye #Shorts'[:100],
+                'description':description,'tags':['Shorts','Gizemli Dünya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','Şehir Efsaneleri'],
+                'categoryId':'24','defaultLanguage':'tr'},
+                'status':{'privacyStatus':YOUTUBE_PRIVACY,'selfDeclaredMadeForKids':False,'containsSyntheticMedia':True}}
+              media=MediaFileUpload(str(path),mimetype='video/mp4',chunksize=-1,resumable=True)
+              request=youtube.videos().insert(part='snippet,status',body=body,media_body=media)
+              result=None; retry=0
               while result is None:
                   try:
-                      _, result = request.next_chunk()
-                      retry = 0
+                      _,result=request.next_chunk(); retry=0
                   except HttpError as error:
-                      if error.resp.status not in (500, 502, 503, 504) or retry >= 4:
-                          raise
-                      retry += 1
-                      time.sleep(min(2**retry, 30))
-                  except (OSError, ConnectionError) as error:
-                      if retry >= 4:
-                          raise
-                      retry += 1
-                      time.sleep(min(2**retry, 30))
-              youtube_id = result.get('id')
-              if not youtube_id:
-                  raise RuntimeError('YouTube ID donmedi: ' + str(result)[:300])
+                      if error.resp.status not in (500,502,503,504) or retry>=4: raise
+                      retry+=1; time.sleep(min(2**retry,30))
+                  except (OSError,ConnectionError):
+                      if retry>=4: raise
+                      retry+=1; time.sleep(min(2**retry,30))
+              youtube_id=result.get('id')
+              if not youtube_id: raise RuntimeError('YouTube ID donmedi: '+str(result)[:300])
               return youtube_id
-
-          # Uretim
-          print('1/5 Kaliteli gorseller olusturuluyor...')
-          seed_base = int(hashlib.sha256((topic_id + slot).encode()).hexdigest()[:7], 16)
-          clips = []
-          for i, (caption, visual) in enumerate(scenes, 1):
-              image_path = IMAGES / f'scene_{i:02d}.png'
-              caption_path = CAPTIONS / f'caption_{i:02d}.png'
-              clip_path = CLIPS / f'clip_{i:02d}.mp4'
-              prompt = (style + visual)
-              last_error = None
-              for model in (PRIMARY_MODEL, BACKUP_MODEL):
-                  for attempt in range(2):
-                      try:
-                          raw = call_image(model, prompt, seed_base+i*17+attempt)
-                          crop_and_save(raw, image_path)
-                          last_error = None
-                          break
-                      except DailyQuotaExhausted as error:
-                          print('KOTA DOLDU:', error)
-                          raise SystemExit(2)
-                      except Exception as error:
-                          last_error = error
-                          print(f'Gorsel {i}, model {model}, deneme {attempt+1}: {str(error)[:220]}')
-                          if attempt == 0:
-                              time.sleep(3)
-                  if last_error is None:
-                      break
-              if last_error is not None:
-                  raise RuntimeError(f'{i}. gorsel uretilemedi: {last_error}')
-              print(f'Gorsel {i}/{SCENE_COUNT} hazir.')
-              make_caption(caption, caption_path)
-              make_clip(image_path, caption_path, clip_path, i)
-              clips.append(clip_path)
-
+          
+          
+          # Üretim: sabit görsel slayt gösterisi yok; her kare Python ile yeniden çizilir.
+          print('1/5 Hareketli 2D sahneler ve Türkçe seslendirme hazırlanıyor...')
+          voice,scene_durations=make_voice_tracks()
+          # Yuvarlama farklarini duzelterek toplam kare sayisini tam 750 yap.
+          frame_counts=[max(1,round(d*FPS)) for d in scene_durations]
+          frame_counts[-1]+=int(TARGET_SECONDS*FPS)-sum(frame_counts)
+          if frame_counts[-1] < 1: raise RuntimeError('Son sahne suresi gecersiz.')
+          seed=int.from_bytes(__import__('hashlib').sha256((topic_id+slot).encode()).digest()[:4],'big')
+          clips=[]
+          for i,((caption,visual),duration,frame_count) in enumerate(zip(scenes,scene_durations,frame_counts),1):
+              clip=CLIPS/f'clip_{i:02d}.mp4'
+              render_animated_clip(i,caption,duration,category,topic_id,seed+i*97,clip,frame_count)
+              clips.append(clip)
+              print(f'Hareketli sahne {i}/6 hazir: {duration:.2f} saniye')
+          
           print('2/5 Fon muzigi hazirlaniyor...')
-          sound = OUT/'soundtrack.wav'
+          sound=OUT/'soundtrack.wav'
           make_soundtrack(sound)
-          print('3/5 Video birlestiriliyor...')
-          concat = OUT/'concat.txt'
-          concat.write_text(''.join(f"file '{p.resolve()}'\n" for p in clips), encoding='utf-8')
-          silent = OUT/'silent.mp4'
-          run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat), '-c', 'copy', str(silent)])
-          final = ROOT/'gizemli-dunya-video.mp4'
-          run_ffmpeg(['-i', str(silent), '-i', str(sound), '-map', '0:v:0', '-map', '1:a:0',
-                      '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest',
-                      '-movflags', '+faststart', str(final)])
-          info = json.loads(subprocess.check_output(['ffprobe', '-v', 'error', '-show_entries',
-            'format=duration:stream=codec_type', '-of', 'json', str(final)], text=True))
-          if float(info.get('format', {}).get('duration', 0)) < 25:
-              raise RuntimeError('Video 25 saniyeden kisa.')
-          if {s.get('codec_type') for s in info['streams']} != {'video', 'audio'}:
-              raise RuntimeError('Video veya ses akisi bulunamadi.')
-
+          print('3/5 30 saniyelik video birlestiriliyor...')
+          concat=OUT/'concat.txt'
+          concat.write_text(''.join("file '"+p.resolve().as_posix()+"'\n" for p in clips),encoding='utf-8')
+          silent=OUT/'silent.mp4'
+          run_ffmpeg(['-f','concat','-safe','0','-i',str(concat),'-c','copy','-an',str(silent)])
+          final=ROOT/'gizemli-dunya-video.mp4'
+          run_ffmpeg(['-i',str(silent),'-i',str(voice),'-i',str(sound),
+              '-filter_complex','[1:a]volume=1.0[voice];[2:a]volume=0.16[music];[voice][music]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.95[a]',
+              '-map','0:v:0','-map','[a]','-t',str(TARGET_SECONDS),'-c:v','copy','-c:a','aac','-b:a','160k',
+              '-movflags','+faststart',str(final)])
+          info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(final)],text=True))
+          streams=info.get('streams',[])
+          if not any(s.get('codec_type')=='video' for s in streams): raise RuntimeError('Videoda goruntu akisi yok.')
+          if not any(s.get('codec_type')=='audio' for s in streams): raise RuntimeError('Videoda ses akisi yok.')
+          duration=float(info['format']['duration'])
+          if abs(duration-TARGET_SECONDS)>0.25: raise RuntimeError(f'Video 30 saniye degil: {duration:.2f}s')
+          if int(info.get('streams',[{}])[0].get('width',0))!=OUTPUT_WIDTH: raise RuntimeError('Video genisligi 1080 degil.')
+          if int(info.get('streams',[{}])[0].get('height',0))!=OUTPUT_HEIGHT: raise RuntimeError('Video yuksekligi 1920 degil.')
+          if final.stat().st_size<250000: raise RuntimeError('Video dosyasi beklenenden kucuk.')
+          
           print('4/5 YouTube yuklemesi baslatiliyor...')
-          youtube_id = youtube_upload(final)
-          youtube_url = f'https://www.youtube.com/watch?v={youtube_id}'
-          print('YouTube video:', youtube_url)
-          record = {'slot': slot, 'topic_id': topic_id, 'title': title,
-                    'youtube_id': youtube_id, 'url': youtube_url,
-                    'uploaded_at': datetime.now(ZoneInfo('Europe/Istanbul')).isoformat()}
-          (OUT/'upload-result.json').write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
-
+          youtube_id=youtube_upload(final)
+          youtube_url=f'https://www.youtube.com/watch?v={youtube_id}'
+          print('YouTube video:',youtube_url)
+          record={'slot':slot,'topic_id':topic_id,'title':title,'youtube_id':youtube_id,'url':youtube_url,
+                  'uploaded_at':datetime.now(ZoneInfo('Europe/Istanbul')).isoformat()}
+          (OUT/'upload-result.json').write_text(json.dumps(record,ensure_ascii=False,indent=2),encoding='utf-8')
+          
           print('5/5 Kalici yayin gecmisi kaydediliyor...')
           history.append(record)
-          HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
-          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
-          subprocess.run(['git', 'add', str(HISTORY_FILE.relative_to(ROOT))], check=True)
-          subprocess.run(['git', 'commit', '-m', f'Yayin gecmisi: {topic_id}'], check=True)
+          HISTORY_FILE.write_text(json.dumps(history,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          subprocess.run(['git','add',str(HISTORY_FILE.relative_to(ROOT))],check=True)
+          subprocess.run(['git','commit','-m',f'Yayin gecmisi: {topic_id}'],check=True)
           try:
-              subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
+              subprocess.run(['git','push','origin','HEAD:main'],check=True)
           except subprocess.CalledProcessError as exc:
               raise RuntimeError('Video YouTube a yuklendi fakat gecmis GitHub a yazilamadi! '
-                                 'Ayni videonun tekrarlanmamasi icin output/upload-result.json kaydini '
-                                 'depo data/youtube_history.json dosyasina elle ekleyin.') from exc
-          print('BASARILI:', youtube_url)
+                'Ayni videonun tekrarlanmamasi icin output/upload-result.json kaydini '
+                'depo data/youtube_history.json dosyasina elle ekleyin.') from exc
+          print('BASARILI:',youtube_url)
           PY
           python create_video.py
 
@@ -759,7 +1111,6 @@ jobs:
             gizemli-dunya-video.mp4
             output/upload-result.json
             output/video-plani.json
-            output/images/
             data/youtube_history.json
           if-no-files-found: warn
           retention-days: 14
