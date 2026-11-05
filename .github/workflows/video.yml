@@ -2,15 +2,6 @@ name: Gizemli Dunya - Ucretsiz Paranormal Hikayeler
 
 on:
   workflow_dispatch:
-    inputs:
-      privacy:
-        description: 'Ilk deneme icin unlisted sec; yayinlamak istersen public sec.'
-        required: true
-        type: choice
-        options:
-          - unlisted
-          - public
-        default: unlisted
   schedule:
     - cron: '23 9,20 * * *'
       timezone: 'Europe/Istanbul'
@@ -80,7 +71,7 @@ jobs:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_PRIVACY: ${{ github.event.inputs.privacy || 'public' }}
+          YOUTUBE_PRIVACY: public
         run: |
           cat > create_video.py <<'PY'
           import os, io, json, time, wave, subprocess, random, math, asyncio
@@ -516,7 +507,7 @@ jobs:
           topic_id, title, category, facts = available[0]
           print(f'Konu: {title} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
           scenes = [
-              (f'Bu gece anlatacağımız kurgusal paranormal hikâye: {title}.', ''),
+              ('Her şey sıradan görünüyordu... ta ki ilk işaret ortaya çıkana kadar.', ''),
               *((story_beat, '') for story_beat in facts),
               ('Sence bu olayın açıklaması ne? Videoyu beğenmeyi ve kanalımıza abone olmayı unutmayın!', '')
           ]
