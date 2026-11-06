@@ -29,10 +29,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: FFmpeg ve font kur
+      - name: FFmpeg, Blender ve sanal ekran kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng blender
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng blender xvfb libgl1-mesa-dri
 
       - name: Ucretsiz Python paketlerini kur
         run: |
@@ -1574,15 +1574,32 @@ jobs:
               frames = frame_count if frame_count is not None else max(1, round(duration * FPS))
               temp_video = CLIPS / f'blender_raw_{scene_no:02d}.mp4'
               theme = paranormal_visual_kind(topic_id, title)
+              # GitHub Actions Linux ortaminda Blender icin sanal ekran ve yazilimsal OpenGL.
+              blender_config = OUT / 'blender-config'
+              blender_config.mkdir(parents=True, exist_ok=True)
+              blender_env = os.environ.copy()
+              blender_env['LIBGL_ALWAYS_SOFTWARE'] = '1'
+              blender_env['MESA_LOADER_DRIVER_OVERRIDE'] = 'llvmpipe'
+              blender_env['GALLIUM_DRIVER'] = 'llvmpipe'
+              blender_env['OMP_NUM_THREADS'] = '1'
+              blender_env['OPENBLAS_NUM_THREADS'] = '1'
+              blender_env['BLENDER_USER_CONFIG'] = str(blender_config)
+
               command = [
-                  'blender', '--background', '--threads', '2', '--python',
-                  str(ROOT / 'render_3d.py'), '--',
+                  'xvfb-run', '-a', '-s', '-screen 0 1280x1024x24',
+                  'blender', '--background', '--factory-startup',
+                  '--threads', '1', '--python-exit-code', '1',
+                  '--python', str(ROOT / 'render_3d.py'), '--',
                   '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
                   '--duration', f'{duration:.6f}', '--output', str(temp_video),
                   '--width', str(WIDTH), '--height', str(HEIGHT), '--fps', str(FPS)
               ]
               print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
-              subprocess.run(command, check=True, timeout=max(900, int(duration * 180)))
+              print('Sanal ekran ve yazilimsal OpenGL etkin.')
+              subprocess.run(
+                  command, check=True, timeout=max(900, int(duration * 180)),
+                  env=blender_env
+              )
               if not temp_video.exists() or temp_video.stat().st_size < 10000:
                   raise RuntimeError(f'Blender {scene_no}. sahne icin gecerli video olusturamadi.')
 
