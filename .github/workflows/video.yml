@@ -393,8 +393,9 @@ jobs:
               scene.render.engine='CYCLES'
               scene.cycles.samples=8
               scene.cycles.use_denoising=True
-          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=32
-          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=32
+          # GitHub Actions yazilimsal GPU renderinda 32 yerine 8 sample: belirgin hiz kazanimi.
+          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=8
+          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=8
           scene.world.color=(.012,.018,.04)
           if scene.world and scene.world.use_nodes:
               bg=scene.world.node_tree.nodes.get('Background')
@@ -430,7 +431,8 @@ jobs:
           CLIPS = OUT / 'clips'
           VOICE_DIR = OUT / 'voice'
           HISTORY_FILE = ROOT / 'data' / 'youtube_history.json'
-          WIDTH, HEIGHT, FPS = 720, 1280, 25
+          # Yazilimsal OpenGL (llvmpipe) icin render maliyetini dusur; final FFmpeg 1080x1920'ye yukseltiyor.
+          WIDTH, HEIGHT, FPS = 540, 960, 20
           OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
           TARGET_SECONDS = 30.0
           SCENE_COUNT = 6
@@ -948,7 +950,7 @@ jobs:
               'topic_id': topic_id, 'title': title, 'category': category,
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
               'visual_theme': visual_theme,
-              'style': 'original procedural 3D cartoon animation rendered with Blender; story-specific generated character; animated props and character actions; scene visuals follow narration; no static-image slideshow',
+              'style': 'cinematic realistic 3D horror scenes rendered in Blender with PBR rigged human GLB characters, atmospheric lighting, story-specific environments, animated props and character actions; scene visuals follow narration; no static-image slideshow',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
               'voice': TTS_VOICE, 'duration_seconds': 30
           }, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -1758,7 +1760,7 @@ jobs:
               command = [
                   'xvfb-run', '-a', '-s', '-screen 0 1280x1024x24',
                   blender_executable, '--background', '--factory-startup',
-                  '--threads', '1', '--python-exit-code', '1',
+                  '--threads', '2', '--python-exit-code', '1',
                   '--python', str(ROOT / 'render_3d.py'), '--',
                   '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
                   '--duration', f'{duration:.6f}', '--output', str(temp_video),
@@ -1772,7 +1774,7 @@ jobs:
               print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
               print('Sanal ekran ve yazilimsal OpenGL etkin.')
               subprocess.run(
-                  command, check=True, timeout=max(1800, int(duration * 300)),
+                  command, check=True, timeout=max(900, int(duration * 180)),
                   env=blender_env
               )
               if not temp_video.exists() or temp_video.stat().st_size < 10000:
