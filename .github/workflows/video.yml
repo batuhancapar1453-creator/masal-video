@@ -302,19 +302,35 @@ jobs:
                   if obj.parent is None:
                       obj.parent=root
                       obj.matrix_parent_inverse=__import__('mathutils').Matrix.Identity(4)
-              # GLB içindeki gerçek hareket kliplerini kullan; statik procedural kemik sallama yok.
+              # Her sahnede aynı idle klibini kullanma: sahne amacına göre gerçek
+              # GLB/Mixamo aksiyonunu seç. İçe aktarılan aksiyon adlarını logla.
               actions=list(bpy.data.actions)
-              preferred=('idle','talk','walk','slouch')
+              action_names=[act.name for act in actions]
+              print(label,'bulunan animasyonlar:',action_names[:30])
+              scene_preferences={
+                  1:('walk','run','idle','standing'),
+                  2:('talk','gesture','point','explain','idle'),
+                  3:('look','turn','surprise','fear','react','talk','idle'),
+                  4:('walk','run','turn','look','idle'),
+                  5:('fear','surprise','back','react','look','talk','idle'),
+                  6:('run','walk','look','turn','idle'),
+              }
+              preferred=scene_preferences.get(a.scene,('idle','talk','walk'))
               chosen=None
-              for token in preferred:
-                  chosen=next((act for act in actions if token in act.name.lower()),None)
-                  if chosen: break
+              ranked=[]
+              for priority,token in enumerate(preferred):
+                  matches=[act for act in actions if token in act.name.lower()]
+                  ranked.extend((priority,act) for act in matches)
+              if ranked:
+                  chosen=sorted(ranked,key=lambda pair:(pair[0],pair[1].name))[0][1]
+              elif actions:
+                  chosen=actions[0]
               if chosen:
                   if not arm.animation_data: arm.animation_data_create()
                   arm.animation_data.action=chosen
-                  print(label,'animasyon klibi:',chosen.name)
+                  print(label,'sahne',a.scene,'için seçilen animasyon:',chosen.name)
               else:
-                  print('UYARI:',label,'GLB içinde adında Idle/Talk/Walk bulunan animasyon bulunamadı.')
+                  print('UYARI:',label,'GLB içinde animasyon klibi yok; yalnızca kök hareketi kullanılacak.')
               return root,arm,meshes
 
           frames=a.frame_count if a.frame_count>0 else max(2,round(a.duration*a.fps))
@@ -370,15 +386,29 @@ jobs:
                       pb.keyframe_insert(data_path='rotation_euler',frame=fr,group='Audio-driven jaw')
               for mesh in meshes:
                   if not mesh.data.shape_keys: continue
-                  for key in mesh.data.shape_keys.key_blocks:
-                      if 'blink' in key.name.lower() or 'eye_close' in key.name.lower():
-                          for bf in (max(2,int(frames*.32)),max(2,int(frames*.76))):
+                  blocks=mesh.data.shape_keys.key_blocks
+                  for key in blocks:
+                      name=key.name.lower()
+                      if 'blink' in name or 'eye_close' in name:
+                          for bf in (max(2,int(frames*.28)),max(2,int(frames*.72))):
                               key.value=1.0; key.keyframe_insert(data_path='value',frame=bf)
                               key.value=0.0; key.keyframe_insert(data_path='value',frame=min(frames,bf+2))
+                      # Available facial controls receive a restrained scene emotion.
+                      emotion_tokens=('fear','scared','surprise','wide','frown','sad') if a.scene in (3,5) else ('smile','happy') if a.scene==6 else ()
+                      if any(token in name for token in emotion_tokens):
+                          key.value=0.0; key.keyframe_insert(data_path='value',frame=1)
+                          key.value=.28; key.keyframe_insert(data_path='value',frame=mid)
+                          key.value=.12; key.keyframe_insert(data_path='value',frame=frames)
 
-          # Cinematic portrait camera, depth and lighting.
+          # Portrait camera with a subtle motivated dolly-in, not a static security-camera shot.
           bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
-          cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
+          cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=46; bpy.context.scene.camera=cam
+          cam.keyframe_insert(data_path='location',frame=1)
+          cam.location += Vector((-.42, .72, -.12))
+          cam.keyframe_insert(data_path='location',frame=frames)
+          cam.data.keyframe_insert(data_path='lens',frame=1)
+          cam.data.lens=51 if a.scene in (3,5) else 49
+          cam.data.keyframe_insert(data_path='lens',frame=frames)
           # Yazilimsal GPU'da DOF pahali; sinematik lens acisi korunup DOF kapatildi.
           cam.data.dof.use_dof=False
           for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
@@ -941,17 +971,40 @@ jobs:
           topic_id, title, category, facts = available[0]
           visual_theme = paranormal_visual_kind(topic_id, title)
           print(f'Konu: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
-          scenes = [
-              ('Her şey sıradan görünüyordu... ta ki ilk işaret ortaya çıkana kadar.', ''),
-              *((story_beat, '') for story_beat in facts),
-              ('Sence bu olayın açıklaması ne? Videoyu beğenmeyi ve kanalımıza abone olmayı unutmayın!', '')
+          # Hikâye akışı: soğuk açılışta finaldeki tekinsiz ayrıntıyı göster,
+          # sonra olayın başlangıcına dön; her konu kendi özgün cümlelerini üretir.
+          # Kapanışlar da tek bir kopya CTA yerine hikâyenin son ayrıntısına bağlanır.
+          hook_templates = [
+              'Bu hikâyenin sonunda yaşananı kimse açıklayamadı: {last} Ama her şey çok daha sıradan başlamıştı.',
+              'Bir an düşün: {last} İşte o geceden sonra hiçbir şey eskisi gibi olmadı.',
+              'En korkuncu, {last} değildi… bunun gerçekten yaşanmış gibi görünmesiydi. Her şey şu olayla başladı: {first}',
+              'Bu olayın tek kanıtı, geride kalan o ayrıntıydı: {last} Şimdi en başına dönelim.',
+              'Gece boyunca her şey normaldi. Ta ki şu tuhaf ayrıntı ortaya çıkana kadar: {last}',
+              'Sana anlatacaklarımın en ürkütücü kısmı şu: {last} Ve bunun ilk işareti çok daha önce gelmişti.'
           ]
+          outro_templates = [
+              'Sence {clue} için mantıklı bir açıklama var mı? Yorumlara yaz; yeni gizemler için takipte kal.',
+              'Peki sen olsan {clue} karşısında ne yapardın? Cevabını yorumlara bırak; sıradaki hikâyede görüşürüz.',
+              'Bu bir tesadüf mü, yoksa başka bir şey mi? {clue} hakkında ne düşündüğünü yorumlarda anlat.',
+              'Sence olayın arkasında ne vardı? Özellikle {clue} ayrıntısını düşün. Yorumlarda buluşalım.',
+              'Sen bu hikâyeye inanır mıydın? {clue} için kendi açıklamanı yaz; bir sonraki gizemde görüşürüz.',
+              'Belki de en önemli ipucu {clue}. Sen nasıl yorumladın? Yorumunu bırak ve yeni hikâyeyi kaçırma.'
+          ]
+          story_seed = int.from_bytes(__import__('hashlib').sha256(topic_id.encode()).digest()[:4], 'big')
+          hook = hook_templates[story_seed % len(hook_templates)].format(
+              first=facts[0][0].lower() if isinstance(facts[0], (tuple,list)) else str(facts[0]).lower(),
+              last=str(facts[-1]).rstrip('.!?')
+          )
+          final_fact = str(facts[-1]).rstrip('.!?')
+          clue = final_fact[:1].lower() + final_fact[1:] if final_fact else title.lower()
+          outro = outro_templates[(story_seed // len(hook_templates)) % len(outro_templates)].format(clue=clue)
+          scenes = [(hook, ''), *((str(story_beat), '') for story_beat in facts), (outro, '')]
           assert len(scenes) == SCENE_COUNT
           (OUT / 'video-plani.json').write_text(json.dumps({
               'topic_id': topic_id, 'title': title, 'category': category,
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
               'visual_theme': visual_theme,
-              'style': 'cinematic realistic 3D horror scenes rendered in Blender with PBR rigged human GLB characters, atmospheric lighting, story-specific environments, animated props and character actions; scene visuals follow narration; no static-image slideshow',
+              'style': 'original stylized-cinematic 3D horror short; PBR rigged characters; scene-specific available motion clips; motivated camera framing; story-specific environments, props, lighting and atmosphere; hook-to-climax-to-question narrative; no repeated generic intro or outro',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
               'voice': TTS_VOICE, 'duration_seconds': 30
           }, ensure_ascii=False, indent=2), encoding='utf-8')
