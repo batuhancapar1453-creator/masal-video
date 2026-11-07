@@ -80,93 +80,107 @@ jobs:
         uses: actions/cache@v4
         with:
           path: assets/characters
-          key: gizemli-dunya-rigs-v1-${{ runner.os }}-rain-v3-snow-v4
+          key: gizemli-dunya-rigs-v2-${{ runner.os }}-rain-v3-snow-v4
           restore-keys: |
-            gizemli-dunya-rigs-v1-${{ runner.os }}-
+            gizemli-dunya-rigs-v2-${{ runner.os }}-
 
       - name: Rain v3 ve Snow v4 karakterlerini resmî kaynaktan edin
         run: |
           mkdir -p assets/characters
           cat > download_rigs.py <<'PY'
-          import re, json
+          import json, zipfile
           from pathlib import Path
-          from urllib.parse import urljoin, urlparse
+          from urllib.parse import urljoin
           import requests
-          from html.parser import HTMLParser
 
           OUT = Path('assets/characters')
           OUT.mkdir(parents=True, exist_ok=True)
+          # Blender Studio sayfalarindaki thumbnail resimlerini taramak yerine,
+          # sayfanin Download dugmesinin gosterdigi ZIP dosyalarini indir.
           SOURCES = {
-              'rain_v3.blend': 'https://studio.blender.org/characters/rain/v3/',
-              'snow_v4.blend': 'https://studio.blender.org/characters/snow/v4/',
+              'rain_v3.blend': [
+                  'https://studio.blender.org/download-source/Rain_v3.zip',
+                  'https://blenderstudio.cn/en/download-source/Rain_v3.zip',
+              ],
+              'snow_v4.blend': [
+                  'https://studio.blender.org/download-source/Snow_v04.zip',
+                  'https://blenderstudio.cn/en/download-source/Snow_v04.zip',
+              ],
           }
           SESSION = requests.Session()
-          SESSION.headers.update({'User-Agent': 'GizemliDunya-OpenSource-Workflow/2.0'})
-
-          class LinkParser(HTMLParser):
-              def __init__(self):
-                  super().__init__(); self.links=[]; self.current=None
-              def handle_starttag(self, tag, attrs):
-                  a=dict(attrs)
-                  if tag == 'a':
-                      href=a.get('href') or a.get('data-href') or a.get('data-url')
-                      if href: self.current=[href, '']
-              def handle_data(self, data):
-                  if self.current and data.strip():
-                      self.current[1]=(self.current[1]+' '+data.strip())[:300]
-              def handle_endtag(self, tag):
-                  if tag == 'a' and self.current:
-                      self.links.append(tuple(self.current)); self.current=None
+          SESSION.headers.update({'User-Agent': 'Mozilla/5.0 (compatible; GizemliDunyaWorkflow/2.1)'})
 
           def is_blend(path):
               try:
-                  with path.open('rb') as f: return f.read(7) == b'BLENDER'
-              except OSError: return False
+                  with path.open('rb') as f:
+                      return f.read(7) == b'BLENDER'
+              except OSError:
+                  return False
 
-          def download_from_page(page_url, target):
+          def extract_blend(archive_path, target):
+              if not zipfile.is_zipfile(archive_path):
+                  return False
+              with zipfile.ZipFile(archive_path) as archive:
+                  names = [n for n in archive.namelist()
+                           if n.lower().endswith('.blend') and not n.endswith('/')]
+                  if not names:
+                      raise RuntimeError('ZIP arsivinde .blend dosyasi bulunamadi: ' + str(archive_path))
+                  # Arşivde birden fazla .blend varsa en büyük olan ana karakter dosyasıdır.
+                  chosen = max(names, key=lambda n: archive.getinfo(n).file_size)
+                  temp = target.with_suffix('.blend.part')
+                  with archive.open(chosen) as src, temp.open('wb') as dst:
+                      while True:
+                          chunk = src.read(1024 * 1024)
+                          if not chunk:
+                              break
+                          dst.write(chunk)
+                  if not is_blend(temp):
+                      temp.unlink(missing_ok=True)
+                      raise RuntimeError('ZIP icindeki dosyanin Blender imzasi gecersiz: ' + chosen)
+                  temp.replace(target)
+                  return True
+
+          def download_one(url, target):
+              tmp = target.with_suffix('.download')
+              try:
+                  with SESSION.get(url, stream=True, timeout=(30, 300), allow_redirects=True) as response:
+                      response.raise_for_status()
+                      with tmp.open('wb') as f:
+                          for chunk in response.iter_content(1024 * 1024):
+                              if chunk:
+                                  f.write(chunk)
+                  if is_blend(tmp):
+                      tmp.replace(target)
+                      return
+                  if extract_blend(tmp, target):
+                      return
+                  raise RuntimeError('Indirilen icerik ne .blend ne de icinde .blend bulunan ZIP')
+              finally:
+                  tmp.unlink(missing_ok=True)
+
+          for name, urls in SOURCES.items():
+              target = OUT / name
               if is_blend(target):
-                  print(target.name+': cache mevcut, indirme atlandi.')
-                  return
-              page=SESSION.get(page_url, timeout=60); page.raise_for_status()
-              parser=LinkParser(); parser.feed(page.text)
-              candidates=[]
-              for href,label in parser.links:
-                  url=urljoin(page_url,href)
-                  host=urlparse(url).hostname or ''
-                  if ('download' in (url+' '+label).lower() or '.blend' in url.lower()) and (
-                      host.endswith('blender.org') or host.endswith('blenderstudio.cn')
-                  ):
-                      candidates.append(url)
-              for raw in re.findall(r'''["'](https?://[^"' ]+|/[^"' ]+)["']''',page.text):
-                  if 'download' in raw.lower() or '.blend' in raw.lower():
-                      url=urljoin(page_url,raw); host=urlparse(url).hostname or ''
-                      if host.endswith('blender.org') or host.endswith('blenderstudio.cn'):
-                          candidates.append(url)
-              candidates=list(dict.fromkeys(candidates))
-              errors=[]
-              for url in candidates:
-                  tmp=target.with_suffix('.part')
+                  print(name + ': gecerli cache bulundu, indirme atlandi.')
+                  continue
+              errors = []
+              for url in urls:
                   try:
-                      with SESSION.get(url,stream=True,timeout=240) as response:
-                          response.raise_for_status()
-                          with tmp.open('wb') as f:
-                              for chunk in response.iter_content(1024*1024):
-                                  if chunk: f.write(chunk)
-                      if is_blend(tmp):
-                          tmp.replace(target)
-                          print(target.name+': resmi indirme tamamlandi ('+str(target.stat().st_size)+' byte)')
-                          return
-                      tmp.unlink(missing_ok=True)
-                      errors.append(url+' -> .blend imzasi yok')
+                      print(name + ': kaynak deneniyor: ' + url)
+                      download_one(url, target)
+                      print(name + ': Blender dosyasi hazir (' + str(target.stat().st_size) + ' byte)')
+                      break
                   except Exception as exc:
-                      tmp.unlink(missing_ok=True)
-                      errors.append(url+' -> '+str(exc)[:160])
-              raise RuntimeError('Blender Studio sayfasindan dogrudan .blend indirme baglantisi bulunamadi: '
-                                 +page_url+' | adaylar: '+json.dumps(errors[-6:],ensure_ascii=False))
+                      errors.append(url + ' -> ' + str(exc)[:240])
+              else:
+                  raise RuntimeError(name + ' indirilemedi. Denenen dogrudan Blender Studio indirme adresleri: '
+                                     + json.dumps(errors, ensure_ascii=False))
 
-          for name,url in SOURCES.items():
-              download_from_page(url,OUT/name)
-          print('Rain v3 ve Snow v4 dosyalari hazir.')
+          for required in ('rain_v3.blend', 'snow_v4.blend'):
+              path = OUT / required
+              if not is_blend(path) or path.stat().st_size < 1_000_000:
+                  raise RuntimeError('Karakter dosyasi eksik veya bozuk: ' + str(path))
+          print('Rain v3 ve Snow v4 dosyalari hazir ve Blender imzasi dogrulandi.')
           PY
           python download_rigs.py
 
