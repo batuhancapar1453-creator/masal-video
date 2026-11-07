@@ -3,8 +3,8 @@ name: Gizemli Dunya - Ucretsiz Paranormal Hikayeler
 on:
   workflow_dispatch:
   schedule:
-    - cron: '23 9,20 * * *'
-      timezone: 'Europe/Istanbul'
+    # GitHub Actions cron saatleri UTC'dir; Turkiye UTC+3: 09:23 ve 20:23 yerel saat.
+    - cron: '23 6,17 * * *'
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   video:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
@@ -76,112 +76,62 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pillow numpy edge-tts google-api-python-client google-auth
 
-      - name: Blender Studio karakter cache
+      - name: Ara 3D Gen karakter motorunu indir
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/olatunde85/3d-gen.git ara3dgen
+
+      - name: Node.js 20 kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ara3dgen/package-lock.json
+
+      - name: Ara 3D Gen bağımlılıklarını kur
+        run: |
+          cd ara3dgen
+          npm ci
+
+      - name: CC0 gerçekçi insan varlıklarını hazırla (önbellekli)
         uses: actions/cache@v4
         with:
-          path: assets/characters
-          key: gizemli-dunya-rigs-v3-${{ runner.os }}-procedural-rig
-          restore-keys: |
-            gizemli-dunya-rigs-v3-${{ runner.os }}-
+          path: |
+            ara3dgen/vendor
+            ara3dgen/public/assets
+          key: ara3dgen-cc0-${{ runner.os }}-${{ hashFiles('ara3dgen/package-lock.json') }}-v1
 
-      - name: Ücretsiz rigli karakterleri Blender içinde üret (harici indirme gerektirmez)
+      - name: CC0 MakeHuman karakter verisini hazırla
         run: |
-          mkdir -p assets/characters
-          cat > generate_rigs.py <<'PY'
-          import bpy, sys, math
-          from mathutils import Vector
+          set -euo pipefail
+          cd ara3dgen
+          npm run setup-assets
+
+      - name: İki gerçekçi rigli karakteri ve animasyonları üret
+        run: |
+          set -euo pipefail
+          mkdir -p assets/characters ara3dgen/out/rain ara3dgen/out/snow
+          cd ara3dgen
+          # Ara CLI GLB dışa aktarımı: PBR dokular, Mixamo uyumlu rig ve seçili animasyon klipleri.
+          npm run export -- --random 3170317 --detail high --formats glb --out out/rain
+          npm run export -- --random 3170320 --detail high --formats glb --out out/snow
+          python - <<'PYCHAR'
           from pathlib import Path
-
-          args = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-          output = Path(args[0])
-          kind = args[1]
-          output.parent.mkdir(parents=True, exist_ok=True)
-          bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
-          for datablocks in (bpy.data.collections, bpy.data.materials, bpy.data.armatures, bpy.data.meshes):
-              pass
-          coll = bpy.data.collections.new('CH-' + kind)
-          bpy.context.scene.collection.children.link(coll)
-
-          def material(name, color, rough=.72, metallic=0):
-              m=bpy.data.materials.new(name); m.diffuse_color=(*color,1); m.roughness=rough; m.metallic=metallic
-              return m
-          skin=material('Skin', (.72,.43,.29) if kind=='rain' else (.43,.62,.78))
-          shirt=material('Clothing', (.10,.34,.62) if kind=='rain' else (.30,.12,.40))
-          pants=material('Trousers', (.055,.075,.13))
-          hair=material('Hair', (.025,.018,.025))
-          shoes=material('Shoes', (.018,.025,.04))
-          eye=material('Eyes', (.96,.98,1)); iris=material('Iris', (.025,.07,.12))
-          mouth=material('Mouth', (.12,.018,.025))
-
-          arm_data=bpy.data.armatures.new('Humanoid Skeleton')
-          arm=bpy.data.objects.new('Humanoid_Rig', arm_data); coll.objects.link(arm)
-          bpy.context.view_layer.objects.active=arm; arm.select_set(True)
-          bpy.ops.object.mode_set(mode='EDIT')
-          bones={
-            'root':((0,0,.05),(0,0,.45),None), 'hips':((0,0,.85),(0,0,1.15),'root'),
-            'spine':((0,0,1.05),(0,0,1.48),'hips'), 'chest':((0,0,1.42),(0,0,1.72),'spine'),
-            'neck':((0,0,1.68),(0,0,1.82),'chest'), 'head':((0,0,1.80),(0,0,2.18),'neck'),
-            'upper_arm.L':((.22,0,1.62),(.48,0,1.42),'chest'), 'forearm.L':((.48,0,1.42),(.70,0,1.18),'upper_arm.L'),
-            'hand.L':((.70,0,1.18),(.78,0,1.10),'forearm.L'), 'upper_arm.R':((-.22,0,1.62),(-.48,0,1.42),'chest'),
-            'forearm.R':((-.48,0,1.42),(-.70,0,1.18),'upper_arm.R'), 'hand.R':((-.70,0,1.18),(-.78,0,1.10),'forearm.R'),
-            'thigh.L':((.13,0,.95),(.14,0,.55),'hips'), 'shin.L':((.14,0,.55),(.14,0,.14),'thigh.L'),
-            'foot.L':((.14,0,.14),(.14,-.22,.08),'shin.L'), 'thigh.R':((-.13,0,.95),(-.14,0,.55),'hips'),
-            'shin.R':((-.14,0,.55),(-.14,0,.14),'thigh.R'), 'foot.R':((-.14,0,.14),(-.14,-.22,.08),'shin.R')}
-          for name,(head,tail,parent) in bones.items():
-              b=arm_data.edit_bones.new(name); b.head=head; b.tail=tail
-              if parent: b.parent=arm_data.edit_bones[parent]
-          bpy.ops.object.mode_set(mode='OBJECT'); arm.select_set(False)
-
-          def link_obj(obj, bone):
-              for c in list(obj.users_collection): c.objects.unlink(obj)
-              coll.objects.link(obj)
-              world=obj.matrix_world.copy(); obj.parent=arm; obj.parent_type='BONE'; obj.parent_bone=bone; obj.matrix_world=world
-              return obj
-          def ball(name, loc, scale, mat, bone):
-              bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, location=loc)
-              o=bpy.context.object; o.name=name; o.scale=scale; o.data.materials.append(mat); bpy.ops.object.shade_smooth(); return link_obj(o,bone)
-          def rod(name, a, b, radius, mat, bone):
-              mid=(Vector(a)+Vector(b))/2; vec=Vector(b)-Vector(a)
-              bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=radius, depth=vec.length, location=mid)
-              o=bpy.context.object; o.name=name; o.rotation_mode='QUATERNION'; o.rotation_quaternion=vec.to_track_quat('Z','Y'); o.data.materials.append(mat); bpy.ops.object.shade_smooth(); return link_obj(o,bone)
-
-          ball('Torso',(0,0,1.40),(.29,.17,.39),shirt,'chest')
-          ball('Pelvis',(0,0,.98),(.25,.16,.18),pants,'hips')
-          ball('Neck',(0,0,1.76),(.09,.09,.13),skin,'neck')
-          ball('Head',(0,-.005,1.99),(.22,.19,.27),skin,'head')
-          ball('Hair cap',(0,.005,2.17),(.225,.19,.12),hair,'head')
-          for x in (-.085,.085):
-              ball('Eye',(x,-.177,2.035),(.035,.018,.043),eye,'head')
-              ball('Iris',(x,-.194,2.035),(.016,.009,.023),iris,'head')
-              rod('Eyebrow',(x-.035,-.18,2.09),(x+.035,-.18,2.095),.012,hair,'head')
-          ball('Mouth',(0,-.188,1.93),(.052,.012,.014),mouth,'head')
-          for side,sign in [('L',1),('R',-1)]:
-              ball('Shoulder.'+side,(sign*.27,0,1.59),(.14,.14,.15),shirt,'upper_arm.'+side)
-              rod('Upper arm.'+side,(sign*.30,0,1.57),(sign*.48,0,1.40),.085,shirt,'upper_arm.'+side)
-              ball('Elbow.'+side,(sign*.49,0,1.39),(.085,.085,.085),skin,'forearm.'+side)
-              rod('Forearm.'+side,(sign*.49,0,1.38),(sign*.69,0,1.18),.065,skin,'forearm.'+side)
-              ball('Hand.'+side,(sign*.72,-.005,1.14),(.075,.06,.09),skin,'hand.'+side)
-              rod('Thigh.'+side,(sign*.13,0,.96),(sign*.14,0,.56),.12,pants,'thigh.'+side)
-              ball('Knee.'+side,(sign*.14,0,.55),(.105,.11,.11),pants,'shin.'+side)
-              rod('Shin.'+side,(sign*.14,0,.54),(sign*.14,0,.15),.075,pants,'shin.'+side)
-              ball('Shoe.'+side,(sign*.14,-.09,.10),(.11,.19,.075),shoes,'foot.'+side)
-          bpy.context.scene.render.film_transparent=False
-          bpy.ops.wm.save_as_mainfile(filepath=str(output))
-          print('Rig generated:', output, 'objects=',len(coll.all_objects))
-          PY
-          BLENDER="$HOME/blender-4.5.15/blender"
-          test -x "$BLENDER"
-          "$BLENDER" --background --factory-startup --python generate_rigs.py -- assets/characters/rain_v3.blend rain
-          "$BLENDER" --background --factory-startup --python generate_rigs.py -- assets/characters/snow_v4.blend snow
-          python - <<'PY'
-          from pathlib import Path
-          for name in ('rain_v3.blend','snow_v4.blend'):
-              p=Path('assets/characters')/name
-              with p.open('rb') as f: ok=f.read(7)==b'BLENDER'
-              if not ok or p.stat().st_size < 100000:
-                  raise SystemExit('Olusturulan karakter dosyasi dogrulanamadi: '+str(p))
-              print(name, 'OK', p.stat().st_size, 'bytes')
-          PY
+          import shutil
+          root=Path('out')
+          for label in ('rain','snow'):
+              files=sorted((root/label).rglob('*.glb'), key=lambda p:p.stat().st_size, reverse=True)
+              if not files:
+                  raise SystemExit(f'Ara 3D Gen {label} için GLB üretmedi; export klasörü: {root/label}')
+              src=files[0]
+              with src.open('rb') as f:
+                  if f.read(4)!=b'glTF': raise SystemExit(f'Geçersiz GLB: {src}')
+              if src.stat().st_size < 150000:
+                  raise SystemExit(f'Karakter GLB dosyası beklenenden küçük: {src} ({src.stat().st_size})')
+              dst=Path('../assets/characters')/('rain_v3.glb' if label=='rain' else 'snow_v4.glb')
+              shutil.copy2(src,dst)
+              print(f'{dst}: {dst.stat().st_size:,} bytes; kaynak={src}')
+          PYCHAR
 
       - name: YouTube OAuth baglantisini onceden denetle
         env:
@@ -302,7 +252,20 @@ jobs:
               cube('Vehicle body',(0,2.15,1.65),(4.6,.75,2.2),mat('Vehicle enamel',(.12,.34,.53)),.22)
               for x in (-1.55,-.5,.5,1.55): cube('Vehicle window',(x,1.75,2.0),(.72,.06,.72),mat('Window glass',(.08,.28,.4),.1,.5),.05)
               for x in (-1.5,1.5): cylinder('Wheel',(x,1.68,.55),.34,.18,shoe,(math.pi/2,0,0))
-          elif a.theme in ('forest','pine_forest','road','bridge','lake','swing','cabin','lighthouse'):
+          elif a.theme == 'lighthouse':
+              # Coastal lighthouse set: sea, wet rocks, tower, lantern room and a visible beam.
+              sea=mat('Night sea',(.012,.055,.095),.24,.22); stone=mat('Weathered lighthouse stone',(.34,.39,.42),.82); rock=mat('Wet coastal rock',(.045,.065,.075),.28,.18)
+              cube('Dark sea',(0,2.8,-.05),(14,8,.35),sea,.08)
+              cube('Rocky promontory',(0,1.0,.18),(5.5,3.8,.65),rock,.28)
+              cylinder('Lighthouse tower',(0,1.25,2.15),.62,3.8,stone)
+              cylinder('Lantern gallery',(0,1.25,4.12),.82,.22,metal)
+              cylinder('Lantern glass',(0,1.25,4.48),.55,.55,mat('Lantern glass',(.9,.58,.2),.12,.15))
+              cylinder('Lantern roof',(0,1.25,4.82),.72,.22,mat('Roof',(.12,.035,.025),.4))
+              for z in (1.0,1.8,2.6,3.4): cube('Tower slit window',(0,.61,z),(.13,.035,.28),gold,.025)
+              bpy.ops.object.light_add(type='SPOT',location=(0,1.1,4.5)); beam=bpy.context.object; beam.data.energy=1800; beam.data.color=(1.0,.72,.38); beam.data.spot_size=math.radians(34); beam.data.spot_blend=.65; beam.rotation_euler=(math.radians(75),0,math.radians(-22))
+              for i in range(5):
+                  x=-2.0+i*1.0; sphere('Coastal boulder',(x,-.15,.38),(.42,.5,.34),rock)
+          elif a.theme in ('forest','pine_forest','road','bridge','lake','swing','cabin'):
               for i in range(7):
                   x=-4.5+i*1.5
                   cylinder('Tree trunk',(x,2.25,1.25),.15,2.5,mat('Bark',(.18,.075,.035)))
@@ -311,47 +274,55 @@ jobs:
               cube('Mysterious doorway',(0,2.55,2.0),(2.4,.22,3.8),gold,.08)
               cube('Door dark inset',(0,2.39,2.0),(2.1,.08,3.5),mat('Door interior',(.018,.028,.055)),.04)
           
-          # Gercek Blender Studio rig koleksiyonlarini .blend dosyalarindan ekle.
-          def import_rig(blend_path, wanted, x_position, target_height=3.15):
+          # Ara 3D Gen: PBR dokulu, Mixamo uyumlu rigli GLB karakterleri içe aktar.
+          def import_rig(glb_path, label, x_position, target_height=3.15):
               from pathlib import Path
-              path=Path(blend_path)
-              if not path.is_file() or path.stat().st_size < 20000:
-                  raise RuntimeError('Rig dosyasi eksik veya bozuk: '+str(path))
-              with path.open('rb') as rig_file:
-                  if rig_file.read(7) != b'BLENDER':
-                      raise RuntimeError('Rig dosyasi gecerli Blender .blend dosyasi degil: '+str(path))
-              with bpy.data.libraries.load(str(path), link=False) as (data_from,data_to):
-                  matches=[n for n in data_from.collections if n.lower().startswith(wanted.lower())]
-                  if not matches: matches=[n for n in data_from.collections if wanted.lower() in n.lower()]
-                  if not matches:
-                      raise RuntimeError(wanted+' koleksiyonu bulunamadi. Mevcutlar: '+repr(data_from.collections[:30]))
-                  data_to.collections=[matches[0]]
-              coll=data_to.collections[0]
-              if coll is None: raise RuntimeError(wanted+' koleksiyonu yuklenemedi.')
-              bpy.context.scene.collection.children.link(coll)
-              objects=list(coll.all_objects)
-              meshes=[o for o in objects if o.type=='MESH']
-              rigs=[o for o in objects if o.type=='ARMATURE']
+              path=Path(glb_path)
+              if not path.is_file() or path.stat().st_size < 150000:
+                  raise RuntimeError('Karakter GLB dosyası eksik veya bozuk: '+str(path))
+              with path.open('rb') as f:
+                  if f.read(4) != b'glTF':
+                      raise RuntimeError('Geçerli GLB başlığı bulunamadı: '+str(path))
+              before=set(bpy.data.objects)
+              bpy.ops.import_scene.gltf(filepath=str(path))
+              imported=[o for o in bpy.data.objects if o not in before]
+              meshes=[o for o in imported if o.type=='MESH']
+              rigs=[o for o in imported if o.type=='ARMATURE']
               if not meshes or not rigs:
-                  raise RuntimeError(wanted+' icinde mesh veya armature eksik.')
-              bounds=[obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box]
+                  raise RuntimeError(label+' GLB içinde mesh veya armature bulunamadı.')
+              arm=rigs[0]
+              bounds=[o.matrix_world @ Vector(corner) for o in meshes for corner in o.bound_box]
               min_z=min(v.z for v in bounds); max_z=max(v.z for v in bounds)
               scale=target_height/max(0.01,max_z-min_z)
-              root=bpy.data.objects.new(wanted+' animated root',None)
+              root=bpy.data.objects.new(label+' cinematic root',None)
               bpy.context.scene.collection.objects.link(root)
-              root.location=(x_position,-1.0,-min_z*scale); root.scale=(scale,scale,scale)
-              for obj in objects:
+              root.location=(x_position,-1.0,-min_z*scale)
+              root.scale=(scale,scale,scale)
+              for obj in imported:
                   if obj.parent is None:
                       obj.parent=root
                       obj.matrix_parent_inverse=__import__('mathutils').Matrix.Identity(4)
-              return root,rigs[0],meshes
+              # GLB içindeki gerçek hareket kliplerini kullan; statik procedural kemik sallama yok.
+              actions=list(bpy.data.actions)
+              preferred=('idle','talk','walk','slouch')
+              chosen=None
+              for token in preferred:
+                  chosen=next((act for act in actions if token in act.name.lower()),None)
+                  if chosen: break
+              if chosen:
+                  if not arm.animation_data: arm.animation_data_create()
+                  arm.animation_data.action=chosen
+                  print(label,'animasyon klibi:',chosen.name)
+              else:
+                  print('UYARI:',label,'GLB içinde adında Idle/Talk/Walk bulunan animasyon bulunamadı.')
+              return root,arm,meshes
 
           frames=a.frame_count if a.frame_count>0 else max(2,round(a.duration*a.fps))
           mid=max(2,frames//2); end=frames
-          rain=import_rig(a.rain_file,'CH-rain',-.65)
+          rain=import_rig(a.rain_file,'rain',-.65)
           actors=[(*rain,'rain')]
           if a.scene>=4:
-              snow=import_rig(a.snow_file,'CH-snow',1.35)
+              snow=import_rig(a.snow_file,'snow',1.35)
               actors.append((*snow,'snow'))
 
           def read_audio_levels(filename,offset,count,fps):
@@ -382,21 +353,7 @@ jobs:
               root.rotation_euler[2]=0; root.keyframe_insert('rotation_euler',frame=1)
               root.rotation_euler[2]=rng.choice([-.16,.16]) if a.scene>=3 else 0
               root.keyframe_insert('rotation_euler',frame=mid)
-              for pb in arm.pose.bones:
-                  name=pb.name.lower()
-                  if not any(k in name for k in ('root','hips','spine','chest','neck','head','shoulder','upper_arm','forearm','hand','thigh','shin','foot','jaw','mouth','brow','eye')):
-                      continue
-                  pb.rotation_mode='XYZ'; base=pb.rotation_euler.copy()
-                  for fr in (1,mid,end):
-                      phase=(fr/max(1,frames))*math.tau*2
-                      pb.rotation_euler=base
-                      if any(k in name for k in ('upper_arm','forearm','hand','arm')):
-                          pb.rotation_euler[1]+=math.sin(phase+actor_index*1.7)*.12
-                      elif 'head' in name or 'neck' in name:
-                          pb.rotation_euler[2]+=(.10 if a.scene>=3 else .025)*math.sin(phase*.5)
-                      elif any(k in name for k in ('thigh','shin','foot')):
-                          pb.rotation_euler[1]+=math.sin(phase+actor_index*math.pi)*.10
-                      pb.keyframe_insert(data_path='rotation_euler',frame=fr,group='Auto performance')
+              # Imported mocap action drives the body; the root keyframes below add subtle blocking.
               face_keys=[]
               for mesh in meshes:
                   if mesh.data.shape_keys:
@@ -422,7 +379,7 @@ jobs:
           # Cinematic portrait camera, depth and lighting.
           bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
           cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
-          cam.data.dof.use_dof=False  # GitHub Actions yazilimsal OpenGL ortaminda hiz icin DOF kapali
+          cam.data.dof.use_dof=True; cam.data.dof.focus_distance=10.5; cam.data.dof.aperture_fstop=5.6
           for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
               bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
           
@@ -436,14 +393,17 @@ jobs:
               scene.render.engine='CYCLES'
               scene.cycles.samples=8
               scene.cycles.use_denoising=True
-          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=8
-          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=8
+          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=32
+          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=32
           scene.world.color=(.012,.018,.04)
-          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=50  # Render 360x640; sonraki FFmpeg adimi 720x1280'e yukseltiyor
+          if scene.world and scene.world.use_nodes:
+              bg=scene.world.node_tree.nodes.get('Background')
+              if bg: bg.inputs['Color'].default_value=(.012,.018,.04,1); bg.inputs['Strength'].default_value=.22
+          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=100
           scene.render.fps=a.fps; scene.frame_start=1; scene.frame_end=frames
-          scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='MEDIUM'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
+          scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='HIGH'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
           scene.render.filepath=a.output; scene.render.use_file_extension=True
-          scene.view_settings.view_transform='Standard'; scene.view_settings.look='Medium High Contrast'; scene.view_settings.exposure=0; scene.view_settings.gamma=1
+          scene.view_settings.view_transform='AgX'; scene.view_settings.look='AgX - Medium High Contrast'; scene.view_settings.exposure=0; scene.view_settings.gamma=1
           scene.render.film_transparent=False
           scene.frame_set(1)
           bpy.ops.render.render(animation=True)
@@ -1804,15 +1764,15 @@ jobs:
                   '--duration', f'{duration:.6f}', '--output', str(temp_video),
                   '--width', str(WIDTH), '--height', str(HEIGHT), '--fps', str(FPS),
                   '--frame-count', str(frames),
-                  '--rain-file', str(ROOT / 'assets' / 'characters' / 'rain_v3.blend'),
-                  '--snow-file', str(ROOT / 'assets' / 'characters' / 'snow_v4.blend'),
+                  '--rain-file', str(ROOT / 'assets' / 'characters' / 'rain_v3.glb'),
+                  '--snow-file', str(ROOT / 'assets' / 'characters' / 'snow_v4.glb'),
                   '--audio-file', str(OUT / 'narration.wav'),
                   '--audio-offset', f'{audio_offset:.6f}'
               ]
               print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
               print('Sanal ekran ve yazilimsal OpenGL etkin.')
               subprocess.run(
-                  command, check=True, timeout=max(900, int(duration * 180)),
+                  command, check=True, timeout=max(1800, int(duration * 300)),
                   env=blender_env
               )
               if not temp_video.exists() or temp_video.stat().st_size < 10000:
