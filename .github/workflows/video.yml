@@ -379,7 +379,8 @@ jobs:
           # Cinematic portrait camera, depth and lighting.
           bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
           cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
-          cam.data.dof.use_dof=True; cam.data.dof.focus_distance=10.5; cam.data.dof.aperture_fstop=5.6
+          # Yazilimsal GPU'da DOF pahali; sinematik lens acisi korunup DOF kapatildi.
+          cam.data.dof.use_dof=False
           for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
               bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
           
@@ -391,11 +392,11 @@ jobs:
               scene.render.engine='BLENDER_EEVEE'
           else:
               scene.render.engine='CYCLES'
-              scene.cycles.samples=8
+              scene.cycles.samples=2
               scene.cycles.use_denoising=True
-          # GitHub Actions yazilimsal GPU renderinda 32 yerine 8 sample: belirgin hiz kazanimi.
-          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=8
-          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=8
+          # GitHub Actions llvmpipe yazilimsal renderi icin dusuk maliyetli EEVEE ayarlari.
+          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=2
+          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=2
           scene.world.color=(.012,.018,.04)
           if scene.world and scene.world.use_nodes:
               bg=scene.world.node_tree.nodes.get('Background')
@@ -432,7 +433,7 @@ jobs:
           VOICE_DIR = OUT / 'voice'
           HISTORY_FILE = ROOT / 'data' / 'youtube_history.json'
           # Yazilimsal OpenGL (llvmpipe) icin render maliyetini dusur; final FFmpeg 1080x1920'ye yukseltiyor.
-          WIDTH, HEIGHT, FPS = 540, 960, 20
+          WIDTH, HEIGHT, FPS = 480, 854, 20
           OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
           TARGET_SECONDS = 30.0
           SCENE_COUNT = 6
@@ -1774,7 +1775,7 @@ jobs:
               print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
               print('Sanal ekran ve yazilimsal OpenGL etkin.')
               subprocess.run(
-                  command, check=True, timeout=max(900, int(duration * 180)),
+                  command, check=True, timeout=max(1200, int(duration * 240)),
                   env=blender_env
               )
               if not temp_video.exists() or temp_video.stat().st_size < 10000:
@@ -1897,7 +1898,7 @@ jobs:
           # Üretim: Blender gerçek 3D sahneleri render eder; Python altyazıları karelere işler.
           print('1/5 Blender ile gerçek 3D sahneler ve Türkçe seslendirme hazırlanıyor...')
           voice,scene_durations=make_voice_tracks()
-          # Yuvarlama farklarini duzelterek toplam kare sayisini tam 750 yap.
+          # Yuvarlama farklarini duzelterek toplam kare sayisini 30 saniyeye gore ayarla.
           frame_counts=[max(1,round(d*FPS)) for d in scene_durations]
           frame_counts[-1]+=int(TARGET_SECONDS*FPS)-sum(frame_counts)
           if frame_counts[-1] < 1: raise RuntimeError('Son sahne suresi gecersiz.')
