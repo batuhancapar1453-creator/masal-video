@@ -33,11 +33,114 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng blender xvfb libgl1-mesa-dri
+          blender --version | head -n 1
+          python - <<'PY'
+          import re, subprocess
+          version = subprocess.check_output(['blender', '--version'], text=True).splitlines()[0]
+          m = re.search(r'Blender (\\d+)\\.(\\d+)', version)
+          if not m or tuple(map(int, m.groups())) < (4, 1):
+              raise SystemExit('Rain v3 / Snow v4 icin Blender 4.1 veya uzeri gerekli: ' + version)
+          print('Blender surumu uygun:', version)
+          PY
 
       - name: Ucretsiz Python paketlerini kur
         run: |
           python -m pip install --upgrade pip
           pip install requests pillow numpy edge-tts google-api-python-client google-auth
+
+      - name: Blender Studio karakter cache
+        uses: actions/cache@v4
+        with:
+          path: assets/characters
+          key: gizemli-dunya-rigs-v1-${{ runner.os }}-rain-v3-snow-v4
+          restore-keys: |
+            gizemli-dunya-rigs-v1-${{ runner.os }}-
+
+      - name: Rain v3 ve Snow v4 karakterlerini resmî kaynaktan edin
+        run: |
+          mkdir -p assets/characters
+          cat > download_rigs.py <<'PY'
+          import re, json
+          from pathlib import Path
+          from urllib.parse import urljoin, urlparse
+          import requests
+          from html.parser import HTMLParser
+
+          OUT = Path('assets/characters')
+          OUT.mkdir(parents=True, exist_ok=True)
+          SOURCES = {
+              'rain_v3.blend': 'https://studio.blender.org/characters/rain/v3/',
+              'snow_v4.blend': 'https://studio.blender.org/characters/snow/v4/',
+          }
+          SESSION = requests.Session()
+          SESSION.headers.update({'User-Agent': 'GizemliDunya-OpenSource-Workflow/2.0'})
+
+          class LinkParser(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.links=[]; self.current=None
+              def handle_starttag(self, tag, attrs):
+                  a=dict(attrs)
+                  if tag == 'a':
+                      href=a.get('href') or a.get('data-href') or a.get('data-url')
+                      if href: self.current=[href, '']
+              def handle_data(self, data):
+                  if self.current and data.strip():
+                      self.current[1]=(self.current[1]+' '+data.strip())[:300]
+              def handle_endtag(self, tag):
+                  if tag == 'a' and self.current:
+                      self.links.append(tuple(self.current)); self.current=None
+
+          def is_blend(path):
+              try:
+                  with path.open('rb') as f: return f.read(7) == b'BLENDER'
+              except OSError: return False
+
+          def download_from_page(page_url, target):
+              if is_blend(target):
+                  print(target.name+': cache mevcut, indirme atlandi.')
+                  return
+              page=SESSION.get(page_url, timeout=60); page.raise_for_status()
+              parser=LinkParser(); parser.feed(page.text)
+              candidates=[]
+              for href,label in parser.links:
+                  url=urljoin(page_url,href)
+                  host=urlparse(url).hostname or ''
+                  if ('download' in (url+' '+label).lower() or '.blend' in url.lower()) and (
+                      host.endswith('blender.org') or host.endswith('blenderstudio.cn')
+                  ):
+                      candidates.append(url)
+              for raw in re.findall(r'''["'](https?://[^"' ]+|/[^"' ]+)["']''',page.text):
+                  if 'download' in raw.lower() or '.blend' in raw.lower():
+                      url=urljoin(page_url,raw); host=urlparse(url).hostname or ''
+                      if host.endswith('blender.org') or host.endswith('blenderstudio.cn'):
+                          candidates.append(url)
+              candidates=list(dict.fromkeys(candidates))
+              errors=[]
+              for url in candidates:
+                  tmp=target.with_suffix('.part')
+                  try:
+                      with SESSION.get(url,stream=True,timeout=240) as response:
+                          response.raise_for_status()
+                          with tmp.open('wb') as f:
+                              for chunk in response.iter_content(1024*1024):
+                                  if chunk: f.write(chunk)
+                      if is_blend(tmp):
+                          tmp.replace(target)
+                          print(target.name+': resmi indirme tamamlandi ('+str(target.stat().st_size)+' byte)')
+                          return
+                      tmp.unlink(missing_ok=True)
+                      errors.append(url+' -> .blend imzasi yok')
+                  except Exception as exc:
+                      tmp.unlink(missing_ok=True)
+                      errors.append(url+' -> '+str(exc)[:160])
+              raise RuntimeError('Blender Studio sayfasindan dogrudan .blend indirme baglantisi bulunamadi: '
+                                 +page_url+' | adaylar: '+json.dumps(errors[-6:],ensure_ascii=False))
+
+          for name,url in SOURCES.items():
+              download_from_page(url,OUT/name)
+          print('Rain v3 ve Snow v4 dosyalari hazir.')
+          PY
+          python download_rigs.py
 
       - name: YouTube OAuth baglantisini onceden denetle
         env:
@@ -88,6 +191,10 @@ jobs:
           p.add_argument('--height', type=int, default=960)
           p.add_argument('--fps', type=int, default=25)
           p.add_argument('--frame-count', type=int, default=0)
+          p.add_argument('--rain-file', required=True)
+          p.add_argument('--snow-file', required=True)
+          p.add_argument('--audio-file', required=True)
+          p.add_argument('--audio-offset', type=float, default=0.0)
           a = p.parse_args(argv)
           rng = random.Random(a.seed)
           
@@ -163,72 +270,131 @@ jobs:
               cube('Mysterious doorway',(0,2.55,2.0),(2.4,.22,3.8),gold,.08)
               cube('Door dark inset',(0,2.39,2.0),(2.1,.08,3.5),mat('Door interior',(.018,.028,.055)),.04)
           
-          # A different generated character per story. Body parts are separate animated 3D objects.
-          root=bpy.data.objects.new('Story character root',None); bpy.context.collection.objects.link(root)
-          root.location=(-.65,-1.0,0)
-          body=cube('Character torso',(0,0,0),(.78,.48,1.0),shirt,.20); body.parent=root; body.location=(0,0,1.55)
-          head=sphere('Character head',(0,0,0),(.39,.36,.43),skin); head.parent=root; head.location=(0,-.015,2.35)
-          haircap=sphere('Character hair',(0,0,0),(.405,.37,.23),hair); haircap.parent=root; haircap.location=(0,.015,2.62)
-          # eyes on the camera-facing side
-          for x in (-.14,.14):
-              e=sphere('Eye',(0,0,0),(.065,.035,.075),white); e.parent=root; e.location=(x,-.345,2.40)
-              q=sphere('Pupil',(0,0,0),(.027,.018,.04),iris); q.parent=root; q.location=(x,-.377,2.39)
-          # neck
-          neck=cylinder('Neck',(0,0,0),.13,.22,skin); neck.parent=root; neck.location=(0,0,2.03)
-          limbs=[]
-          for side in (-1,1):
-              arm=bpy.data.objects.new('Arm pivot',None); bpy.context.collection.objects.link(arm); arm.parent=root; arm.location=(side*.43,0,1.88)
-              upper=between('Upper arm',(0,0,0),(0,0,-.55),.13,shirt); upper.parent=arm; upper.location=(0,0,-.275)
-              hand=sphere('Hand',(0,0,0),(.14,.14,.15),skin); hand.parent=arm; hand.location=(0,0,-.62)
-              leg=bpy.data.objects.new('Leg pivot',None); bpy.context.collection.objects.link(leg); leg.parent=root; leg.location=(side*.20,0,1.12)
-              thigh=between('Leg',(0,0,0),(0,0,-.66),.16,pants); thigh.parent=leg; thigh.location=(0,0,-.33)
-              foot=cube('Sneaker',(0,0,0),(.28,.48,.16),shoe,.07); foot.parent=leg; foot.location=(0,-.10,-.67)
-              limbs.append((arm,leg,side))
-          
-          # Shadow apparition appears behind the protagonist in later beats.
-          if a.scene >= 4:
-              ghostmat=dark
-              gbody=sphere('Emerging shadow',(1.65,1.65,1.7),(.48,.22,1.15),ghostmat)
-              ghead=sphere('Shadow head',(1.65,1.62,2.85),(.38,.23,.42),ghostmat)
-              gbody.keyframe_insert('location',frame=1); gbody.location.x=.75; gbody.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.8)))
-              ghead.keyframe_insert('location',frame=1); ghead.location.x=.75; ghead.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.8)))
-          
-          # Animate protagonist according to beat; unique walk/run timing per seed.
-          frames=a.frame_count if a.frame_count > 0 else max(2,round(a.duration*a.fps)); mid=max(2,frames//2); end=frames
-          root.location=(-.65,-1.0,0); root.keyframe_insert('location',frame=1)
-          if a.scene in (1,2): root.location.x=1.0
-          elif a.scene in (3,4): root.location.x=-.15
-          else: root.location.x=-2.1
-          root.keyframe_insert('location',frame=end)
-          root.rotation_euler[2]=0; root.keyframe_insert('rotation_euler',frame=1)
-          root.rotation_euler[2]=rng.choice([-.18,.18,math.pi*.85]) if a.scene in (3,4,5,6) else 0
-          root.keyframe_insert('rotation_euler',frame=mid)
-          for arm,leg,side in limbs:
-              for frame in (1,mid,end):
-                  phase=(frame/frames)*math.pi*4 + (0 if side<0 else math.pi)
-                  swing=math.sin(phase)*(.48 if a.scene in (1,5,6) else .12)
-                  arm.rotation_euler[1]=swing if side<0 else -swing
-                  leg.rotation_euler[1]=-swing if side<0 else swing
-                  if a.scene in (4,5,6): arm.rotation_euler[1]+=(-.65 if side<0 else .65)
-                  arm.keyframe_insert('rotation_euler',frame=frame); leg.keyframe_insert('rotation_euler',frame=frame)
-          for obj in (root,):
-              if obj.animation_data and obj.animation_data.action:
-                  for fc in obj.animation_data.action.fcurves:
-                      for kp in fc.keyframe_points: kp.interpolation='BEZIER'
-          
+          # Gercek Blender Studio rig koleksiyonlarini .blend dosyalarindan ekle.
+          def import_rig(blend_path, wanted, x_position, target_height=3.15):
+              from pathlib import Path
+              path=Path(blend_path)
+              if not path.is_file() or path.stat().st_size < 1000000:
+                  raise RuntimeError('Rig dosyasi eksik veya bozuk: '+str(path))
+              with bpy.data.libraries.load(str(path), link=False) as (data_from,data_to):
+                  matches=[n for n in data_from.collections if n.lower().startswith(wanted.lower())]
+                  if not matches: matches=[n for n in data_from.collections if wanted.lower() in n.lower()]
+                  if not matches:
+                      raise RuntimeError(wanted+' koleksiyonu bulunamadi. Mevcutlar: '+repr(data_from.collections[:30]))
+                  data_to.collections=[matches[0]]
+              coll=data_to.collections[0]
+              if coll is None: raise RuntimeError(wanted+' koleksiyonu yuklenemedi.')
+              bpy.context.scene.collection.children.link(coll)
+              objects=list(coll.all_objects)
+              meshes=[o for o in objects if o.type=='MESH']
+              rigs=[o for o in objects if o.type=='ARMATURE']
+              if not meshes or not rigs:
+                  raise RuntimeError(wanted+' icinde mesh veya armature eksik.')
+              bounds=[obj.matrix_world @ Vector(corner) for obj in meshes for corner in obj.bound_box]
+              min_z=min(v.z for v in bounds); max_z=max(v.z for v in bounds)
+              scale=target_height/max(0.01,max_z-min_z)
+              root=bpy.data.objects.new(wanted+' animated root',None)
+              bpy.context.scene.collection.objects.link(root)
+              root.location=(x_position,-1.0,-min_z*scale); root.scale=(scale,scale,scale)
+              for obj in objects:
+                  if obj.parent is None:
+                      obj.parent=root
+                      obj.matrix_parent_inverse=__import__('mathutils').Matrix.Identity(4)
+              return root,rigs[0],meshes
+
+          frames=a.frame_count if a.frame_count>0 else max(2,round(a.duration*a.fps))
+          mid=max(2,frames//2); end=frames
+          rain=import_rig(a.rain_file,'CH-rain',-.65)
+          actors=[(*rain,'rain')]
+          if a.scene>=4:
+              snow=import_rig(a.snow_file,'CH-snow',1.35)
+              actors.append((*snow,'snow'))
+
+          def read_audio_levels(filename,offset,count,fps):
+              import wave, array
+              try:
+                  with wave.open(filename,'rb') as w:
+                      if w.getsampwidth()!=2: return [0.0]*count
+                      rate=w.getframerate(); channels=w.getnchannels()
+                      samples=array.array('h'); samples.frombytes(w.readframes(w.getnframes()))
+                      if sys.byteorder!='little': samples.byteswap()
+                      result=[]
+                      for i in range(count):
+                          lo=int((offset+i/fps)*rate)*channels
+                          hi=int((offset+(i+1)/fps)*rate)*channels
+                          part=samples[lo:hi]
+                          rms=math.sqrt(sum(float(v)*v for v in part)/len(part))/32768.0 if part else 0.0
+                          result.append(min(1.0,rms*5.0))
+                      return result
+              except Exception as exc:
+                  print('Ses dalga bicimi okunamadi; agiz kontrolu sifirlandi:',exc)
+                  return [0.0]*count
+
+          levels=read_audio_levels(a.audio_file,a.audio_offset,frames,a.fps)
+          for actor_index,(root,arm,meshes,actor_name) in enumerate(actors):
+              root.keyframe_insert('location',frame=1)
+              root.location.x += (1.05 if a.scene in (1,2) else .35 if a.scene in (3,4) else -.55)
+              root.keyframe_insert('location',frame=end)
+              root.rotation_euler[2]=0; root.keyframe_insert('rotation_euler',frame=1)
+              root.rotation_euler[2]=rng.choice([-.16,.16]) if a.scene>=3 else 0
+              root.keyframe_insert('rotation_euler',frame=mid)
+              for pb in arm.pose.bones:
+                  name=pb.name.lower()
+                  if not any(k in name for k in ('root','hips','spine','chest','neck','head','shoulder','upper_arm','forearm','hand','thigh','shin','foot','jaw','mouth','brow','eye')):
+                      continue
+                  pb.rotation_mode='XYZ'; base=pb.rotation_euler.copy()
+                  for fr in (1,mid,end):
+                      phase=(fr/max(1,frames))*math.tau*2
+                      pb.rotation_euler=base
+                      if any(k in name for k in ('upper_arm','forearm','hand','arm')):
+                          pb.rotation_euler[1]+=math.sin(phase+actor_index*1.7)*.12
+                      elif 'head' in name or 'neck' in name:
+                          pb.rotation_euler[2]+=(.10 if a.scene>=3 else .025)*math.sin(phase*.5)
+                      elif any(k in name for k in ('thigh','shin','foot')):
+                          pb.rotation_euler[1]+=math.sin(phase+actor_index*math.pi)*.10
+                      pb.keyframe_insert(data_path='rotation_euler',frame=fr,group='Auto performance')
+              face_keys=[]
+              for mesh in meshes:
+                  if mesh.data.shape_keys:
+                      for key in mesh.data.shape_keys.key_blocks:
+                          if any(k in key.name.lower() for k in ('jawopen','jaw_open','mouthopen','mouth_open')):
+                              face_keys.append(key)
+              jaw_bones=[pb for pb in arm.pose.bones if 'jaw' in pb.name.lower() or 'mouth' in pb.name.lower()]
+              for fr,level in enumerate(levels,1):
+                  for key in face_keys:
+                      key.value=level
+                      key.keyframe_insert(data_path='value',frame=fr,group='Audio-driven mouth')
+                  for pb in jaw_bones:
+                      pb.rotation_mode='XYZ'; pb.rotation_euler[0]=level*.22
+                      pb.keyframe_insert(data_path='rotation_euler',frame=fr,group='Audio-driven jaw')
+              for mesh in meshes:
+                  if not mesh.data.shape_keys: continue
+                  for key in mesh.data.shape_keys.key_blocks:
+                      if 'blink' in key.name.lower() or 'eye_close' in key.name.lower():
+                          for bf in (max(2,int(frames*.32)),max(2,int(frames*.76))):
+                              key.value=1.0; key.keyframe_insert(data_path='value',frame=bf)
+                              key.value=0.0; key.keyframe_insert(data_path='value',frame=min(frames,bf+2))
+
           # Cinematic portrait camera, depth and lighting.
           bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
           cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
-          cam.data.dof.use_dof=True; cam.data.dof.focus_object=root; cam.data.dof.aperture_fstop=5.6
+          cam.data.dof.use_dof=True; cam.data.dof.focus_object=rain[0]; cam.data.dof.aperture_fstop=5.6
           for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
               bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
           
           scene=bpy.context.scene
-          scene.render.engine='BLENDER_WORKBENCH'
-          scene.display.shading.light='STUDIO'; scene.display.shading.studio_light='paint.sl'; scene.display.shading.color_type='MATERIAL'
-          scene.display.shading.show_shadows=True; scene.display.shading.show_cavity=True; scene.display.shading.cavity_type='BOTH'
-          scene.display.shading.curvature_ridge_factor=1.25; scene.display.shading.curvature_valley_factor=1.0
-          scene.display.shading.background_type='WORLD'; scene.world.color=(.012,.018,.04)
+          engines={item.identifier for item in scene.render.bl_rna.properties['engine'].enum_items}
+          if 'BLENDER_EEVEE_NEXT' in engines:
+              scene.render.engine='BLENDER_EEVEE_NEXT'
+          elif 'BLENDER_EEVEE' in engines:
+              scene.render.engine='BLENDER_EEVEE'
+          else:
+              scene.render.engine='CYCLES'
+              scene.cycles.samples=16
+              scene.cycles.use_denoising=True
+          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=32
+          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=32
+          scene.world.color=(.012,.018,.04)
           scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=100
           scene.render.fps=a.fps; scene.frame_start=1; scene.frame_end=frames
           scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='MEDIUM'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
@@ -260,7 +426,7 @@ jobs:
           CLIPS = OUT / 'clips'
           VOICE_DIR = OUT / 'voice'
           HISTORY_FILE = ROOT / 'data' / 'youtube_history.json'
-          WIDTH, HEIGHT, FPS = 540, 960, 25
+          WIDTH, HEIGHT, FPS = 720, 1280, 25
           OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
           TARGET_SECONDS = 30.0
           SCENE_COUNT = 6
@@ -1519,11 +1685,7 @@ jobs:
 
 
           def draw_subtitles(draw, text_value, progress, category, scene_no):
-              draw.rounded_rectangle((24, 24, WIDTH-24, 67), radius=17, fill=(5, 10, 24, 175))
-              draw.text((WIDTH//2, 45), f'GİZEMLİ DÜNYA  —  {category.upper()}', font=FONT_SMALL,
-                        anchor='mm', fill=(238, 245, 255, 255))
-              draw.rounded_rectangle((24, 82, WIDTH-24, 89), radius=4, fill=(255, 255, 255, 55))
-              draw.rounded_rectangle((24, 82, 24+(WIDTH-48)*progress, 89), radius=4, fill=(255, 194, 75, 255))
+              # Kanal adi / ust koyu serit tamamen kaldirildi.
               lines = wrap_text(draw, text_value, FONT_CAPTION, WIDTH-78)
               line_h = 37
               panel_h = len(lines)*line_h + 34
@@ -1570,7 +1732,7 @@ jobs:
 
 
 
-          def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
+          def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None, audio_offset=0.0):
               """Render a genuine animated 3D scene in Blender, then add the established subtitles."""
               frames = frame_count if frame_count is not None else max(1, round(duration * FPS))
               temp_video = CLIPS / f'blender_raw_{scene_no:02d}.mp4'
@@ -1594,7 +1756,11 @@ jobs:
                   '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
                   '--duration', f'{duration:.6f}', '--output', str(temp_video),
                   '--width', str(WIDTH), '--height', str(HEIGHT), '--fps', str(FPS),
-                  '--frame-count', str(frames)
+                  '--frame-count', str(frames),
+                  '--rain-file', str(ROOT / 'assets' / 'characters' / 'rain_v3.blend'),
+                  '--snow-file', str(ROOT / 'assets' / 'characters' / 'snow_v4.blend'),
+                  '--audio-file', str(OUT / 'narration.wav'),
+                  '--audio-offset', f'{audio_offset:.6f}'
               ]
               print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
               print('Sanal ekran ve yazilimsal OpenGL etkin.')
@@ -1693,7 +1859,8 @@ jobs:
               youtube=build('youtube','v3',credentials=creds,cache_discovery=False)
               description=(f'{title}\n\n'
                 'Gizemli Dünya’da bu kez kısa bir paranormal hikâye anlatıyoruz. '
-                'Bu video, özgün Blender 3D animasyonu ve Türkçe seslendirme ile hazırlanmıştır. '
+                'Bu video Blender Studio Rain Rig ve Snow Rig karakterleriyle hazirlanan 3D animasyon ve Turkce seslendirme icerir. '
+                'Karakter atiflari: Rain Rig (CC) Blender Foundation | studio.blender.org; Snow Rig (CC) Blender Foundation | studio.blender.org. '
                 'Hikâye kurgu ve şehir efsanesi atmosferinde anlatılmıştır; gerçek olduğu iddia edilmez.\n'
                 'Sence bu olayın açıklaması ne? Yorumlarda paylaş. Videoyu beğenmeyi ve kanalımıza abone olmayı unutma!\n\n'
                 '#Shorts #Paranormal #GizemliHikayeler #KorkuHikayeleri #Gizem')
@@ -1727,10 +1894,12 @@ jobs:
           if frame_counts[-1] < 1: raise RuntimeError('Son sahne suresi gecersiz.')
           seed=int.from_bytes(__import__('hashlib').sha256((topic_id+slot).encode()).digest()[:4],'big')
           clips=[]
+          audio_offset=0.0
           for i,((caption,visual),duration,frame_count) in enumerate(zip(scenes,scene_durations,frame_counts),1):
               clip=CLIPS/f'clip_{i:02d}.mp4'
-              render_animated_clip(i,caption,duration,category,topic_id,seed,clip,frame_count)
+              render_animated_clip(i,caption,duration,category,topic_id,seed,clip,frame_count,audio_offset)
               clips.append(clip)
+              audio_offset += duration
               print(f'Blender 3D sahne {i}/6 hazir: {duration:.2f} saniye')
 
           print('2/5 Fon muzigi hazirlaniyor...')
