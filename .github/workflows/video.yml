@@ -62,7 +62,7 @@ jobs:
           "$BLENDER_DIR/blender" --version | head -n 1
           python - <<'PY'
           import re, subprocess
-          version = subprocess.check_output(['blender', '--version'], text=True).splitlines()[0]
+          version = subprocess.check_output([str(__import__('pathlib').Path.home() / 'blender-4.5.15' / 'blender'), '--version'], text=True).splitlines()[0]
           m = re.search(r'Blender (\d+)\.(\d+)', version)
           if not m or tuple(map(int, m.groups())) < (4, 1):
               raise SystemExit('Rain v3 / Snow v4 icin Blender 4.1 veya uzeri gerekli: ' + version)
@@ -1776,9 +1776,12 @@ jobs:
               blender_env['OPENBLAS_NUM_THREADS'] = '1'
               blender_env['BLENDER_USER_CONFIG'] = str(blender_config)
 
+              blender_executable = str(Path.home() / 'blender-4.5.15' / 'blender')
+              if not Path(blender_executable).is_file():
+                  raise FileNotFoundError(f'Blender calistirilabilir dosyasi bulunamadi: {blender_executable}')
               command = [
                   'xvfb-run', '-a', '-s', '-screen 0 1280x1024x24',
-                  'blender', '--background', '--factory-startup',
+                  blender_executable, '--background', '--factory-startup',
                   '--threads', '1', '--python-exit-code', '1',
                   '--python', str(ROOT / 'render_3d.py'), '--',
                   '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
