@@ -29,17 +29,43 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: FFmpeg, Blender ve sanal ekran kur
+      - name: FFmpeg ve sanal ekran kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng blender xvfb libgl1-mesa-dri
-          blender --version | head -n 1
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng xvfb libgl1-mesa-dri libxi6 libxrender1 libxfixes3 libxkbcommon0 libsm6 libgl1
+
+      - name: Blender 4.5.15 LTS cache
+        uses: actions/cache@v4
+        with:
+          path: ~/blender-4.5.15
+          key: blender-4.5.15-linux-x64-${{ runner.os }}-v1
+
+      - name: Resmî Blender 4.5.15 LTS kur
+        run: |
+          set -euo pipefail
+          BLENDER_DIR="$HOME/blender-4.5.15"
+          if [ ! -x "$BLENDER_DIR/blender" ]; then
+            ARCHIVE="blender-4.5.15-linux-x64.tar.xz"
+            BASE_URL="https://download.blender.org/release/Blender4.5"
+            cd "$RUNNER_TEMP"
+            curl -fL --retry 3 --retry-delay 3 "$BASE_URL/$ARCHIVE" -o "$ARCHIVE"
+            curl -fL --retry 3 --retry-delay 3 "$BASE_URL/$ARCHIVE.sha256" -o "$ARCHIVE.sha256"
+            sha256sum -c "$ARCHIVE.sha256"
+            tar -xf "$ARCHIVE"
+            mv "$RUNNER_TEMP/blender-4.5.15-linux-x64" "$BLENDER_DIR"
+          else
+            echo "Blender 4.5.15 cache bulundu; yeniden indirme atlandi."
+          fi
+          echo "$BLENDER_DIR" >> "$GITHUB_PATH"
+          "$BLENDER_DIR/blender" --version | head -n 1
           python - <<'PY'
           import re, subprocess
           version = subprocess.check_output(['blender', '--version'], text=True).splitlines()[0]
-          m = re.search(r'Blender (\\d+)\\.(\\d+)', version)
+          m = re.search(r'Blender (\d+)\.(\d+)', version)
           if not m or tuple(map(int, m.groups())) < (4, 1):
               raise SystemExit('Rain v3 / Snow v4 icin Blender 4.1 veya uzeri gerekli: ' + version)
+          if not version.startswith('Blender 4.5.15'):
+              raise SystemExit('Beklenen Blender 4.5.15 LTS yerine farkli surum bulundu: ' + version)
           print('Blender surumu uygun:', version)
           PY
 
