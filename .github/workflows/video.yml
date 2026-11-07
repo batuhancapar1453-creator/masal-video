@@ -315,8 +315,11 @@ jobs:
           def import_rig(blend_path, wanted, x_position, target_height=3.15):
               from pathlib import Path
               path=Path(blend_path)
-              if not path.is_file() or path.stat().st_size < 1000000:
+              if not path.is_file() or path.stat().st_size < 20000:
                   raise RuntimeError('Rig dosyasi eksik veya bozuk: '+str(path))
+              with path.open('rb') as rig_file:
+                  if rig_file.read(7) != b'BLENDER':
+                      raise RuntimeError('Rig dosyasi gecerli Blender .blend dosyasi degil: '+str(path))
               with bpy.data.libraries.load(str(path), link=False) as (data_from,data_to):
                   matches=[n for n in data_from.collections if n.lower().startswith(wanted.lower())]
                   if not matches: matches=[n for n in data_from.collections if wanted.lower() in n.lower()]
@@ -419,7 +422,7 @@ jobs:
           # Cinematic portrait camera, depth and lighting.
           bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
           cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
-          cam.data.dof.use_dof=True; cam.data.dof.focus_object=rain[0]; cam.data.dof.aperture_fstop=5.6
+          cam.data.dof.use_dof=False  # GitHub Actions yazilimsal OpenGL ortaminda hiz icin DOF kapali
           for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
               bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
           
@@ -431,12 +434,12 @@ jobs:
               scene.render.engine='BLENDER_EEVEE'
           else:
               scene.render.engine='CYCLES'
-              scene.cycles.samples=16
+              scene.cycles.samples=8
               scene.cycles.use_denoising=True
-          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=32
-          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=32
+          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=8
+          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=8
           scene.world.color=(.012,.018,.04)
-          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=100
+          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=50  # Render 360x640; sonraki FFmpeg adimi 720x1280'e yukseltiyor
           scene.render.fps=a.fps; scene.frame_start=1; scene.frame_end=frames
           scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='MEDIUM'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
           scene.render.filepath=a.output; scene.render.use_file_extension=True
