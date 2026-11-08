@@ -834,7 +834,7 @@ jobs:
                   'forest': ['dark pine forest fog', 'dense forest mist trees'],
                   'pine_forest': ['pine forest fog trees', 'dark woodland path'],
                   'hotel': ['old hotel corridor interior', 'abandoned hotel hallway'],
-                  'hospital': ['abandoned hospital corridor', 'hospital hallway interior'],
+                  'hospital': ['abandoned hospital corridor', 'hospital hallway interior', 'hospital interior corridor', 'abandoned medical building hallway'],
                   'mirror': ['antique mirror dark room', 'old mirror interior'],
                   'phone': ['vintage telephone closeup', 'old telephone dark room'],
                   'lighthouse': ['lighthouse storm coast fog', 'lighthouse at night'],
@@ -880,19 +880,33 @@ jobs:
               return terms
 
 
-          def commons_search_images(query, limit=18):
+          def commons_search_images(query, limit=40):
+              """Search Commons with two API routes; tolerate sparse generator results."""
               api = 'https://commons.wikimedia.org/w/api.php'
-              params = {
-                  'action': 'query', 'format': 'json', 'generator': 'search',
-                  'gsrsearch': f'filetype:bitmap {query}', 'gsrnamespace': 6,
-                  'gsrlimit': limit, 'prop': 'imageinfo',
-                  'iiprop': 'url|size|extmetadata', 'iiurlwidth': 1100
-              }
-              response = requests.get(api, params=params,
-                  headers={'User-Agent': 'GizemliDunyaVideoBot/1.0 (educational noncommercial video project)'}, timeout=35)
+              headers = {'User-Agent': 'GizemliDunyaVideoBot/1.1 (free noncommercial video project)'}
+              common = {'action': 'query', 'format': 'json', 'prop': 'imageinfo',
+                        'iiprop': 'url|size|extmetadata', 'iiurlwidth': 1400}
+              # First use generator=search. Do not force filetype:bitmap; Commons
+              # search may otherwise return zero items for valid photographic files.
+              params = dict(common, generator='search', gsrsearch=query,
+                            gsrnamespace=6, gsrlimit=min(limit, 50))
+              response = requests.get(api, params=params, headers=headers, timeout=35)
               response.raise_for_status()
-              pages = response.json().get('query', {}).get('pages', {})
-              return list(pages.values())
+              pages = list(response.json().get('query', {}).get('pages', {}).values())
+              if pages:
+                  return pages
+              # Fallback: list=search followed by a batched imageinfo lookup.
+              params = {'action': 'query', 'format': 'json', 'list': 'search',
+                        'srnamespace': 6, 'srsearch': query, 'srlimit': min(limit, 50)}
+              response = requests.get(api, params=params, headers=headers, timeout=35)
+              response.raise_for_status()
+              titles = [x.get('title') for x in response.json().get('query', {}).get('search', []) if x.get('title')]
+              if not titles:
+                  return []
+              params = dict(common, titles='|'.join(titles))
+              response = requests.get(api, params=params, headers=headers, timeout=35)
+              response.raise_for_status()
+              return list(response.json().get('query', {}).get('pages', {}).values())
 
 
           def generate_scene_image(scene_no, caption, topic_id, seed):
@@ -904,9 +918,14 @@ jobs:
                         'painting', 'poster', 'flag', 'icon', 'screenshot', 'svg', 'collage')
               used_titles = set()
               last_error = None
-              for query in terms:
+              # Add broad fallbacks: Commons contains many useful landscape photos;
+              # the final 9:16 crop is performed locally after download.
+              broad = [kind.replace('_', ' '), 'abandoned building interior', 'dark corridor interior']
+              queries = list(dict.fromkeys(terms + broad))
+              for query in queries:
                   try:
                       candidates = commons_search_images(query)
+                      print(f'Commons sonucu: {query!r} -> {len(candidates)} dosya')
                       # Sort deterministically but vary the preferred result by scene/topic.
                       candidates.sort(key=lambda item: (len(item.get('title', '')), item.get('title', '')))
                       random.Random(seed + scene_no * 7919 + len(query)).shuffle(candidates)
@@ -922,7 +941,9 @@ jobs:
                           mime = info.get('mime', '')
                           if mime not in ('image/jpeg', 'image/png', 'image/webp'):
                               continue
-                          if int(info.get('width', 0)) < 900 or int(info.get('height', 0)) < 1200:
+                          iw, ih = int(info.get('width', 0)), int(info.get('height', 0))
+                          # Accept landscape and portrait photos; crop to 9:16 later.
+                          if iw < 700 or ih < 500 or iw * ih < 600000:
                               continue
                           ext = info.get('extmetadata', {})
                           desc = str(ext.get('ImageDescription', {}).get('value', '')).lower()
@@ -933,7 +954,7 @@ jobs:
                               continue
                           image_response = requests.get(url, headers={'User-Agent': 'GizemliDunyaVideoBot/1.0'}, timeout=60)
                           image_response.raise_for_status()
-                          if len(image_response.content) < 45000:
+                          if len(image_response.content) < 25000:
                               continue
                           image = Image.open(io.BytesIO(image_response.content)).convert('RGB')
                           if image.width < 640 or image.height < 1000:
@@ -963,7 +984,8 @@ jobs:
                   except Exception as exc:
                       last_error = exc
                       print(f'Commons arama uyarisi ({query}): {str(exc)[:180]}')
-              raise RuntimeError(f'{scene_no}. sahne icin yeterli kalitede, benzersiz ve lisans bilgisi olan ucretsiz fotograf bulunamadi. Yayin engellendi. Son hata: {last_error}')
+              detail = str(last_error) if last_error is not None else 'Commons aramasi uygun dosya dondurmedi (arama bos veya boyut/lisans/tekrar filtresine takildi).'
+              raise RuntimeError(f'{scene_no}. sahne icin uygun, benzersiz ve lisans bilgisi olan ucretsiz fotograf bulunamadi. Yayin engellendi. Son hata: {detail}')
 
 
           def render_image_scene(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
