@@ -1,4 +1,4 @@
-name: Gizemli Dunya - Ucretsiz Paranormal Hikayeler
+name: Gizemli Dunya - Ucretsiz Sinematik Sahne Gorselleri
 
 on:
   workflow_dispatch:
@@ -29,109 +29,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: FFmpeg ve sanal ekran kur
+      - name: FFmpeg ve Türkçe çevrimdışı ses motorunu kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng xvfb libgl1-mesa-dri libxi6 libxrender1 libxfixes3 libxkbcommon0 libsm6 libgl1
+          sudo apt-get install -y ffmpeg fonts-dejavu-core espeak-ng
 
-      - name: Blender 4.5.15 LTS cache
-        uses: actions/cache@v4
-        with:
-          path: ~/blender-4.5.15
-          key: blender-4.5.15-linux-x64-${{ runner.os }}-v1
-
-      - name: Resmî Blender 4.5.15 LTS kur
-        run: |
-          set -euo pipefail
-          BLENDER_DIR="$HOME/blender-4.5.15"
-          if [ ! -x "$BLENDER_DIR/blender" ]; then
-            ARCHIVE="blender-4.5.15-linux-x64.tar.xz"
-            BASE_URL="https://download.blender.org/release/Blender4.5"
-            cd "$RUNNER_TEMP"
-            curl -fL --retry 3 --retry-delay 3 "$BASE_URL/$ARCHIVE" -o "$ARCHIVE"
-            # Blender checksum dosyasi arsiv adi + .sha256 degil,
-            # surum adi ile yayinlaniyor; yalnizca Linux x64 arsiv satirini dogrula.
-            curl -fL --retry 3 --retry-delay 3 "$BASE_URL/blender-4.5.15.sha256" -o blender-4.5.15.sha256
-            grep -F "$ARCHIVE" blender-4.5.15.sha256 | sha256sum -c -
-            tar -xf "$ARCHIVE"
-            mv "$RUNNER_TEMP/blender-4.5.15-linux-x64" "$BLENDER_DIR"
-          else
-            echo "Blender 4.5.15 cache bulundu; yeniden indirme atlandi."
-          fi
-          echo "$BLENDER_DIR" >> "$GITHUB_PATH"
-          "$BLENDER_DIR/blender" --version | head -n 1
-          python - <<'PY'
-          import re, subprocess
-          version = subprocess.check_output([str(__import__('pathlib').Path.home() / 'blender-4.5.15' / 'blender'), '--version'], text=True).splitlines()[0]
-          m = re.search(r'Blender (\d+)\.(\d+)', version)
-          if not m or tuple(map(int, m.groups())) < (4, 1):
-              raise SystemExit('Rain v3 / Snow v4 icin Blender 4.1 veya uzeri gerekli: ' + version)
-          if not version.startswith('Blender 4.5.15'):
-              raise SystemExit('Beklenen Blender 4.5.15 LTS yerine farkli surum bulundu: ' + version)
-          print('Blender surumu uygun:', version)
-          PY
-
-      - name: Ucretsiz Python paketlerini kur
+      - name: Python bagimliliklarini kur
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow numpy edge-tts google-api-python-client google-auth
-
-      - name: Ara 3D Gen karakter motorunu indir
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/olatunde85/3d-gen.git ara3dgen
-
-      - name: Node.js 20 kur
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: npm
-          cache-dependency-path: ara3dgen/package-lock.json
-
-      - name: Ara 3D Gen bağımlılıklarını kur
-        run: |
-          cd ara3dgen
-          npm ci
-
-      - name: CC0 gerçekçi insan varlıklarını hazırla (önbellekli)
-        uses: actions/cache@v4
-        with:
-          path: |
-            ara3dgen/vendor
-            ara3dgen/public/assets
-          key: ara3dgen-cc0-${{ runner.os }}-${{ hashFiles('ara3dgen/package-lock.json') }}-v1
-
-      - name: CC0 MakeHuman karakter verisini hazırla
-        run: |
-          set -euo pipefail
-          cd ara3dgen
-          npm run setup-assets
-
-      - name: İki gerçekçi rigli karakteri ve animasyonları üret
-        run: |
-          set -euo pipefail
-          mkdir -p assets/characters ara3dgen/out/rain ara3dgen/out/snow
-          cd ara3dgen
-          # Ara CLI GLB dışa aktarımı: PBR dokular, Mixamo uyumlu rig ve seçili animasyon klipleri.
-          npm run export -- --random 3170317 --detail high --formats glb --out out/rain
-          npm run export -- --random 3170320 --detail high --formats glb --out out/snow
-          python - <<'PYCHAR'
-          from pathlib import Path
-          import shutil
-          root=Path('out')
-          for label in ('rain','snow'):
-              files=sorted((root/label).rglob('*.glb'), key=lambda p:p.stat().st_size, reverse=True)
-              if not files:
-                  raise SystemExit(f'Ara 3D Gen {label} için GLB üretmedi; export klasörü: {root/label}')
-              src=files[0]
-              with src.open('rb') as f:
-                  if f.read(4)!=b'glTF': raise SystemExit(f'Geçersiz GLB: {src}')
-              if src.stat().st_size < 150000:
-                  raise SystemExit(f'Karakter GLB dosyası beklenenden küçük: {src} ({src.stat().st_size})')
-              dst=Path('../assets/characters')/('rain_v3.glb' if label=='rain' else 'snow_v4.glb')
-              shutil.copy2(src,dst)
-              print(f'{dst}: {dst.stat().st_size:,} bytes; kaynak={src}')
-          PYCHAR
+          python -m pip install requests numpy pillow edge-tts google-auth google-auth-oauthlib google-api-python-client
 
       - name: YouTube OAuth baglantisini onceden denetle
         env:
@@ -167,250 +73,6 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_PRIVACY: public
         run: |
-          cat > render_3d.py <<'BLENDER'
-          import bpy, sys, math, random, argparse
-          from mathutils import Vector
-          
-          argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-          p = argparse.ArgumentParser()
-          p.add_argument('--theme', default='haunted_room')
-          p.add_argument('--scene', type=int, default=1)
-          p.add_argument('--seed', type=int, default=1)
-          p.add_argument('--duration', type=float, default=5)
-          p.add_argument('--output', required=True)
-          p.add_argument('--width', type=int, default=540)
-          p.add_argument('--height', type=int, default=960)
-          p.add_argument('--fps', type=int, default=25)
-          p.add_argument('--frame-count', type=int, default=0)
-          p.add_argument('--rain-file', required=True)
-          p.add_argument('--snow-file', required=True)
-          p.add_argument('--audio-file', required=True)
-          p.add_argument('--audio-offset', type=float, default=0.0)
-          a = p.parse_args(argv)
-          rng = random.Random(a.seed)
-          
-          bpy.ops.object.select_all(action='SELECT'); bpy.ops.object.delete(use_global=False)
-          for datablocks in (bpy.data.materials, bpy.data.curves, bpy.data.meshes, bpy.data.cameras, bpy.data.lights):
-              pass
-          
-          def mat(name, color, rough=0.72, metallic=0.0):
-              m=bpy.data.materials.new(name); m.diffuse_color=(*color,1); m.roughness=rough; m.metallic=metallic
-              return m
-          
-          colors=[(0.08,0.55,0.78),(0.92,0.28,0.18),(0.95,0.62,0.12),(0.35,0.72,0.38),(0.55,0.32,0.78),(0.92,0.35,0.58),(0.12,0.68,0.62)]
-          skin=mat('Character skin',rng.choice([(0.72,.43,.28),(.91,.68,.51),(.55,.32,.21),(.82,.59,.42),(.95,.77,.63)]))
-          shirt=mat('Unique clothing',rng.choice(colors)); pants=mat('Trousers',rng.choice([(0.05,.09,.19),(.12,.16,.24),(.28,.19,.14),(.12,.25,.28)]))
-          hair=mat('Unique hair',rng.choice([(.025,.02,.03),(.12,.055,.025),(.22,.12,.06),(.55,.19,.08),(.08,.12,.18)]))
-          shoe=mat('Shoes',(.025,.03,.045)); white=mat('Eyes',(.96,.97,1)); iris=mat('Iris',(.04,.08,.12)); dark=mat('Shadow figure',(.012,.018,.035),.95)
-          wall=mat('Deep teal walls',(.035,.095,.16)); floor=mat('Polished floor',(.055,.075,.11),.35); gold=mat('Warm light',(.98,.53,.12),.3,0.25); metal=mat('Metal',(.22,.32,.4),.25,.7)
-          
-          def cube(name, loc, scale, material, bevel=0.0):
-              bpy.ops.mesh.primitive_cube_add(size=1, location=loc); o=bpy.context.object; o.name=name; o.dimensions=scale; bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-              o.data.materials.append(material)
-              if bevel:
-                  mod=o.modifiers.new('Soft rounded edges','BEVEL'); mod.width=bevel; mod.segments=3
-                  o.modifiers.new('Weighted corner normals','WEIGHTED_NORMAL')
-              return o
-          
-          def sphere(name, loc, scale, material):
-              bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=12, location=loc); o=bpy.context.object; o.name=name; o.scale=scale; o.data.materials.append(material); bpy.ops.object.shade_smooth(); return o
-          
-          def cylinder(name, loc, radius, depth, material, rotation=None):
-              bpy.ops.mesh.primitive_cylinder_add(vertices=20, radius=radius, depth=depth, location=loc, rotation=rotation or (0,0,0)); o=bpy.context.object; o.name=name; o.data.materials.append(material); bpy.ops.object.shade_smooth(); return o
-          
-          def between(name, p1, p2, radius, material):
-              mid=(Vector(p1)+Vector(p2))/2; vec=Vector(p2)-Vector(p1)
-              o=cylinder(name,mid,radius,vec.length,material); o.rotation_mode='QUATERNION'; o.rotation_quaternion=vec.to_track_quat('Z','Y'); return o
-          
-          # Stage: a designed, colored 3D set, not a flat image.
-          cube('Floor',(0,0,-.18),(12,12,.35),floor,.12)
-          cube('Back wall',(0,3.0,3.3),(12,.35,7),wall,.12)
-          for x in (-5.3,5.3): cube('Side wall',(x,0,3.3),(.28,6.2,7),wall,.08)
-          # luminous wall strips and floor markings
-          for x in (-4.7,4.7): cube('Neon architectural strip',(x,2.78,3.2),(.07,.035,5.8),gold,.025)
-          for x in (-3,-1,1,3): cube('Floor inlay',(x,-.4,.005),(.025,6,.012),metal,.005)
-          
-          # Theme-specific 3D story prop.
-          if a.theme in ('elevator','elevator_zero','hotel','hospital','basement','door','door_self','doorbell','hiddenroom'):
-              cube('Elevator surround',(0,2.55,2.0),(3.25,.35,4.3),metal,.12)
-              left=cube('Elevator left door',(-.72,2.30,2.0),(1.38,.16,3.75),mat('Door blue',(.12,.3,.48)),.08)
-              right=cube('Elevator right door',(.72,2.30,2.0),(1.38,.16,3.75),mat('Door violet',(.28,.16,.48)),.08)
-              left.keyframe_insert('location',frame=1); left.location.x=-1.55; left.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.45)))
-              right.keyframe_insert('location',frame=1); right.location.x=1.55; right.keyframe_insert('location',frame=max(2,int(a.duration*a.fps*.45)))
-              for z in (1.25,2.0,2.75): sphere('Elevator button',(1.95,2.15,z),(.07,.07,.07),gold)
-          elif a.theme in ('mirror','window','window_face','photo','camera','album'):
-              cube('Mirror frame',(0,2.55,2.3),(2.6,.22,3.7),gold,.15); cube('Reflective dark glass',(0,2.40,2.3),(2.3,.08,3.4),mat('Mirror glass',(.06,.19,.27),.12,.8),.05)
-          elif a.theme in ('phone','phonebook','radio','cassette','piano','clock','clock_backwards','tea','key','book'):
-              cube('Antique table',(0,1.5,.65),(2.6,1.3,.18),mat('Wood',(.24,.095,.045)),.08)
-              for x in (-1,1):
-                  for y in (1.05,1.95): cube('Table leg',(x,y,.28),(.12,.12,.65),mat('Dark wood',(.12,.055,.03)),.035)
-              if a.theme in ('phone','phonebook'):
-                  cube('Glowing phone',(0,1.45,.88),(.52,.25,.12),mat('Phone casing',(.025,.035,.05),.2,.6),.04); cube('Phone screen',(0,1.31,.95),(.40,.012,.07),gold,.01)
-              else:
-                  sphere('Mysterious artifact',(0,1.45,1.02),(.42,.32,.24),gold)
-          elif a.theme in ('train','station','bus','busstop','missing_passenger','ship','ferry'):
-              cube('Vehicle body',(0,2.15,1.65),(4.6,.75,2.2),mat('Vehicle enamel',(.12,.34,.53)),.22)
-              for x in (-1.55,-.5,.5,1.55): cube('Vehicle window',(x,1.75,2.0),(.72,.06,.72),mat('Window glass',(.08,.28,.4),.1,.5),.05)
-              for x in (-1.5,1.5): cylinder('Wheel',(x,1.68,.55),.34,.18,shoe,(math.pi/2,0,0))
-          elif a.theme == 'lighthouse':
-              # Coastal lighthouse set: sea, wet rocks, tower, lantern room and a visible beam.
-              sea=mat('Night sea',(.012,.055,.095),.24,.22); stone=mat('Weathered lighthouse stone',(.34,.39,.42),.82); rock=mat('Wet coastal rock',(.045,.065,.075),.28,.18)
-              cube('Dark sea',(0,2.8,-.05),(14,8,.35),sea,.08)
-              cube('Rocky promontory',(0,1.0,.18),(5.5,3.8,.65),rock,.28)
-              cylinder('Lighthouse tower',(0,1.25,2.15),.62,3.8,stone)
-              cylinder('Lantern gallery',(0,1.25,4.12),.82,.22,metal)
-              cylinder('Lantern glass',(0,1.25,4.48),.55,.55,mat('Lantern glass',(.9,.58,.2),.12,.15))
-              cylinder('Lantern roof',(0,1.25,4.82),.72,.22,mat('Roof',(.12,.035,.025),.4))
-              for z in (1.0,1.8,2.6,3.4): cube('Tower slit window',(0,.61,z),(.13,.035,.28),gold,.025)
-              bpy.ops.object.light_add(type='SPOT',location=(0,1.1,4.5)); beam=bpy.context.object; beam.data.energy=1800; beam.data.color=(1.0,.72,.38); beam.data.spot_size=math.radians(34); beam.data.spot_blend=.65; beam.rotation_euler=(math.radians(75),0,math.radians(-22))
-              for i in range(5):
-                  x=-2.0+i*1.0; sphere('Coastal boulder',(x,-.15,.38),(.42,.5,.34),rock)
-          elif a.theme in ('forest','pine_forest','road','bridge','lake','swing','cabin'):
-              for i in range(7):
-                  x=-4.5+i*1.5
-                  cylinder('Tree trunk',(x,2.25,1.25),.15,2.5,mat('Bark',(.18,.075,.035)))
-                  bpy.ops.mesh.primitive_cone_add(vertices=12, radius1=.85, radius2=0, depth=2.2, location=(x,2.25,2.9)); bpy.context.object.data.materials.append(mat('Bright pine',(.045,.27,.16)))
-          else:
-              cube('Mysterious doorway',(0,2.55,2.0),(2.4,.22,3.8),gold,.08)
-              cube('Door dark inset',(0,2.39,2.0),(2.1,.08,3.5),mat('Door interior',(.018,.028,.055)),.04)
-          
-          # Ara 3D Gen: PBR dokulu, Mixamo uyumlu rigli GLB karakterleri içe aktar.
-          def import_rig(glb_path, label, x_position, target_height=3.15):
-              from pathlib import Path
-              path=Path(glb_path)
-              if not path.is_file() or path.stat().st_size < 150000:
-                  raise RuntimeError('Karakter GLB dosyası eksik veya bozuk: '+str(path))
-              with path.open('rb') as f:
-                  if f.read(4) != b'glTF':
-                      raise RuntimeError('Geçerli GLB başlığı bulunamadı: '+str(path))
-              before=set(bpy.data.objects)
-              bpy.ops.import_scene.gltf(filepath=str(path))
-              imported=[o for o in bpy.data.objects if o not in before]
-              meshes=[o for o in imported if o.type=='MESH']
-              rigs=[o for o in imported if o.type=='ARMATURE']
-              if not meshes or not rigs:
-                  raise RuntimeError(label+' GLB içinde mesh veya armature bulunamadı.')
-              arm=rigs[0]
-              bounds=[o.matrix_world @ Vector(corner) for o in meshes for corner in o.bound_box]
-              min_z=min(v.z for v in bounds); max_z=max(v.z for v in bounds)
-              scale=target_height/max(0.01,max_z-min_z)
-              root=bpy.data.objects.new(label+' cinematic root',None)
-              bpy.context.scene.collection.objects.link(root)
-              root.location=(x_position,-1.0,-min_z*scale)
-              root.scale=(scale,scale,scale)
-              for obj in imported:
-                  if obj.parent is None:
-                      obj.parent=root
-                      obj.matrix_parent_inverse=__import__('mathutils').Matrix.Identity(4)
-              # GLB içindeki gerçek hareket kliplerini kullan; statik procedural kemik sallama yok.
-              actions=list(bpy.data.actions)
-              preferred=('idle','talk','walk','slouch')
-              chosen=None
-              for token in preferred:
-                  chosen=next((act for act in actions if token in act.name.lower()),None)
-                  if chosen: break
-              if chosen:
-                  if not arm.animation_data: arm.animation_data_create()
-                  arm.animation_data.action=chosen
-                  print(label,'animasyon klibi:',chosen.name)
-              else:
-                  print('UYARI:',label,'GLB içinde adında Idle/Talk/Walk bulunan animasyon bulunamadı.')
-              return root,arm,meshes
-
-          frames=a.frame_count if a.frame_count>0 else max(2,round(a.duration*a.fps))
-          mid=max(2,frames//2); end=frames
-          rain=import_rig(a.rain_file,'rain',-.65)
-          actors=[(*rain,'rain')]
-          if a.scene>=4:
-              snow=import_rig(a.snow_file,'snow',1.35)
-              actors.append((*snow,'snow'))
-
-          def read_audio_levels(filename,offset,count,fps):
-              import wave, array
-              try:
-                  with wave.open(filename,'rb') as w:
-                      if w.getsampwidth()!=2: return [0.0]*count
-                      rate=w.getframerate(); channels=w.getnchannels()
-                      samples=array.array('h'); samples.frombytes(w.readframes(w.getnframes()))
-                      if sys.byteorder!='little': samples.byteswap()
-                      result=[]
-                      for i in range(count):
-                          lo=int((offset+i/fps)*rate)*channels
-                          hi=int((offset+(i+1)/fps)*rate)*channels
-                          part=samples[lo:hi]
-                          rms=math.sqrt(sum(float(v)*v for v in part)/len(part))/32768.0 if part else 0.0
-                          result.append(min(1.0,rms*5.0))
-                      return result
-              except Exception as exc:
-                  print('Ses dalga bicimi okunamadi; agiz kontrolu sifirlandi:',exc)
-                  return [0.0]*count
-
-          levels=read_audio_levels(a.audio_file,a.audio_offset,frames,a.fps)
-          for actor_index,(root,arm,meshes,actor_name) in enumerate(actors):
-              root.keyframe_insert('location',frame=1)
-              root.location.x += (1.05 if a.scene in (1,2) else .35 if a.scene in (3,4) else -.55)
-              root.keyframe_insert('location',frame=end)
-              root.rotation_euler[2]=0; root.keyframe_insert('rotation_euler',frame=1)
-              root.rotation_euler[2]=rng.choice([-.16,.16]) if a.scene>=3 else 0
-              root.keyframe_insert('rotation_euler',frame=mid)
-              # Imported mocap action drives the body; the root keyframes below add subtle blocking.
-              face_keys=[]
-              for mesh in meshes:
-                  if mesh.data.shape_keys:
-                      for key in mesh.data.shape_keys.key_blocks:
-                          if any(k in key.name.lower() for k in ('jawopen','jaw_open','mouthopen','mouth_open')):
-                              face_keys.append(key)
-              jaw_bones=[pb for pb in arm.pose.bones if 'jaw' in pb.name.lower() or 'mouth' in pb.name.lower()]
-              for fr,level in enumerate(levels,1):
-                  for key in face_keys:
-                      key.value=level
-                      key.keyframe_insert(data_path='value',frame=fr,group='Audio-driven mouth')
-                  for pb in jaw_bones:
-                      pb.rotation_mode='XYZ'; pb.rotation_euler[0]=level*.22
-                      pb.keyframe_insert(data_path='rotation_euler',frame=fr,group='Audio-driven jaw')
-              for mesh in meshes:
-                  if not mesh.data.shape_keys: continue
-                  for key in mesh.data.shape_keys.key_blocks:
-                      if 'blink' in key.name.lower() or 'eye_close' in key.name.lower():
-                          for bf in (max(2,int(frames*.32)),max(2,int(frames*.76))):
-                              key.value=1.0; key.keyframe_insert(data_path='value',frame=bf)
-                              key.value=0.0; key.keyframe_insert(data_path='value',frame=min(frames,bf+2))
-
-          # Cinematic portrait camera, depth and lighting.
-          bpy.ops.object.camera_add(location=(5.6,-10.8,5.0)); cam=bpy.context.object
-          cam.rotation_euler=(Vector((0,.4,1.9))-cam.location).to_track_quat('-Z','Y').to_euler(); cam.data.lens=48; bpy.context.scene.camera=cam
-          # Yazilimsal GPU'da DOF pahali; sinematik lens acisi korunup DOF kapatildi.
-          cam.data.dof.use_dof=False
-          for loc, power, size, color in [((-3,-4,7),1150,5,(.25,.55,1)),((4,1,6),1450,4,(1,.28,.12)),((0,3,5),900,3,(1,.65,.28))]:
-              bpy.ops.object.light_add(type='AREA',location=loc); light=bpy.context.object; light.data.energy=power; light.data.shape='DISK'; light.data.size=size; light.data.color=color; light.rotation_euler=(Vector((0,0,1.5))-light.location).to_track_quat('-Z','Y').to_euler()
-          
-          scene=bpy.context.scene
-          engines={item.identifier for item in scene.render.bl_rna.properties['engine'].enum_items}
-          if 'BLENDER_EEVEE_NEXT' in engines:
-              scene.render.engine='BLENDER_EEVEE_NEXT'
-          elif 'BLENDER_EEVEE' in engines:
-              scene.render.engine='BLENDER_EEVEE'
-          else:
-              scene.render.engine='CYCLES'
-              scene.cycles.samples=2
-              scene.cycles.use_denoising=True
-          # GitHub Actions llvmpipe yazilimsal renderi icin dusuk maliyetli EEVEE ayarlari.
-          if hasattr(scene,'eevee'): scene.eevee.taa_render_samples=2
-          if hasattr(scene,'eevee_next'): scene.eevee_next.taa_render_samples=2
-          scene.world.color=(.012,.018,.04)
-          if scene.world and scene.world.use_nodes:
-              bg=scene.world.node_tree.nodes.get('Background')
-              if bg: bg.inputs['Color'].default_value=(.012,.018,.04,1); bg.inputs['Strength'].default_value=.22
-          scene.render.resolution_x=a.width; scene.render.resolution_y=a.height; scene.render.resolution_percentage=100
-          scene.render.fps=a.fps; scene.frame_start=1; scene.frame_end=frames
-          scene.render.image_settings.file_format='FFMPEG'; scene.render.ffmpeg.format='MPEG4'; scene.render.ffmpeg.codec='H264'; scene.render.ffmpeg.constant_rate_factor='HIGH'; scene.render.ffmpeg.ffmpeg_preset='GOOD'
-          scene.render.filepath=a.output; scene.render.use_file_extension=True
-          scene.view_settings.view_transform='AgX'; scene.view_settings.look='AgX - Medium High Contrast'; scene.view_settings.exposure=0; scene.view_settings.gamma=1
-          scene.render.film_transparent=False
-          scene.frame_set(1)
-          bpy.ops.render.render(animation=True)
-          BLENDER
-
           cat > create_video.py <<'PY'
           import os, io, json, time, wave, subprocess, random, math, asyncio
           from pathlib import Path
@@ -418,7 +80,7 @@ jobs:
           from zoneinfo import ZoneInfo
           import requests
           import numpy as np
-          from PIL import Image, ImageDraw, ImageFont
+          from PIL import Image, ImageDraw, ImageFont, ImageOps
           import edge_tts
           from google.oauth2.credentials import Credentials
           from google.auth.transport.requests import Request
@@ -432,11 +94,12 @@ jobs:
           CLIPS = OUT / 'clips'
           VOICE_DIR = OUT / 'voice'
           HISTORY_FILE = ROOT / 'data' / 'youtube_history.json'
-          # Yazilimsal OpenGL (llvmpipe) icin render maliyetini dusur; final FFmpeg 1080x1920'ye yukseltiyor.
+          # Ucretsiz lisansli sahne fotograflari 768x1365 hazirlanir; final video 1080x1920 kodlanir.
           WIDTH, HEIGHT, FPS = 480, 854, 20
           OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
-          TARGET_SECONDS = 45.0  # Gercek seslendirme uzunluguna gore 35-75 sn araliginda ayarlanir.
+          TARGET_SECONDS = 30.0
           SCENE_COUNT = 5
+          IMAGE_DIR = OUT / 'scene_images'
           SAMPLE_RATE = 22050
           TTS_VOICE = 'tr-TR-EmelNeural'
           YOUTUBE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID', '').strip()
@@ -911,8 +574,14 @@ jobs:
           if any(len(item[3]) != 4 for item in TOPICS):
               raise RuntimeError('Her konu tam 4 bilgi sahnesi icermeli.')
 
-          for folder in (OUT, CAPTIONS, CLIPS, VOICE_DIR, HISTORY_FILE.parent):
+          for folder in (OUT, CAPTIONS, CLIPS, VOICE_DIR, HISTORY_FILE.parent, IMAGE_DIR):
               folder.mkdir(parents=True, exist_ok=True)
+          # Prevent stale scene files from a previous/manual run from passing the upload gate.
+          for stale in IMAGE_DIR.glob('scene_*.jpg'):
+              stale.unlink()
+          source_manifest = OUT / 'image_sources.json'
+          if source_manifest.exists():
+              source_manifest.unlink()
 
           required = {
               'YOUTUBE_CLIENT_ID': YOUTUBE_CLIENT_ID,
@@ -924,6 +593,7 @@ jobs:
               raise RuntimeError('GitHub Secrets eksik: ' + ', '.join(missing))
           if YOUTUBE_PRIVACY not in ('public', 'private', 'unlisted'):
               raise RuntimeError('YOUTUBE_PRIVACY public/private/unlisted olmali.')
+          print('Ucretsiz goruntu kaynagi: Wikimedia Commons API (API anahtari/odeme gerektirmez).')
 
           now = datetime.now(ZoneInfo('Europe/Istanbul'))
           slot = (f'{now:%Y-%m-%d}-' + ('sabah' if now.hour < 15 else 'aksam')
@@ -940,28 +610,19 @@ jobs:
               raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin durduruldu; TOPICS havuzuna yeni konular ekleyin.')
           topic_id, title, category, facts = available[0]
           visual_theme = paranormal_visual_kind(topic_id, title)
-          # Hikayeye gore iki ucretsiz Edge Turkce anlatim sesinden biri secilir.
-          voice_choices = ('tr-TR-EmelNeural', 'tr-TR-AhmetNeural')
-          TTS_VOICE = voice_choices[int.from_bytes(__import__('hashlib').sha256(topic_id.encode()).digest()[:2], 'big') % len(voice_choices)]
           print(f'Konu: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
-          hooks = (
-              'Bu kayıttaki son ayrıntıyı kimse açıklayamadı.',
-              'O gece yaşananları anlatan kişi, bir daha aynı yere dönmedi.',
-              'Başta küçük bir tesadüf sandılar; sonra ayrıntılar değişti.',
-              'Bu hikâyenin en korkunç kısmı, her şey bittikten sonra ortaya çıktı.',
-              'İlk başta kimse ona inanmadı. Ta ki kanıtı görene kadar.',
-              'Olayı araştıranlar tek bir soruya cevap bulamadı.'
-          )
-          hook_index = int.from_bytes(__import__('hashlib').sha256((topic_id + slot).encode()).digest()[:2], 'big') % len(hooks)
-          scenes = [(hooks[hook_index], '')] + [(story_beat, '') for story_beat in facts]
+          scenes = [
+              (f'{title}. Her şey o gece başladı.', ''),
+              *((story_beat, '') for story_beat in facts),
+          ]
           assert len(scenes) == SCENE_COUNT
           (OUT / 'video-plani.json').write_text(json.dumps({
               'topic_id': topic_id, 'title': title, 'category': category,
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
               'visual_theme': visual_theme,
-              'style': 'cinematic realistic 3D horror scenes rendered in Blender with PBR rigged human GLB characters, atmospheric lighting, story-specific environments, animated props and character actions; scene visuals follow narration; no static-image slideshow',
+              'style': 'five distinct photorealistic cinematic 9:16 AI still images, one per narration beat; no Blender, no procedural characters, no toy-like figures, no repeated background; subtle camera movement on each still',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
-              'voice': TTS_VOICE, 'duration_seconds': 'voice_adaptive_35_to_75_seconds'
+              'voice': TTS_VOICE, 'duration_seconds': 30, 'image_source': 'Wikimedia Commons (free licensed photographs)'
           }, ensure_ascii=False, indent=2), encoding='utf-8')
 
           FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
@@ -1015,7 +676,6 @@ jobs:
 
 
           def make_voice_tracks():
-              global TARGET_SECONDS
               print('1/5 Ucretsiz Turkce seslendirme olusturuluyor...')
               raw_files, raw_durations = [], []
               for i, (caption, _) in enumerate(scenes, 1):
@@ -1026,19 +686,16 @@ jobs:
                       raise RuntimeError(f'{i}. sahnenin seslendirmesi gecersiz.')
                   raw_files.append(mp3)
                   raw_durations.append(duration)
-                  print(f'Ses {i}/{len(scenes)}: {duration:.2f} saniye | anlatıcı={TTS_VOICE}')
+                  print(f'Ses {i}/{SCENE_COUNT}: {duration:.2f} saniye')
 
               total = sum(raw_durations)
-              if total > 120:
-                  raise RuntimeError('Hikaye seslendirmesi 120 saniyeyi asti; metinler kisaltilmali.')
-              # Hikayenin dogal uzunlugunu koru; gereksiz 30 saniyelik kesme yapma.
-              TARGET_SECONDS = max(35.0, min(75.0, total + 3.5))
               speed_factor = max(1.0, total / (TARGET_SECONDS - 0.15))
               if speed_factor > 1.65:
-                  raise RuntimeError('Hikaye 75 saniyeye dogal hizda sigmiyor; metinler kisaltilmali.')
+                  raise RuntimeError('Seslendirme 30 saniyeye sigmiyor; metinler kisaltilmali.')
               spoken_durations = [d / speed_factor for d in raw_durations]
-              extra_each = max(0.0, (TARGET_SECONDS - sum(spoken_durations)) / len(scenes))
+              extra_each = max(0.0, (TARGET_SECONDS - sum(spoken_durations)) / SCENE_COUNT)
               scene_durations = [d + extra_each for d in spoken_durations]
+              # Son klipte kayan nokta farkini kapat; toplam tam 30 saniye olsun.
               scene_durations[-1] += TARGET_SECONDS - sum(scene_durations)
 
               padded_files = []
@@ -1055,614 +712,40 @@ jobs:
               run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat_list),
                           '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(voice)])
               actual = probe_duration(voice)
+              # Concat/MP3 zaman damgalarindaki kucuk farklari son WAV dosyasinda duzelt.
+              # Buyuk sapmalari sessizce kapatmak yerine hata ver; 0.5 saniyeden fazlasi
+              # seslendirme veya sahne zamanlamasinda gercek bir soruna isaret eder.
               if actual <= 0 or abs(actual - TARGET_SECONDS) > 0.5:
-                  raise RuntimeError(f'Seslendirme suresi beklenenden fazla sasti: {actual:.3f}s (hedef {TARGET_SECONDS:.2f}s).')
-              fixed_voice = VOICE_DIR / 'narration_exact.wav'
-              exact_filter = f'apad=whole_dur={TARGET_SECONDS:.6f},atrim=duration={TARGET_SECONDS:.6f},asetpts=N/SR/TB'
-              run_ffmpeg(['-i', str(voice), '-af', exact_filter, '-ar', '44100', '-ac', '2',
-                          '-c:a', 'pcm_s16le', str(fixed_voice)])
+                  raise RuntimeError(
+                      f'Seslendirme suresi beklenenden fazla sasti: {actual:.3f}s '
+                      f'(hedef {TARGET_SECONDS:.2f}s).'
+                  )
+
+              fixed_voice = VOICE_DIR / 'narration_exact_30s.wav'
+              exact_filter = (
+                  f'apad=whole_dur={TARGET_SECONDS:.6f},'
+                  f'atrim=duration={TARGET_SECONDS:.6f},'
+                  'asetpts=N/SR/TB'
+              )
+              run_ffmpeg([
+                  '-i', str(voice), '-af', exact_filter,
+                  '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le',
+                  str(fixed_voice)
+              ])
+              fixed_actual = probe_duration(fixed_voice)
+              if abs(fixed_actual - TARGET_SECONDS) > 0.002:
+                  raise RuntimeError(
+                      f'Seslendirme 30 saniyeye sabitlenemedi: {fixed_actual:.3f}s'
+                  )
+
               fixed_voice.replace(voice)
               actual = probe_duration(voice)
-              if abs(actual - TARGET_SECONDS) > 0.01:
-                  raise RuntimeError(f'Seslendirme hedef suresine ayarlanamadi: {actual:.3f}s')
-              print(f'Dogal video suresi: {actual:.2f} saniye')
+              if abs(actual - TARGET_SECONDS) > 0.002:
+                  raise RuntimeError(
+                      f'Son seslendirme suresi 30 saniye degil: {actual:.3f}s'
+                  )
+              print(f'Seslendirme kesin suresi: {actual:.3f} saniye')
               return voice, scene_durations
-
-
-          def gradient(top, bottom):
-              arr = np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)
-              for y in range(HEIGHT):
-                  t = y / max(1, HEIGHT - 1)
-                  arr[y, :, :] = [int(top[k] * (1-t) + bottom[k] * t) for k in range(3)]
-              return Image.fromarray(arr, 'RGB')
-
-
-
-
-
-
-
-          def make_paranormal_background(topic_id, scene_no, seed):
-              """Draw a different illustrated setting for the selected paranormal story."""
-              kind = paranormal_visual_kind(topic_id, title)
-              rng = random.Random(seed + scene_no * 101)
-              palettes = {
-                  'phone': ((9, 12, 30), (35, 31, 48)), 'hotel': ((10, 13, 29), (35, 34, 48)),
-                  'mirror': ((8, 12, 29), (31, 36, 57)), 'forest': ((4, 16, 20), (20, 37, 38)),
-                  'train': ((8, 14, 31), (31, 34, 50)), 'lighthouse': ((5, 18, 35), (19, 44, 61)),
-                  'attic': ((13, 10, 23), (42, 31, 35)), 'photo': ((12, 12, 27), (42, 31, 42)),
-                  'chair': ((9, 12, 26), (34, 29, 38)), 'hospital': ((7, 16, 28), (30, 43, 54)),
-                  'elevator': ((9, 13, 26), (36, 38, 51)), 'bell': ((10, 13, 30), (37, 35, 47)),
-                  'door': ((7, 11, 25), (34, 30, 42)), 'piano': ((8, 9, 22), (34, 26, 34)),
-                  'wall': ((9, 12, 24), (37, 30, 39)), 'ship': ((3, 16, 31), (14, 40, 56)),
-                  'window': ((8, 12, 27), (29, 32, 47)), 'dream': ((13, 15, 42), (46, 39, 76)),
-                  'busstop': ((7, 15, 29), (31, 39, 52)), 'umbrella': ((8, 13, 25), (28, 34, 42)),
-                  'cassette': ((10, 10, 24), (39, 29, 35)), 'classroom': ((8, 14, 28), (34, 37, 48)),
-                  'shop': ((8, 13, 27), (36, 34, 42)), 'bridge': ((6, 15, 29), (28, 38, 48)),
-                  'clock': ((9, 12, 29), (35, 33, 47)), 'cabin': ((5, 16, 29), (31, 43, 53)),
-                  'phonebook': ((10, 12, 27), (39, 31, 42)), 'museum': ((12, 13, 27), (43, 37, 45)),
-                  'lantern': ((5, 17, 24), (26, 40, 39)), 'rainhouse': ((7, 15, 29), (31, 42, 53)),
-                  'swing': ((6, 15, 27), (30, 40, 46)), 'bus': ((7, 13, 27), (31, 35, 47)),
-                  'rooftop': ((7, 12, 28), (29, 33, 47)), 'silhouette': ((6, 8, 20), (25, 25, 38)),
-                  'carousel': ((15, 10, 29), (48, 29, 49)), 'lake': ((3, 17, 31), (15, 43, 57)),
-                  'station': ((7, 13, 29), (32, 38, 52)), 'basement': ((6, 8, 20), (27, 25, 34)),
-                  'map': ((9, 12, 25), (37, 31, 37)), 'camera': ((8, 11, 27), (35, 31, 44)),
-                  'coldspot': ((5, 17, 35), (26, 39, 59)), 'fingerprints': ((7, 15, 29), (30, 38, 51)),
-                  'key': ((9, 11, 24), (37, 30, 38)), 'cinema': ((8, 7, 20), (34, 24, 36)),
-                  'book': ((9, 12, 25), (37, 31, 40)), 'doorbell': ((8, 12, 25), (35, 30, 39)),
-                  'road': ((5, 13, 26), (24, 33, 46)), 'shadow': ((7, 8, 21), (31, 27, 39)),
-                  'radio': ((8, 11, 24), (37, 30, 37)), 'tea': ((11, 12, 25), (40, 30, 34)),
-                  'album': ((10, 10, 24), (40, 29, 36)), 'hiddenroom': ((8, 10, 23), (34, 28, 37)),
-                  'ferry': ((4, 16, 31), (17, 42, 55)), 'footprints': ((5, 14, 28), (29, 38, 49)),
-                  'pine_forest': ((3, 20, 18), (15, 47, 37)), 'elevator_zero': ((8, 10, 28), (25, 28, 55)),
-                  'door_self': ((20, 8, 14), (49, 22, 28)), 'window_face': ((10, 9, 27), (40, 20, 38)),
-                  'missing_passenger': ((5, 16, 32), (17, 36, 58)), 'clock_backwards': ((22, 9, 16), (48, 22, 31)),
-              }
-              top, bottom = palettes.get(kind, ((5, 8, 22), (25, 28, 43)))
-              img = gradient(top, bottom)
-              d = ImageDraw.Draw(img, 'RGBA')
-              # Night sky / ambient light, adjusted per scene so the six shots do not look identical.
-              moon_x = 430 if scene_no % 2 else 105
-              d.ellipse((moon_x-46, 95, moon_x+46, 187), fill=(190, 205, 225, 95))
-              for _ in range(24):
-                  x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT // 2)
-                  d.ellipse((x, y, x+2, y+2), fill=(190, 210, 235, rng.randrange(45, 125)))
-
-              if kind in ('forest', 'pine_forest', 'cabin', 'lantern', 'umbrella', 'rainhouse', 'road', 'footprints', 'shadow', 'bridge', 'rooftop'):
-                  d.polygon([(0, 700), (110, 620), (210, 710), (360, 610), (540, 700), (540, 960), (0, 960)], fill=(7, 22, 25, 255))
-                  for x in (18, 92, 445, 520):
-                      d.line((x, 820, x-8, 300), fill=(3, 10, 15, 255), width=17)
-                      for j in range(4):
-                          yy = 390 + j*82
-                          d.line((x, yy, x-65+j*8, yy-65), fill=(3, 10, 15, 255), width=9)
-                          d.line((x, yy+10, x+60-j*8, yy-60), fill=(3, 10, 15, 255), width=8)
-              elif kind in ('ship', 'ferry', 'lake', 'lighthouse'):
-                  d.rectangle((0, 610, WIDTH, HEIGHT), fill=(4, 25, 43, 255))
-                  for y in (690, 760, 835):
-                      pts = [(x, y + 8*math.sin(x/35 + scene_no)) for x in range(0, WIDTH+8, 8)]
-                      d.line(pts, fill=(70, 150, 180, 90), width=3)
-              elif kind in ('train', 'bus', 'busstop', 'missing_passenger', 'station'):
-                  d.rectangle((0, 730, WIDTH, HEIGHT), fill=(20, 23, 34, 255))
-                  d.polygon([(0, 960), (190, 720), (350, 720), (540, 960)], fill=(9, 13, 22, 255))
-                  d.line((250, 720, 45, 960), fill=(125, 130, 140, 120), width=5)
-                  d.line((290, 720, 495, 960), fill=(125, 130, 140, 120), width=5)
-              else:
-                  d.rectangle((0, 760, WIDTH, HEIGHT), fill=(12, 13, 24, 255))
-                  d.line((0, 760, WIDTH, 760), fill=(95, 95, 115, 100), width=3)
-
-              # Story-specific landmarks: the setting itself identifies the episode before the character moves.
-              if kind == 'pine_forest':
-                  for x in (65, 180, 360, 475):
-                      d.polygon([(x-58, 650), (x, 270), (x+58, 650)], fill=(5, 35, 27, 255), outline=(30, 75, 53, 220))
-                      d.polygon([(x-45, 520), (x, 190), (x+45, 520)], fill=(4, 27, 23, 255))
-              elif kind == 'elevator_zero':
-                  d.rectangle((165, 235, 375, 745), fill=(12, 16, 29, 255), outline=(125, 145, 165, 255), width=10)
-                  d.rectangle((205, 145, 335, 220), fill=(4, 6, 14, 255), outline=(180, 190, 205, 255), width=4)
-                  d.text((270, 182), '-1', fill=(255, 75, 75, 255), anchor='mm')
-              elif kind == 'door_self':
-                  d.rectangle((135, 230, 405, 755), fill=(33, 18, 20, 255), outline=(170, 115, 95, 255), width=10)
-                  d.ellipse((345, 485, 375, 515), fill=(230, 180, 100, 255))
-                  d.line((270, 240, 270, 745), fill=(90, 45, 42, 255), width=5)
-              elif kind == 'window_face':
-                  d.rectangle((95, 205, 445, 700), fill=(5, 9, 23, 255), outline=(180, 90, 100, 255), width=14)
-                  d.line((270, 205, 270, 700), fill=(110, 65, 80, 220), width=5)
-              elif kind == 'missing_passenger':
-                  d.rectangle((45, 275, 495, 510), fill=(9, 19, 31, 255), outline=(130, 145, 160, 255), width=8)
-                  d.line((80, 510, 80, 760), fill=(150, 155, 160, 255), width=8)
-                  d.line((460, 510, 460, 760), fill=(150, 155, 160, 255), width=8)
-              elif kind == 'clock_backwards':
-                  d.ellipse((115, 210, 425, 520), fill=(35, 13, 20, 255), outline=(220, 145, 95, 255), width=14)
-                  d.text((270, 365), '13', fill=(255, 90, 90, 255), anchor='mm', stroke_width=2, stroke_fill=(50, 5, 10, 255))
-              if kind == 'phone':
-                  d.rectangle((55, 250, 485, 760), fill=(13, 17, 31, 255), outline=(70, 78, 98, 180), width=5)
-                  d.rectangle((80, 285, 220, 485), fill=(9, 18, 34, 255), outline=(100, 110, 130, 150), width=5)
-                  d.rectangle((120, 650, 420, 760), fill=(74, 46, 39, 255))
-              elif kind == 'hotel':
-                  for x in (40, 175, 325, 455):
-                      d.rectangle((x-38, 245, x+38, 720), fill=(22, 24, 39, 255), outline=(105, 91, 79, 180), width=4)
-                      d.ellipse((x+20, 470, x+28, 478), fill=(235, 185, 95, 230))
-                  d.line((270, 180, 270, 760), fill=(95, 90, 100, 120), width=3)
-              elif kind in ('mirror', 'photo', 'camera', 'album'):
-                  d.rectangle((130, 240, 410, 680), fill=(25, 26, 39, 255), outline=(177, 145, 100, 255), width=12)
-                  d.rectangle((151, 260, 389, 655), fill=(10, 20, 35, 255))
-              elif kind == 'attic':
-                  d.polygon([(0, 430), (270, 170), (540, 430), (540, 960), (0, 960)], fill=(25, 19, 26, 255), outline=(95, 72, 61, 255))
-                  d.rectangle((190, 310, 350, 410), fill=(7, 9, 17, 255), outline=(130, 105, 78, 255), width=6)
-              elif kind == 'hospital':
-                  for x in (70, 390):
-                      d.rectangle((x, 220, x+85, 720), fill=(17, 28, 38, 255), outline=(90, 110, 120, 180), width=4)
-                  d.line((270, 160, 270, 760), fill=(130, 150, 160, 70), width=3)
-              elif kind in ('elevator', 'elevator_zero', 'door', 'door_self', 'basement', 'doorbell', 'hiddenroom', 'key'):
-                  d.rectangle((150, 245, 390, 740), fill=(23, 24, 35, 255), outline=(120, 103, 85, 255), width=8)
-                  d.line((270, 245, 270, 740), fill=(80, 77, 81, 255), width=4)
-              elif kind == 'piano':
-                  d.rectangle((55, 455, 485, 750), fill=(8, 9, 14, 255), outline=(130, 105, 80, 255), width=5)
-                  d.rectangle((85, 655, 455, 710), fill=(225, 218, 195, 255))
-                  for x in range(105, 450, 34):
-                      d.line((x, 655, x, 710), fill=(30, 30, 35, 255), width=2)
-              elif kind == 'wall':
-                  d.rectangle((35, 270, 505, 760), fill=(47, 43, 48, 255), outline=(110, 95, 95, 170), width=5)
-                  for y in range(320, 740, 55):
-                      d.line((45, y, 495, y), fill=(100, 82, 78, 100), width=2)
-              elif kind in ('window', 'window_face', 'fingerprints'):
-                  d.rectangle((100, 210, 440, 680), fill=(8, 18, 33, 255), outline=(110, 105, 105, 255), width=12)
-                  d.line((270, 210, 270, 680), fill=(105, 110, 125, 220), width=6)
-                  d.line((100, 445, 440, 445), fill=(105, 110, 125, 220), width=6)
-              elif kind == 'dream':
-                  d.ellipse((90, 470, 250, 630), fill=(22, 30, 54, 255))
-                  d.ellipse((285, 460, 450, 630), fill=(24, 29, 55, 255))
-                  for i in range(3):
-                      d.arc((120+i*20, 220+i*30, 430-i*20, 460+i*25), 185, 350, fill=(130, 145, 210, 100), width=5)
-              elif kind in ('cassette', 'phonebook', 'radio', 'tea', 'map', 'book', 'classroom', 'shop', 'museum', 'clock', 'clock_backwards', 'bell', 'chair', 'coldspot', 'cinema'):
-                  d.rectangle((45, 630, 495, 760), fill=(54, 38, 34, 255))
-                  d.line((45, 630, 495, 630), fill=(145, 112, 83, 190), width=5)
-              elif kind == 'lighthouse':
-                  d.polygon([(360, 690), (395, 290), (455, 290), (490, 690)], fill=(190, 190, 180, 255), outline=(40, 48, 58, 255))
-                  d.rectangle((385, 260, 465, 315), fill=(35, 39, 48, 255), outline=(200, 190, 160, 255), width=5)
-              elif kind == 'cabin' or kind == 'rainhouse':
-                  d.rectangle((130, 500, 420, 770), fill=(45, 34, 29, 255), outline=(130, 100, 75, 255), width=5)
-                  d.polygon([(95, 510), (270, 350), (455, 510)], fill=(28, 24, 29, 255), outline=(125, 95, 75, 255))
-                  d.rectangle((320, 600, 380, 700), fill=(255, 185, 95, 120))
-              elif kind == 'swing':
-                  d.line((160, 280, 380, 280), fill=(115, 105, 90, 255), width=12)
-                  d.line((210, 280, 210, 610), fill=(155, 155, 165, 255), width=5)
-                  d.line((330, 280, 330, 610), fill=(155, 155, 165, 255), width=5)
-              elif kind == 'carousel':
-                  d.line((270, 270, 270, 730), fill=(170, 145, 100, 255), width=12)
-                  d.ellipse((65, 380, 475, 690), fill=(60, 34, 58, 90), outline=(190, 145, 100, 220), width=7)
-              elif kind == 'bridge':
-                  d.arc((25, 430, 515, 820), 180, 360, fill=(120, 125, 135, 255), width=20)
-                  d.line((25, 625, 515, 625), fill=(125, 125, 135, 255), width=12)
-              elif kind in ('clock', 'clock_backwards'):
-                  d.ellipse((150, 250, 390, 490), fill=(32, 30, 39, 255), outline=(185, 155, 105, 255), width=12)
-              elif kind == 'ship' or kind == 'ferry':
-                  d.polygon([(75, 650), (465, 650), (390, 760), (150, 760)], fill=(22, 31, 43, 255), outline=(150, 140, 125, 255))
-                  d.rectangle((190, 535, 360, 650), fill=(34, 39, 49, 255))
-              elif kind == 'train' or kind == 'bus':
-                  d.rectangle((80, 485, 460, 735), fill=(25, 34, 45, 255), outline=(130, 135, 145, 255), width=7)
-                  for x in (125, 215, 305, 395):
-                      d.rectangle((x, 525, x+55, 600), fill=(185, 190, 190, 100), outline=(160, 165, 170, 160), width=3)
-              elif kind in ('station', 'busstop', 'missing_passenger'):
-                  d.rectangle((55, 260, 485, 380), fill=(15, 21, 32, 255), outline=(160, 145, 110, 255), width=5)
-                  d.line((95, 380, 95, 760), fill=(135, 130, 120, 255), width=8)
-                  d.line((445, 380, 445, 760), fill=(135, 130, 120, 255), width=8)
-              elif kind == 'lake':
-                  d.ellipse((205, 450, 335, 580), fill=(120, 205, 240, 70), outline=(150, 225, 255, 180), width=4)
-              elif kind == 'map':
-                  d.polygon([(70, 350), (460, 300), (490, 700), (95, 740)], fill=(164, 139, 100, 220), outline=(70, 55, 42, 255))
-                  for x in range(140, 430, 70):
-                      d.line((x, 370, x+35, 670), fill=(80, 95, 80, 130), width=3)
-              elif kind == 'lantern':
-                  d.line((270, 300, 270, 440), fill=(120, 110, 95, 255), width=8)
-                  d.rectangle((230, 440, 310, 590), fill=(40, 35, 28, 255), outline=(180, 145, 90, 255), width=6)
-              elif kind == 'umbrella':
-                  for x in (145, 270, 395):
-                      d.ellipse((x-42, 660, x+42, 735), fill=(32, 34, 42, 255))
-              elif kind == 'silhouette' or kind == 'shadow' or kind == 'rooftop':
-                  d.rectangle((0, 680, WIDTH, 960), fill=(8, 9, 18, 255))
-                  d.line((0, 680, WIDTH, 680), fill=(85, 83, 98, 150), width=4)
-              return img
-
-
-          def draw_paranormal_subject(d, topic_id, frame_no, total_frames, phase, scene_no, seed):
-              """Animate the object/action that belongs to this exact story topic."""
-              kind = paranormal_visual_kind(topic_id, title)
-              pulse = 0.5 + 0.5 * math.sin(phase * 2.0)
-              wobble = math.sin(phase * 1.7)
-              reveal = min(1.0, max(0.0, (scene_no - 1) / 4.0))
-              glow = int(90 + 120 * pulse)
-              white = (225, 230, 240, 255)
-              gold = (255, 205, 120, 230)
-
-              if kind == 'pine_forest':
-                  for i, x in enumerate((85, 205, 335, 455)):
-                      sway = 18 * math.sin(phase * 1.3 + i)
-                      d.line((x, 330, x+sway, 730), fill=(5, 18, 16, 255), width=18)
-                      for j in range(3):
-                          yy = 390 + j*75
-                          d.line((x+sway, yy, x-70+sway, yy-65), fill=(20, 75, 48, 230), width=12)
-                          d.line((x+sway, yy, x+70+sway, yy-65), fill=(20, 75, 48, 230), width=12)
-                  eyes = int(80 + 150*pulse)
-                  d.ellipse((250, 520, 270, 540), fill=(220, 245, 185, eyes))
-                  d.ellipse((292, 520, 312, 540), fill=(220, 245, 185, eyes))
-              elif kind == 'elevator_zero':
-                  opening = int(25 + 100*(0.5 + 0.5*math.sin(phase*.7)))
-                  d.rectangle((150, 265, 270-opening//2, 740), fill=(65, 73, 88, 255), outline=(190, 195, 205, 255), width=7)
-                  d.rectangle((270+opening//2, 265, 390, 740), fill=(48, 56, 72, 255), outline=(190, 195, 205, 255), width=7)
-                  d.rectangle((205, 150, 335, 225), fill=(4, 6, 14, 255), outline=(185, 190, 200, 255), width=4)
-                  d.text((270, 188), '-1' if scene_no < 4 else '0', fill=(255, 65, 65, glow), anchor='mm')
-                  for i in range(3):
-                      yy = 330 + i*115 + int(12*math.sin(phase*2+i))
-                      d.line((215, yy, 325, yy), fill=(120, 205, 235, 130), width=3)
-              elif kind == 'door_self':
-                  angle = 35 + 22*math.sin(phase*.8)
-                  d.polygon([(155, 265), (385, 265), (385+angle, 740), (155+angle, 740)], fill=(70, 38, 30, 255), outline=(205, 150, 105, 255))
-                  hx = 345 + angle*.75
-                  d.ellipse((hx-13, 485, hx+13, 511), fill=(245, 195, 105, 255))
-                  d.arc((365, 440, 520, 600), 80, 280, fill=(255, 185, 100, glow), width=5)
-              elif kind == 'window_face':
-                  alpha = int(55 + 190*reveal*pulse)
-                  shift = 12*math.sin(phase*.6)
-                  d.ellipse((205+shift, 340, 335+shift, 485), fill=(2, 4, 12, alpha), outline=(180, 195, 220, int(alpha*.65)), width=4)
-                  d.ellipse((232+shift, 395, 247+shift, 410), fill=(230, 235, 245, alpha))
-                  d.ellipse((293+shift, 395, 308+shift, 410), fill=(230, 235, 245, alpha))
-                  d.arc((235+shift, 420, 305+shift, 465), 10, 170, fill=(180, 195, 220, alpha), width=4)
-                  d.rounded_rectangle((220+shift, 480, 320+shift, 665), radius=35, fill=(2, 4, 12, int(alpha*.65)))
-              elif kind == 'missing_passenger':
-                  bus_x = -230 + (frame_no*5 % 850)
-                  d.rounded_rectangle((bus_x, 430, bus_x+330, 650), radius=24, fill=(35, 48, 62, 255), outline=(180, 185, 190, 255), width=6)
-                  for wx in (bus_x+45, bus_x+135, bus_x+225):
-                      d.rectangle((wx, 465, wx+58, 535), fill=(255, 205, 130, int(80+150*pulse)))
-                  d.ellipse((245, 510, 295, 560), fill=(2, 4, 10, int(90+130*reveal)))
-                  d.polygon([(245, 555), (295, 555), (315, 710), (225, 710)], fill=(2, 4, 10, int(90+130*reveal)))
-              elif kind == 'clock_backwards':
-                  d.ellipse((115, 215, 425, 525), fill=(30, 10, 18, 255), outline=(225, 155, 105, 255), width=12)
-                  for i in range(13):
-                      a = i*2*math.pi/13
-                      x = 270+125*math.sin(a); y = 370-125*math.cos(a)
-                      d.ellipse((x-5, y-5, x+5, y+5), fill=(255, 210, 165, 255))
-                  a1 = -phase*.7; a2 = -phase*.09
-                  d.line((270, 370, 270+105*math.sin(a1), 370-105*math.cos(a1)), fill=white, width=8)
-                  d.line((270, 370, 270+75*math.sin(a2), 370-75*math.cos(a2)), fill=gold, width=10)
-                  d.ellipse((258, 358, 282, 382), fill=gold)
-              elif kind in ('phone', 'phonebook'):
-                  x = 270 + 7*math.sin(phase*8)
-                  d.rounded_rectangle((x-76, 420, x+76, 690), radius=24, fill=(8, 11, 19, 255), outline=(160, 170, 185, 255), width=7)
-                  d.rounded_rectangle((x-60, 445, x+60, 635), radius=10, fill=(25, 45, 66, 255))
-                  d.ellipse((x-8, 650, x+8, 666), fill=(180, 185, 195, 255))
-                  d.text((x, 505), '03:17' if kind == 'phone' else '???', fill=(255, 225, 160, 255), anchor='mm')
-                  for r in (95, 125, 155):
-                      d.arc((x-r, 470-r/2, x+r, 470+r/2), 205, 335, fill=(255, 210, 130, int(glow*.7)), width=5)
-                  if scene_no >= 4:
-                      d.ellipse((x-105, 385, x+105, 595), outline=(190, 210, 245, 100), width=4)
-              elif kind == 'hotel':
-                  gap = int(18 + 16*(0.5+0.5*math.sin(phase*.8)))
-                  d.rectangle((155, 275, 385, 725), fill=(7, 10, 19, 255), outline=(175, 150, 112, 255), width=9)
-                  d.rectangle((165, 285, 375-gap, 715), fill=(24, 24, 37, 255))
-                  d.rectangle((375-gap, 285, 385, 715), fill=(5, 7, 14, 255))
-                  d.ellipse((340-gap, 490, 352-gap, 502), fill=gold)
-                  d.text((270, 250), '13', fill=gold, anchor='mm')
-                  d.ellipse((210, 400, 330, 590), fill=(2, 4, 12, int(100+100*reveal)))
-              elif kind == 'mirror':
-                  d.rounded_rectangle((145, 230, 395, 730), radius=85, fill=(22, 35, 50, 255), outline=(190, 165, 125, 255), width=12)
-                  d.ellipse((205, 330, 335, 470), fill=(5, 10, 20, 230))
-                  d.rounded_rectangle((220, 455, 320, 650), radius=35, fill=(5, 10, 20, 230))
-                  lag = 28 + 32*math.sin(phase*.55)
-                  d.ellipse((215+lag, 335, 330+lag, 465), outline=(170, 210, 230, 210), width=5)
-                  d.line((270+lag, 470, 270+lag, 640), fill=(170, 210, 230, 190), width=9)
-              elif kind == 'forest':
-                  for i in range(3):
-                      r = 20 + ((frame_no*3+i*30) % 115)
-                      d.ellipse((270-r, 610-r, 270+r, 610+r), outline=(170, 200, 210, max(25, 150-i*35)), width=4)
-                  sx = 350 + 20*math.sin(phase)
-                  d.ellipse((sx-20, 510, sx+20, 555), fill=(1, 3, 8, 230))
-                  d.rounded_rectangle((sx-27, 550, sx+27, 680), radius=14, fill=(1, 3, 8, 230))
-              elif kind == 'train':
-                  x = 270 + 38*math.sin(phase*.55)
-                  d.polygon([(x-155, 480), (x+155, 480), (x+125, 710), (x-125, 710)], fill=(39, 48, 60, 255), outline=(175, 175, 180, 255))
-                  d.rectangle((x-105, 515, x+105, 610), fill=(9, 17, 29, 255), outline=(195, 180, 145, 255), width=5)
-                  for wx in (x-70, x, x+70):
-                      d.rectangle((wx-20, 530, wx+20, 590), fill=(255, 210, 135, int(100+130*pulse)))
-                  d.ellipse((x-28, 635, x+28, 690), fill=(255, 230, 170, glow))
-              elif kind == 'lighthouse':
-                  angle = math.sin(phase*.65)*0.7
-                  bx = 430 + 160*math.sin(angle)
-                  d.polygon([(420, 285), (bx-180, 150), (bx+180, 150)], fill=(255, 235, 175, 38))
-                  d.ellipse((390, 260, 455, 325), fill=(255, 238, 180, glow))
-              elif kind == 'attic':
-                  hatch = int(22*math.sin(phase*.7))
-                  d.polygon([(190, 315), (350, 315), (350+hatch, 400), (190, 400)], fill=(74, 51, 39, 255), outline=(190, 155, 110, 255))
-                  for i in range(14):
-                      x = 210 + (i*37 + frame_no*2) % 170
-                      y = 410 + (i*51 + frame_no*3) % 250
-                      d.ellipse((x, y, x+3, y+3), fill=(210, 190, 150, 120))
-              elif kind in ('photo', 'camera', 'album'):
-                  alpha = int(35 + 210*reveal*pulse)
-                  d.rectangle((155, 260, 385, 650), fill=(20, 25, 35, 255), outline=(205, 170, 115, 255), width=10)
-                  d.ellipse((220, 340, 320, 445), fill=(5, 8, 15, alpha))
-                  d.rounded_rectangle((205, 440, 335, 610), radius=40, fill=(5, 8, 15, alpha))
-                  if kind == 'camera':
-                      d.rounded_rectangle((170, 650, 370, 760), radius=18, fill=(25, 30, 38, 255), outline=(170, 170, 180, 255), width=6)
-                      d.ellipse((225, 665, 315, 755), fill=(4, 9, 18, 255), outline=(160, 190, 210, glow), width=8)
-                      if frame_no % 50 < 4:
-                          d.rectangle((0, 0, WIDTH, HEIGHT), fill=(255, 255, 255, 100))
-              elif kind == 'chair':
-                  rock = 12*wobble
-                  d.polygon([(170+rock, 500), (370+rock, 500), (350-rock, 560), (190-rock, 560)], fill=(95, 55, 35, 255), outline=(190, 145, 95, 255))
-                  d.polygon([(190+rock, 495), (205+rock, 360), (345+rock, 360), (360+rock, 495)], fill=(80, 48, 34, 255), outline=(185, 140, 90, 255))
-                  for x in (205, 345):
-                      d.line((x+rock, 550, x+rock-18, 735), fill=(100, 65, 42, 255), width=13)
-              elif kind == 'hospital':
-                  x = 245 + 42*math.sin(phase*.45)
-                  d.rectangle((x-115, 570, x+120, 650), fill=(185, 195, 195, 255), outline=(65, 80, 90, 255), width=5)
-                  d.ellipse((x-95, 530, x-35, 590), fill=(170, 180, 185, 255))
-                  d.line((x-105, 650, x-105, 730), fill=(100, 110, 120, 255), width=8)
-                  d.line((x+95, 650, x+95, 730), fill=(100, 110, 120, 255), width=8)
-                  d.ellipse((235, 180, 305, 250), fill=(255, 240, 195, int(75+150*pulse)))
-              elif kind == 'elevator':
-                  opening = int(70 + 60*(0.5+0.5*math.sin(phase*.55)))
-                  d.rectangle((150, 270, 270-opening//2, 730), fill=(75, 83, 94, 255), outline=(185, 190, 195, 255), width=6)
-                  d.rectangle((270+opening//2, 270, 390, 730), fill=(65, 74, 86, 255), outline=(185, 190, 195, 255), width=6)
-                  d.rectangle((220, 175, 320, 235), fill=(5, 8, 15, 255), outline=(175, 160, 125, 255), width=4)
-                  d.text((270, 205), '0' if scene_no < 4 else '3', fill=(255, 85, 85, 255), anchor='mm')
-              elif kind == 'bell':
-                  swing = 22*wobble
-                  d.arc((175+swing, 330, 365+swing, 540), 180, 360, fill=(205, 175, 110, 255), width=16)
-                  d.polygon([(190+swing, 440), (350+swing, 440), (380+swing, 580), (160+swing, 580)], fill=(150, 120, 75, 255), outline=(225, 190, 125, 255))
-                  d.ellipse((245+swing, 565, 295+swing, 625), fill=(200, 165, 105, 255))
-              elif kind == 'door' or kind == 'doorbell' or kind == 'basement' or kind == 'hiddenroom' or kind == 'key':
-                  gap = int(10 + 48*(0.5+0.5*math.sin(phase*.55)))
-                  d.rectangle((155, 260, 385-gap, 740), fill=(67, 46, 36, 255), outline=(190, 150, 105, 255), width=8)
-                  d.rectangle((385-gap, 260, 385, 740), fill=(3, 5, 12, 255))
-                  d.polygon([(385-gap, 430), (500, 360), (500, 760), (385-gap, 650)], fill=(255, 210, 130, int(35+110*pulse)))
-                  d.ellipse((340-gap, 490, 355-gap, 505), fill=gold)
-                  if kind == 'doorbell':
-                      d.ellipse((420, 460, 470, 510), fill=(135, 145, 155, 255), outline=(230, 210, 165, 255), width=5)
-                      d.ellipse((433, 473, 457, 497), fill=(255, 80, 80, glow))
-                  if kind == 'key':
-                      d.ellipse((210, 590, 265, 645), outline=(235, 195, 105, 255), width=12)
-                      d.line((260, 615, 370, 615), fill=(235, 195, 105, 255), width=12)
-                      d.line((340, 615, 340, 650), fill=(235, 195, 105, 255), width=8)
-              elif kind == 'piano':
-                  for i in range(10):
-                      x = 70+i*40
-                      lift = 12 if (i + frame_no//8) % 4 == 0 else 0
-                      d.rectangle((x, 640+lift, x+38, 720), fill=(245, 240, 220, 255), outline=(35, 35, 40, 255), width=2)
-                  for i in (1, 2, 4, 5, 6, 8):
-                      x = 70+i*40
-                      d.rectangle((x+25, 640, x+48, 690), fill=(8, 9, 13, 255))
-                  for i in range(5):
-                      x = 160 + i*55
-                      d.arc((x, 430-i*10, x+55, 510-i*10), 190, 350, fill=(220, 195, 140, 140), width=4)
-              elif kind == 'wall':
-                  for i in range(4):
-                      r = 25 + ((frame_no*2+i*32) % 120)
-                      d.arc((270-r, 510-r, 270+r, 510+r), 200, 340, fill=(180, 195, 210, max(20, 130-i*25)), width=4)
-                  d.line((270, 360, 255+10*wobble, 500, 285, 610), fill=(100, 75, 75, 220), width=5)
-              elif kind == 'window' or kind == 'fingerprints':
-                  alpha = int(35 + 210*reveal*pulse)
-                  d.ellipse((205, 335, 335, 475), fill=(2, 4, 10, alpha))
-                  d.rounded_rectangle((210, 460, 330, 650), radius=35, fill=(2, 4, 10, alpha))
-                  if kind == 'fingerprints':
-                      for i in range(5):
-                          x = 190+i*38
-                          d.ellipse((x, 430+int(8*math.sin(phase+i)), x+25, 470+int(8*math.sin(phase+i))), outline=(190, 210, 225, 190), width=3)
-              elif kind == 'dream':
-                  for i in range(4):
-                      x = 130 + i*75 + 18*math.sin(phase+i)
-                      y = 320 + 20*math.cos(phase*.7+i)
-                      d.ellipse((x-30, y-18, x+30, y+18), fill=(180, 175, 225, 65), outline=(210, 205, 245, 120), width=3)
-                  d.line((145, 520, 210, 480, 275, 520, 340, 480, 405, 520), fill=(185, 180, 235, 140), width=5)
-              elif kind == 'busstop':
-                  d.line((390, 260, 390, 750), fill=(160, 160, 165, 255), width=8)
-                  d.rectangle((350, 260, 430, 355), fill=(24, 34, 46, 255), outline=(205, 190, 145, 255), width=4)
-                  alpha = int(35+210*reveal*pulse)
-                  d.ellipse((175, 475, 245, 545), fill=(2, 4, 10, alpha))
-                  d.polygon([(175, 545), (245, 545), (265, 710), (155, 710)], fill=(2, 4, 10, alpha))
-              elif kind == 'umbrella':
-                  angle = 16*wobble
-                  d.pieslice((130+angle, 360, 410+angle, 610), 180, 360, fill=(40, 48, 68, 255), outline=(170, 175, 190, 255), width=5)
-                  d.line((270+angle, 485, 270, 740), fill=(180, 175, 160, 255), width=8)
-                  d.arc((245, 690, 300, 755), 0, 180, fill=(180, 175, 160, 255), width=8)
-              elif kind == 'cassette':
-                  d.rounded_rectangle((100, 420, 440, 660), radius=20, fill=(43, 48, 54, 255), outline=(190, 175, 145, 255), width=7)
-                  for x in (195, 345):
-                      d.ellipse((x-48, 470, x+48, 565), fill=(10, 13, 18, 255), outline=(190, 185, 165, 255), width=6)
-                      for a in range(4):
-                          ang = phase*2 + a*math.pi/2
-                          d.line((x, 518, x+35*math.cos(ang), 518+35*math.sin(ang)), fill=(170, 175, 180, 220), width=4)
-                  d.rectangle((225, 590, 315, 620), fill=(15, 18, 22, 255))
-              elif kind == 'classroom':
-                  d.rectangle((70, 270, 470, 520), fill=(17, 48, 43, 255), outline=(135, 110, 80, 255), width=8)
-                  n = min(4, 1 + frame_no//18)
-                  for i in range(n):
-                      d.line((120, 335+i*42, 230+35*i, 335+i*42), fill=(225, 220, 195, 210), width=5)
-                  for x in (100, 270, 420):
-                      d.rectangle((x-50, 680, x+50, 725), fill=(72, 49, 34, 255))
-                      d.line((x-40, 725, x-45, 790), fill=(105, 80, 55, 255), width=6)
-              elif kind == 'shop':
-                  lift = int(65+65*(0.5+0.5*math.sin(phase*.5)))
-                  d.rectangle((120, 300+lift, 420, 720), fill=(8, 15, 22, 255), outline=(185, 145, 95, 255), width=7)
-                  d.rectangle((145, 330+lift, 395, 520+lift), fill=(255, 190, 100, int(70+120*pulse)))
-                  for y in range(300, 300+lift, 18):
-                      d.line((120, y, 420, y), fill=(110, 110, 120, 160), width=3)
-              elif kind == 'bridge':
-                  x = 270 + 85*math.sin(phase*.45)
-                  d.ellipse((x-18, 470, x+18, 510), fill=(1, 3, 8, 240))
-                  d.rounded_rectangle((x-23, 505, x+23, 650), radius=12, fill=(1, 3, 8, 240))
-                  d.ellipse((x+55-18, 470, x+55+18, 510), fill=(1, 3, 8, 210))
-                  d.rounded_rectangle((x+55-23, 505, x+55+23, 650), radius=12, fill=(1, 3, 8, 210))
-              elif kind == 'clock':
-                  d.ellipse((155, 250, 385, 480), fill=(30, 29, 38, 255), outline=(215, 180, 115, 255), width=10)
-                  for i in range(12):
-                      a = i*math.pi/6
-                      x = 270+88*math.sin(a); y = 365-88*math.cos(a)
-                      d.ellipse((x-4, y-4, x+4, y+4), fill=white)
-                  a1 = phase*.15; a2 = phase*.02
-                  d.line((270, 365, 270+70*math.sin(a1), 365-70*math.cos(a1)), fill=white, width=7)
-                  d.line((270, 365, 270+52*math.sin(a2), 365-52*math.cos(a2)), fill=gold, width=9)
-                  d.ellipse((258, 353, 282, 377), fill=gold)
-              elif kind == 'cabin' or kind == 'rainhouse':
-                  for i in range(18):
-                      x = (i*37 + frame_no*2) % WIDTH
-                      y = (i*61 + frame_no*5) % HEIGHT
-                      d.line((x, y, x-8, y+22), fill=(190, 210, 225, 100), width=2)
-                  d.rectangle((320, 600, 380, 700), fill=(255, 190, 110, int(60+170*pulse)))
-                  if kind == 'cabin':
-                      for i in range(8):
-                          x = 185+i*24
-                          d.ellipse((x, 330-int((frame_no+i*8)%100), x+12, 345-int((frame_no+i*8)%100)), fill=(220, 225, 235, 90))
-              elif kind == 'museum':
-                  d.rounded_rectangle((200, 350, 340, 650), radius=35, fill=(80, 88, 96, 255), outline=(190, 180, 155, 255), width=6)
-                  d.ellipse((220+8*wobble, 275, 320+8*wobble, 385), fill=(95, 105, 112, 255), outline=(190, 180, 155, 255), width=5)
-                  d.line((240, 440, 175, 540), fill=(150, 155, 160, 255), width=15)
-                  d.line((300, 440, 365, 530+18*wobble), fill=(150, 155, 160, 255), width=15)
-              elif kind == 'lantern':
-                  x = 270+35*wobble
-                  d.line((x, 280, x, 405), fill=(150, 145, 130, 255), width=6)
-                  d.polygon([(x-45, 420), (x+45, 420), (x+30, 570), (x-30, 570)], fill=(43, 39, 32, 255), outline=(200, 160, 95, 255))
-                  d.ellipse((x-22, 450, x+22, 540), fill=(255, 195, 90, glow))
-                  d.polygon([(x-25, 550), (x-155, 850), (x+160, 850)], fill=(255, 205, 120, 22))
-              elif kind == 'swing':
-                  angle = 30*wobble
-                  d.line((210, 280, 210+angle, 620), fill=(185, 190, 195, 255), width=6)
-                  d.line((330, 280, 330+angle, 620), fill=(185, 190, 195, 255), width=6)
-                  d.line((190+angle, 620, 350+angle, 620), fill=(140, 95, 55, 255), width=16)
-                  d.ellipse((235+angle, 505, 305+angle, 575), fill=(1, 3, 8, int(100+130*reveal)))
-              elif kind == 'bus':
-                  x = 270+55*math.sin(phase*.5)
-                  d.rounded_rectangle((x-190, 430, x+190, 700), radius=35, fill=(42, 54, 65, 255), outline=(185, 175, 145, 255), width=7)
-                  for wx in (x-130, x-35, x+60):
-                      d.rectangle((wx, 470, wx+72, 555), fill=(255, 205, 135, int(70+140*pulse)))
-                  for wx in (x-120, x+120):
-                      d.ellipse((wx-25, 675, wx+25, 725), fill=(8, 10, 15, 255), outline=(170, 170, 175, 255), width=5)
-              elif kind == 'rooftop' or kind == 'silhouette' or kind == 'shadow':
-                  x = (80 + frame_no*3) % 420 + 40
-                  d.ellipse((x-19, 460, x+19, 500), fill=(1, 2, 7, 245))
-                  d.polygon([(x-18, 500), (x+18, 500), (x+34, 660), (x-35, 660)], fill=(1, 2, 7, 245))
-                  d.line((x-10, 650, x-38, 735), fill=(1, 2, 7, 245), width=12)
-                  d.line((x+10, 650, x+40, 735), fill=(1, 2, 7, 245), width=12)
-                  if kind == 'shadow':
-                      d.line((x, 500, x+70*math.sin(phase*2), 380), fill=(1, 2, 7, 210), width=18)
-              elif kind == 'carousel':
-                  for i in range(4):
-                      a = phase*.6 + i*math.pi/2
-                      x = 270+125*math.cos(a); y = 540+65*math.sin(a)
-                      d.line((x, 390, x, y), fill=(205, 175, 120, 255), width=5)
-                      d.ellipse((x-24, y-30, x+24, y+30), fill=(205, 185, 145, 255), outline=(70, 45, 55, 255), width=4)
-                  d.ellipse((145, 370, 395, 430), fill=(140, 65, 95, 180), outline=(220, 170, 130, 255), width=6)
-              elif kind == 'lake':
-                  x = 270+65*math.sin(phase*.55)
-                  y = 500+30*math.cos(phase*.8)
-                  d.ellipse((x-35, y-35, x+35, y+35), fill=(130, 220, 255, glow), outline=(220, 245, 255, 230), width=4)
-                  for i in range(4):
-                      r = 45+i*28 + (frame_no*2 % 25)
-                      d.arc((x-r, 620-r/4, x+r, 620+r/4), 180, 360, fill=(110, 205, 230, 110-i*18), width=3)
-              elif kind == 'station':
-                  d.rectangle((75, 285, 465, 385), fill=(9, 14, 22, 255), outline=(195, 165, 110, 255), width=5)
-                  d.text((270, 335), 'SON SEFER', fill=(255, 200, 115, glow), anchor='mm')
-                  x = 120 + (frame_no*4 % 330)
-                  d.ellipse((x-18, 570, x+18, 606), fill=(255, 225, 160, glow))
-              elif kind == 'map':
-                  x = 130 + (frame_no*3 % 270)
-                  y = 510 + 75*math.sin(phase*.5)
-                  d.line((125, 570, x, y, 420, 430), fill=(165, 55, 45, 230), width=6)
-                  d.ellipse((x-12, y-12, x+12, y+12), fill=(255, 65, 55, 255))
-              elif kind == 'coldspot':
-                  r = 55 + 90*pulse
-                  d.ellipse((270-r, 520-r, 270+r, 520+r), outline=(140, 220, 255, 180), width=8)
-                  for i in range(12):
-                      x = 270 + (i%4-1.5)*48 + 10*math.sin(phase+i)
-                      y = 520 + (i//4-1)*55
-                      d.line((x, y-18, x, y+18), fill=(190, 230, 255, 190), width=4)
-                      d.line((x-12, y, x+12, y), fill=(190, 230, 255, 190), width=4)
-              elif kind == 'cinema':
-                  d.rectangle((95, 260, 445, 560), fill=(5, 8, 15, 255), outline=(180, 160, 125, 255), width=8)
-                  d.ellipse((210, 350, 330, 475), fill=(1, 3, 8, int(70+170*reveal)))
-                  d.polygon([(270, 160), (120, 280), (420, 280)], fill=(255, 230, 180, 25))
-                  for x in (110, 210, 310, 410):
-                      d.rounded_rectangle((x-30, 650, x+30, 740), radius=12, fill=(90, 20, 28, 255))
-              elif kind == 'book':
-                  open_amt = int(20+75*(0.5+0.5*math.sin(phase*.6)))
-                  d.polygon([(270, 500), (270-open_amt, 430), (270-open_amt, 680), (270, 735)], fill=(225, 210, 175, 255), outline=(95, 70, 50, 255))
-                  d.polygon([(270, 500), (270+open_amt, 430), (270+open_amt, 680), (270, 735)], fill=(238, 225, 190, 255), outline=(95, 70, 50, 255))
-                  for i in range(5):
-                      y = 525+i*34
-                      d.line((195, y, 255, y), fill=(95, 75, 60, 140), width=2)
-                      d.line((285, y, 345, y), fill=(95, 75, 60, 140), width=2)
-              elif kind == 'road':
-                  x = 270 + 120*math.sin(phase*.35)
-                  d.ellipse((x-22, 530, x+22, 574), fill=(255, 230, 175, glow))
-                  d.polygon([(x-15, 570), (x-125, 850), (x+130, 850)], fill=(255, 225, 160, 35))
-                  d.line((270, 700, 270, 950), fill=(185, 185, 175, 130), width=5)
-              elif kind == 'radio':
-                  d.rounded_rectangle((100, 430, 440, 680), radius=25, fill=(65, 43, 34, 255), outline=(185, 145, 95, 255), width=7)
-                  d.rectangle((145, 475, 300, 535), fill=(9, 13, 18, 255))
-                  d.line((170, 505, 275, 505+24*math.sin(phase*5)), fill=(90, 220, 180, 255), width=4)
-                  d.ellipse((335, 480, 405, 550), fill=(20, 22, 25, 255), outline=(180, 165, 135, 255), width=5)
-                  d.arc((330, 390, 455, 560), 190, 340, fill=(160, 210, 210, 150), width=4)
-              elif kind == 'tea':
-                  d.ellipse((175, 550, 365, 680), fill=(230, 220, 200, 255), outline=(150, 135, 120, 255), width=7)
-                  d.ellipse((195, 565, 345, 630), fill=(45, 25, 20, 255))
-                  d.arc((335, 570, 430, 680), 270, 90, fill=(220, 215, 200, 255), width=12)
-                  for i in range(3):
-                      x = 220+i*48+12*math.sin(phase+i)
-                      d.arc((x-25, 390-i*15, x+25, 535-i*15), 190, 350, fill=(220, 225, 230, 130), width=5)
-              elif kind == 'ferry' or kind == 'ship':
-                  x = 270+80*math.sin(phase*.35)
-                  d.polygon([(x-170, 600), (x+170, 600), (x+110, 710), (x-110, 710)], fill=(25, 35, 48, 255), outline=(175, 165, 145, 255))
-                  d.rectangle((x-75, 490, x+75, 600), fill=(48, 55, 64, 255), outline=(175, 165, 145, 255), width=5)
-                  for wx in (x-45, x, x+45):
-                      d.rectangle((wx-12, 510, wx+12, 550), fill=(255, 210, 135, glow))
-              elif kind == 'footprints':
-                  for i in range(min(10, 1+frame_no//5)):
-                      x = 210 + (i%2)*55 + 12*math.sin(i)
-                      y = 735 - i*45
-                      d.ellipse((x-12, y-22, x+12, y+22), fill=(3, 7, 14, 210))
-                      d.ellipse((x-22, y-35, x-12, y-22), fill=(3, 7, 14, 210))
-              elif kind == 'haunted_room':
-                  gx = 270+100*math.sin(phase*.5)
-                  d.ellipse((gx-32, 390, gx+32, 455), fill=(190, 205, 225, 150))
-                  d.rounded_rectangle((gx-42, 450, gx+42, 660), radius=30, fill=(190, 205, 225, 90))
-
-
-          def make_background(topic_id, category, scene_no, seed):
-              if category == 'Paranormal':
-                  return make_paranormal_background(topic_id, scene_no, seed)
-              # Keep the existing non-paranormal visual worlds available if topics are expanded later.
-              rng = random.Random(seed + scene_no * 101)
-              if category == 'Uzay':
-                  img = gradient((5, 9, 32), (18, 28, 67))
-                  d = ImageDraw.Draw(img, 'RGBA')
-                  for _ in range(95):
-                      x, y = rng.randrange(WIDTH), rng.randrange(HEIGHT)
-                      r = rng.choice([1, 1, 2, 3])
-                      d.ellipse((x-r, y-r, x+r, y+r), fill=(220, 235, 255, rng.randrange(90, 230)))
-                  cx, cy, radius = 340, 390, 150
-                  color = (65, 125, 190, 255)
-                  if 'black-hole' in topic_id:
-                      d.ellipse((cx-radius-35, cy-radius//2, cx+radius+35, cy+radius//2), outline=(255, 145, 55, 220), width=22)
-                      d.ellipse((cx-radius//2, cy-radius//2, cx+radius//2, cy+radius//2), fill=(2, 3, 10, 255))
-                  else:
-                      if 'mars' in topic_id: color=(198,83,48,255)
-                      elif 'venus' in topic_id: color=(218,161,80,255)
-                      elif 'neptune' in topic_id: color=(65,105,220,255)
-                      elif 'moon' in topic_id or 'lunar' in topic_id: color=(160,165,177,255)
-                      d.ellipse((cx-radius,cy-radius,cx+radius,cy+radius),fill=color)
-                  d.polygon([(0,780),(100,730),(210,780),(360,720),(540,785),(540,960),(0,960)],fill=(15,22,45,255))
-                  return img
-              if category == 'Tarih':
-                  img=gradient((35,44,77),(230,139,75)); d=ImageDraw.Draw(img,'RGBA')
-                  d.ellipse((390,130,500,240),fill=(255,215,140,210))
-                  d.polygon([(0,650),(120,580),(240,650),(390,570),(540,650),(540,960),(0,960)],fill=(151,93,55,255))
-                  for x in (55,145,370,460):
-                      d.rectangle((x,440,x+42,690),fill=(178,157,125,255),outline=(90,75,60,255),width=3)
-                  return img
-              img=gradient((48,106,142),(224,176,105)); d=ImageDraw.Draw(img,'RGBA')
-              d.ellipse((385,120,490,225),fill=(255,220,145,220))
-              d.polygon([(0,690),(90,560),(190,680),(320,510),(450,675),(540,590),(540,960),(0,960)],fill=(44,91,76,255))
-              return img
-
 
 
           def wrap_text(draw, text_value, font, max_width):
@@ -1694,171 +777,256 @@ jobs:
                             fill=(255, 255, 255, 255), stroke_width=1, stroke_fill=(0, 0, 0, 180))
 
 
-          def render_frame(bg, topic_id, category, scene_no, frame_no, total_frames, caption, seed):
-              img = bg.copy()
-              d = ImageDraw.Draw(img, 'RGBA')
-              t = frame_no / FPS
-              phase = t*2.8 + scene_no
-              if category == 'Paranormal':
-                  draw_paranormal_subject(d, topic_id, frame_no, total_frames, phase, scene_no, seed)
-                  # Every story gets its own moving atmospheric details, not a repeated haunted-house overlay.
-                  kind = paranormal_visual_kind(topic_id, title)
-                  for i in range(12):
-                      x = (i*53 + frame_no*(1+i%3)*0.48 + seed%31) % WIDTH
-                      y = (i*79 - frame_no*(0.45+i%2*0.35)) % HEIGHT
-                      r = 1 + (i%3)
-                      color = (175, 205, 225, 70) if kind not in ('phone','piano','tea','cassette','radio') else (235, 190, 125, 65)
-                      d.ellipse((x-r, y-r, x+r, y+r), fill=color)
-              elif category == 'Uzay':
-                  for i in range(22):
-                      x=(i*83+frame_no*(1+i%3)*0.55+seed%37)%WIDTH
-                      y=(i*137+frame_no*(1+i%2)*0.7)%HEIGHT
-                      r=2+(i%3)
-                      d.ellipse((x-r,y-r,x+r,y+r),fill=(190,220,255,110))
-                  draw_astronaut(d,105+25*math.sin(phase*.7),560+20*math.cos(phase),phase,.72)
-              elif category == 'Tarih':
-                  for i in range(3):
-                      x=(55+i*185+frame_no*(5+i)*.18)%(WIDTH+80)-30
-                      draw_worker(d,x,785,phase+i*1.7,.88 if i==1 else .78,carrying=(i!=1))
-              else:
-                  x=95+((frame_no*2)%330)
-                  draw_worker(d,x,790,phase,.78,(35,48,43,255),False)
-              progress=(frame_no+1)/max(1,total_frames)
-              draw_subtitles(d,caption,progress,category,scene_no)
-              return img
+          def image_dhash(image):
+              """Small perceptual fingerprint used to reject repeated-looking scenes."""
+              gray = ImageOps.fit(image.convert('L'), (9, 8), method=Image.Resampling.LANCZOS)
+              px = np.asarray(gray, dtype=np.int16)
+              bits = (px[:, 1:] > px[:, :-1]).flatten()
+              value = 0
+              for bit in bits:
+                  value = (value << 1) | int(bit)
+              return value
 
 
+          def hamming_distance(a, b):
+              return (a ^ b).bit_count()
 
-          def render_animated_clip(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None, audio_offset=0.0):
-              """Render a genuine animated 3D scene in Blender, then add the established subtitles."""
-              frames = frame_count if frame_count is not None else max(1, round(duration * FPS))
-              temp_video = CLIPS / f'blender_raw_{scene_no:02d}.mp4'
-              theme = paranormal_visual_kind(topic_id, title)
-              # GitHub Actions Linux ortaminda Blender icin sanal ekran ve yazilimsal OpenGL.
-              blender_config = OUT / 'blender-config'
-              blender_config.mkdir(parents=True, exist_ok=True)
-              blender_env = os.environ.copy()
-              blender_env['LIBGL_ALWAYS_SOFTWARE'] = '1'
-              blender_env['MESA_LOADER_DRIVER_OVERRIDE'] = 'llvmpipe'
-              blender_env['GALLIUM_DRIVER'] = 'llvmpipe'
-              blender_env['OMP_NUM_THREADS'] = '1'
-              blender_env['OPENBLAS_NUM_THREADS'] = '1'
-              blender_env['BLENDER_USER_CONFIG'] = str(blender_config)
 
-              blender_executable = str(Path.home() / 'blender-4.5.15' / 'blender')
-              if not Path(blender_executable).is_file():
-                  raise FileNotFoundError(f'Blender calistirilabilir dosyasi bulunamadi: {blender_executable}')
-              command = [
-                  'xvfb-run', '-a', '-s', '-screen 0 1280x1024x24',
-                  blender_executable, '--background', '--factory-startup',
-                  '--threads', '2', '--python-exit-code', '1',
-                  '--python', str(ROOT / 'render_3d.py'), '--',
-                  '--theme', theme, '--scene', str(scene_no), '--seed', str(seed),
-                  '--duration', f'{duration:.6f}', '--output', str(temp_video),
-                  '--width', str(WIDTH), '--height', str(HEIGHT), '--fps', str(FPS),
-                  '--frame-count', str(frames),
-                  '--rain-file', str(ROOT / 'assets' / 'characters' / 'rain_v3.glb'),
-                  '--snow-file', str(ROOT / 'assets' / 'characters' / 'snow_v4.glb'),
-                  '--audio-file', str(OUT / 'narration.wav'),
-                  '--audio-offset', f'{audio_offset:.6f}'
+          def scene_shot_description(scene_no):
+              shots = [
+                  'wide establishing shot that clearly reveals the location and geography',
+                  'medium cinematic shot focused on the exact event and its physical evidence',
+                  'tight close-up of the important object or unsettling clue, shallow depth of field',
+                  'over-the-shoulder or low-angle perspective showing the threat in the environment',
+                  'dramatic reveal shot with a new composition and a visually meaningful consequence'
               ]
-              print(f'Blender 3D sahnesi olusturuluyor: {scene_no}/6 | tema={theme}')
-              print('Sanal ekran ve yazilimsal OpenGL etkin.')
-              subprocess.run(
-                  command, check=True, timeout=max(1200, int(duration * 240)),
-                  env=blender_env
-              )
-              if not temp_video.exists() or temp_video.stat().st_size < 10000:
-                  raise RuntimeError(f'Blender {scene_no}. sahne icin gecerli video olusturamadi.')
+              return shots[(scene_no - 1) % len(shots)]
 
-              # Decode exactly the expected number of frames at a fixed size.
-              # Draining the decoder pipe prevents FFmpeg from exiting with SIGPIPE
-              # when the source contains an extra frame due to container timestamps.
-              decode = subprocess.Popen([
-                  'ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', str(temp_video),
-                  '-map', '0:v:0', '-an', '-vf', f'scale={WIDTH}:{HEIGHT}:flags=bicubic,setsar=1',
-                  '-frames:v', str(frames), '-vsync', '0',
-                  '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'
-              ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
+
+          def validate_generated_image(image, scene_no):
+              if image.width < 640 or image.height < 1100:
+                  raise RuntimeError(f'Gorsel cozunurlugu dusuk: {image.size}')
+              rgb = np.asarray(image.convert('RGB'), dtype=np.uint8)
+              if float(rgb.std()) < 18.0:
+                  raise RuntimeError('Gorsel asiri duz/siyah; ayrinti seviyesi yetersiz.')
+              if len(np.unique(rgb.reshape(-1, 3)[::max(1, rgb.shape[0] * rgb.shape[1] // 5000)], axis=0)) < 80:
+                  raise RuntimeError('Gorselde yeterli renk/detay cesitliligi yok.')
+              current_hash = image_dhash(image)
+              for old_path in sorted(IMAGE_DIR.glob('scene_*.jpg')):
+                  if old_path.name == f'scene_{scene_no:02d}.jpg':
+                      continue
+                  try:
+                      old = Image.open(old_path).convert('RGB')
+                      if hamming_distance(current_hash, image_dhash(old)) < 7:
+                          raise RuntimeError(f'{old_path.name} ile birbirine cok benzeyen sahne gorseli reddedildi.')
+                  except RuntimeError:
+                      raise
+                  except Exception:
+                      continue
+              return current_hash
+
+
+          def commons_terms(kind, caption):
+              """English search terms for free-to-use, topic-matched documentary photographs."""
+              mapping = {
+                  'train': ['railway station train locomotive platform', 'passenger train railway tracks'],
+                  'station': ['railway station platform night', 'empty train station interior'],
+                  'forest': ['dark pine forest fog', 'dense forest mist trees'],
+                  'pine_forest': ['pine forest fog trees', 'dark woodland path'],
+                  'hotel': ['old hotel corridor interior', 'abandoned hotel hallway'],
+                  'hospital': ['abandoned hospital corridor', 'hospital hallway interior'],
+                  'mirror': ['antique mirror dark room', 'old mirror interior'],
+                  'phone': ['vintage telephone closeup', 'old telephone dark room'],
+                  'lighthouse': ['lighthouse storm coast fog', 'lighthouse at night'],
+                  'ship': ['old ship fog sea', 'ship at night ocean'],
+                  'bus': ['empty bus night road', 'old bus station'],
+                  'busstop': ['empty bus stop night', 'rural bus shelter fog'],
+                  'door': ['old wooden door dark corridor', 'abandoned house doorway'],
+                  'door_self': ['old wooden door corridor', 'door handle closeup'],
+                  'window': ['old window rain night', 'dark house window'],
+                  'window_face': ['foggy window night', 'old window condensation'],
+                  'attic': ['dusty attic old house', 'abandoned attic interior'],
+                  'elevator': ['old elevator doors hallway', 'elevator interior vintage'],
+                  'elevator_zero': ['old elevator panel buttons', 'empty elevator hallway'],
+                  'clock': ['antique clock dark room', 'old wall clock closeup'],
+                  'clock_backwards': ['antique clock closeup', 'old clock mechanism'],
+                  'bridge': ['old bridge fog night', 'empty bridge mist'],
+                  'lake': ['misty lake forest night', 'fog over lake'],
+                  'road': ['foggy forest road night', 'empty road fog'],
+                  'basement': ['dark basement stairs old house', 'stone basement corridor'],
+                  'classroom': ['abandoned classroom school', 'empty school classroom'],
+                  'cinema': ['abandoned cinema theater interior', 'empty old movie theater'],
+                  'museum': ['old museum corridor interior', 'museum hall dark'],
+                  'library': ['old library shelves dark', 'historic library interior'],
+                  'book': ['antique book closeup', 'old book library'],
+                  'radio': ['vintage radio closeup', 'old radio dark room'],
+                  'cassette': ['audio cassette tape closeup', 'vintage cassette recorder'],
+                  'camera': ['vintage camera closeup', 'old photograph camera'],
+                  'photo': ['old photograph album closeup', 'vintage photo album'],
+                  'footprints': ['footprints wet ground night', 'footprints snow forest'],
+                  'swing': ['empty playground swing fog', 'playground at night'],
+                  'rooftop': ['old building rooftop night', 'city rooftop fog'],
+                  'ferry': ['ferry boat fog water', 'empty ferry terminal'],
+                  'lantern': ['old lantern dark forest', 'vintage lantern night'],
+                  'key': ['antique iron key closeup', 'old rusty key'],
+                  'bell': ['old church bell tower', 'village church bell'],
+                  'piano': ['old piano dark room', 'abandoned piano interior'],
+                  'wall': ['old plaster wall dark room', 'cracked wall closeup'],
+                  'swing': ['empty playground swing fog', 'playground at night'],
+                  'haunted_room': ['abandoned room dark interior', 'old house room dust'],
+              }
+              terms = mapping.get(kind, ['abandoned building interior', 'foggy night street'])
+              # Retain the story's core location while varying queries across scene attempts.
+              return terms
+
+
+          def commons_search_images(query, limit=18):
+              api = 'https://commons.wikimedia.org/w/api.php'
+              params = {
+                  'action': 'query', 'format': 'json', 'generator': 'search',
+                  'gsrsearch': f'filetype:bitmap {query}', 'gsrnamespace': 6,
+                  'gsrlimit': limit, 'prop': 'imageinfo',
+                  'iiprop': 'url|size|extmetadata', 'iiurlwidth': 1100
+              }
+              response = requests.get(api, params=params,
+                  headers={'User-Agent': 'GizemliDunyaVideoBot/1.0 (educational noncommercial video project)'}, timeout=35)
+              response.raise_for_status()
+              pages = response.json().get('query', {}).get('pages', {})
+              return list(pages.values())
+
+
+          def generate_scene_image(scene_no, caption, topic_id, seed):
+              """Fetch a distinct, high-resolution, freely licensed real photograph from Wikimedia Commons."""
+              path = IMAGE_DIR / f'scene_{scene_no:02d}.jpg'
+              kind = paranormal_visual_kind(topic_id, title)
+              terms = commons_terms(kind, caption)
+              banned = ('diagram', 'map', 'logo', 'coat of arms', 'drawing', 'illustration',
+                        'painting', 'poster', 'flag', 'icon', 'screenshot', 'svg', 'collage')
+              used_titles = set()
+              last_error = None
+              for query in terms:
+                  try:
+                      candidates = commons_search_images(query)
+                      # Sort deterministically but vary the preferred result by scene/topic.
+                      candidates.sort(key=lambda item: (len(item.get('title', '')), item.get('title', '')))
+                      random.Random(seed + scene_no * 7919 + len(query)).shuffle(candidates)
+                      for item in candidates:
+                          title_text = item.get('title', '')
+                          low_title = title_text.lower()
+                          if any(word in low_title for word in banned) or title_text in used_titles:
+                              continue
+                          info_list = item.get('imageinfo', [])
+                          if not info_list:
+                              continue
+                          info = info_list[0]
+                          mime = info.get('mime', '')
+                          if mime not in ('image/jpeg', 'image/png', 'image/webp'):
+                              continue
+                          if int(info.get('width', 0)) < 900 or int(info.get('height', 0)) < 1200:
+                              continue
+                          ext = info.get('extmetadata', {})
+                          desc = str(ext.get('ImageDescription', {}).get('value', '')).lower()
+                          if any(word in desc for word in banned):
+                              continue
+                          url = info.get('thumburl') or info.get('url')
+                          if not url:
+                              continue
+                          image_response = requests.get(url, headers={'User-Agent': 'GizemliDunyaVideoBot/1.0'}, timeout=60)
+                          image_response.raise_for_status()
+                          if len(image_response.content) < 45000:
+                              continue
+                          image = Image.open(io.BytesIO(image_response.content)).convert('RGB')
+                          if image.width < 640 or image.height < 1000:
+                              continue
+                          image = ImageOps.fit(image, (768, 1365), method=Image.Resampling.LANCZOS, centering=(0.5, 0.48))
+                          try:
+                              validate_generated_image(image, scene_no)
+                          except RuntimeError:
+                              used_titles.add(title_text)
+                              continue
+                          image.save(path, 'JPEG', quality=94, optimize=True)
+                          def meta(key):
+                              return str(ext.get(key, {}).get('value', '')).replace('<br />', ' ').strip()
+                          record = {
+                              'scene': scene_no, 'caption': caption, 'commons_title': title_text,
+                              'source_page': info.get('descriptionurl', ''),
+                              'image_url': info.get('url', ''), 'artist': meta('Artist'),
+                              'license': meta('LicenseShortName'), 'license_url': meta('LicenseUrl'),
+                              'search_query': query
+                          }
+                          source_file = OUT / 'image_sources.json'
+                          sources = json.loads(source_file.read_text(encoding='utf-8')) if source_file.exists() else []
+                          sources.append(record)
+                          source_file.write_text(json.dumps(sources, ensure_ascii=False, indent=2), encoding='utf-8')
+                          print(f'Ucretsiz sahne fotografi bulundu: {scene_no}/{SCENE_COUNT} | {title_text} | {record["license"]}')
+                          return path
+                  except Exception as exc:
+                      last_error = exc
+                      print(f'Commons arama uyarisi ({query}): {str(exc)[:180]}')
+              raise RuntimeError(f'{scene_no}. sahne icin yeterli kalitede, benzersiz ve lisans bilgisi olan ucretsiz fotograf bulunamadi. Yayin engellendi. Son hata: {last_error}')
+
+
+          def render_image_scene(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
+              """Animate a unique AI still with restrained camera drift and synchronized subtitles."""
+              frames = frame_count if frame_count is not None else max(1, round(duration * FPS))
+              still = generate_scene_image(scene_no, caption, topic_id, seed)
+              source = Image.open(still).convert('RGB')
+              # Portrait crop with a little overscan enables a slow, cinematic push-in/pan.
+              base = ImageOps.fit(source, (WIDTH, HEIGHT), method=Image.Resampling.LANCZOS, centering=(0.5, 0.48))
               encode = subprocess.Popen([
                   'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
                   '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-video_size', f'{WIDTH}x{HEIGHT}',
                   '-framerate', str(FPS), '-i', 'pipe:0', '-an',
                   '-vf', f'scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos,format=yuv420p',
                   '-frames:v', str(frames), '-c:v', 'libx264', '-preset', 'veryfast',
-                  '-crf', '21', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)
+                  '-crf', '20', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)
               ], stdin=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
-              frame_bytes = WIDTH * HEIGHT * 3
               try:
                   for frame_no in range(frames):
-                      chunks = []
-                      remaining = frame_bytes
-                      while remaining:
-                          chunk = decode.stdout.read(remaining)
-                          if not chunk:
-                              break
-                          chunks.append(chunk)
-                          remaining -= len(chunk)
-                      raw = b''.join(chunks)
-                      if len(raw) != frame_bytes:
-                          decode_err = decode.stderr.read().decode('utf-8', 'replace')[-1500:]
-                          raise RuntimeError(
-                              f'Blender videosundan eksik kare okundu: {scene_no}. sahne, '
-                              f'{frame_no}/{frames}. kare; okunan={len(raw)}/{frame_bytes} byte. '
-                              f'FFmpeg: {decode_err}'
-                          )
-                      frame = Image.frombytes('RGB', (WIDTH, HEIGHT), raw)
+                      progress = frame_no / max(1, frames - 1)
+                      zoom = 1.0 + 0.075 * progress
+                      cw, ch = int(WIDTH / zoom), int(HEIGHT / zoom)
+                      # Alternate gentle pan directions so the visual does not feel like a static card.
+                      drift = (progress - 0.5) * 0.10
+                      cx = 0.5 + (drift if scene_no % 2 else -drift)
+                      cy = 0.48 + (progress - 0.5) * 0.035
+                      left = max(0, min(WIDTH - cw, int(cx * WIDTH - cw / 2)))
+                      top = max(0, min(HEIGHT - ch, int(cy * HEIGHT - ch / 2)))
+                      frame = base.crop((left, top, left + cw, top + ch)).resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
                       draw = ImageDraw.Draw(frame, 'RGBA')
                       draw_subtitles(draw, caption, (frame_no + 1) / max(1, frames), category, scene_no)
                       encode.stdin.write(frame.tobytes())
-
-                  # Read to EOF before waiting; otherwise the decoder can receive SIGPIPE.
-                  extra_data = decode.stdout.read()
                   encode.stdin.close()
-                  enc_code = encode.wait()
-                  dec_code = decode.wait()
-                  encode_err = encode.stderr.read().decode('utf-8', 'replace')[-1500:]
-                  decode_err = decode.stderr.read().decode('utf-8', 'replace')[-1500:]
-                  if enc_code or dec_code:
-                      raise RuntimeError(
-                          f'3D altyazi birlestirme hatasi: encode={enc_code}, decode={dec_code}; '
-                          f'ekstra_veri={len(extra_data)} byte; encoder={encode_err}; decoder={decode_err}'
-                      )
+                  code = encode.wait()
+                  err = encode.stderr.read().decode('utf-8', 'replace')[-1500:]
+                  if code:
+                      raise RuntimeError(f'AI görsel video kodlama hatası: {code}; {err}')
               finally:
-                  temp_video.unlink(missing_ok=True)
+                  if encode.poll() is None:
+                      encode.kill()
               if not output.exists() or output.stat().st_size < 10000:
-                  raise RuntimeError(f'{scene_no}. 3D animasyon klibi olusturulamadi.')
+                  raise RuntimeError(f'{scene_no}. Ücretsiz fotoğraf sahnesisi video klibine dönüştürülemedi.')
 
 
 
           def make_soundtrack(path):
               total=int(TARGET_SECONDS*SAMPLE_RATE)
               t=np.arange(total,dtype=np.float32)/SAMPLE_RATE
-              seed=int.from_bytes(__import__('hashlib').sha256((topic_id+slot+'sound').encode()).digest()[:4],'big')
-              rng=np.random.default_rng(seed)
-              base=float(rng.choice([41.2,46.25,49.0,55.0,61.74]))
-              pulse_rate=float(rng.choice([0.17,0.23,0.31,0.41]))
-              audio=(0.030*np.sin(2*np.pi*base*t)+0.014*np.sin(2*np.pi*(base*1.5)*t)+
-                     0.009*np.sin(2*np.pi*(base*2.0)*t)*(0.35+0.65*np.sin(2*np.pi*pulse_rate*t)))
-              # Her hikayede farkli, dusuk seviyeli atmosferik vurgu dizisi.
-              scale=rng.choice([[1.0,1.19,1.414,1.26],[1.0,1.122,1.335,1.498],[1.0,1.25,1.5,1.125]])
-              starts=np.arange(0.7,TARGET_SECONDS, float(rng.choice([2.1,2.6,3.0])))
-              for i,start in enumerate(starts):
-                  first=int(start*SAMPLE_RATE); size=min(int(2.1*SAMPLE_RATE),total-first)
-                  if size<=0: continue
+              # Original, generated ambient bed; intentionally quiet under narration.
+              audio=(0.035*np.sin(2*np.pi*55*t)+0.018*np.sin(2*np.pi*82.41*t)+
+                     0.010*np.sin(2*np.pi*110*t)*(0.5+0.5*np.sin(2*np.pi*0.35*t)))
+              notes=[329.63,392,493.88,440,392,293.66]
+              for i,start in enumerate(np.arange(0.5,TARGET_SECONDS,2.5)):
+                  first=int(start*SAMPLE_RATE); size=min(int(1.8*SAMPLE_RATE),total-first)
                   lt=np.arange(size,dtype=np.float32)/SAMPLE_RATE
-                  freq=base*scale[i%len(scale)]
-                  tone=0.010*np.sin(2*np.pi*freq*lt)*np.exp(-1.35*lt)
-                  audio[first:first+size]+=tone
-              # Kisa, sessiz araliklar anlatimin onune gecmez; her video kendi seed'ini kullanir.
-              fade=int(SAMPLE_RATE*1.2)
+                  audio[first:first+size]+=0.018*np.sin(2*np.pi*notes[i%len(notes)]*lt)*np.exp(-1.8*lt)
+              fade=int(SAMPLE_RATE*1.0)
               audio[:fade]*=np.linspace(0,1,fade); audio[-fade:]*=np.linspace(1,0,fade)
               peak=float(np.max(np.abs(audio)))
-              if peak>0: audio*=0.58/peak
+              if peak>0: audio*=0.6/peak
               pcm=(np.clip(np.column_stack((audio,audio)),-1,1)*32767).astype('<i2')
               with wave.open(str(path),'wb') as wav:
                   wav.setnchannels(2); wav.setsampwidth(2); wav.setframerate(SAMPLE_RATE); wav.writeframes(pcm.tobytes())
-
 
 
           def youtube_upload(path):
@@ -1868,12 +1036,16 @@ jobs:
               creds.refresh(Request())
               youtube=build('youtube','v3',credentials=creds,cache_discovery=False)
               description=(f'{title}\n\n'
-                'Gizemli Dünya’da bu kez sinematik atmosferli paranormal bir hikâye anlatıyoruz. '
-                'Bu video Blender icinde uretilen ozgun, rigli CC0 humanoid karakterlerle hazirlanan 3D animasyon ve Turkce seslendirme icerir. '
-                'Karakterler: ozgun prosedurel humanoid rigler (CC0). '
+                'Gizemli Dünya’da bu kez kısa bir paranormal hikâye anlatıyoruz. '
+                'Bu video, hikâyedeki anlatım anlarına eşleştirilmiş ücretsiz lisanslı fotoğraflar ve Türkçe seslendirme içerir. '
                 'Hikâye kurgu ve şehir efsanesi atmosferinde anlatılmıştır; gerçek olduğu iddia edilmez.\n'
-                'Bu olayın açıklamasını sen nasıl yorumluyorsun?\n\n'
+                'Bu hikâyeyle ilgili teorini yorumlarda paylaş.\n\n'
                 '#Shorts #Paranormal #GizemliHikayeler #KorkuHikayeleri #Gizem')
+              source_file = OUT / 'image_sources.json'
+              if source_file.exists():
+                  credits = json.loads(source_file.read_text(encoding='utf-8'))
+                  description += '\n\nGÖRSEL KAYNAKLARI / LİSANSLAR:\n' + '\n'.join(
+                      f"Sahne {x['scene']}: {x['commons_title']} — {x['artist']} — {x['license']} — {x['source_page']}" for x in credits)
               body={'snippet':{'title':f'{title} | Paranormal Hikâye #Shorts'[:100],
                 'description':description,'tags':['Shorts','Gizemli Dünya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','Şehir Efsaneleri'],
                 'categoryId':'24','defaultLanguage':'tr'},
@@ -1895,10 +1067,10 @@ jobs:
               return youtube_id
 
 
-          # Üretim: Blender gerçek 3D sahneleri render eder; Python altyazıları karelere işler.
-          print('1/5 Blender ile gerçek 3D sahneler ve Türkçe seslendirme hazırlanıyor...')
+          # Uretim: Her anlatim sahnesi icin ayri, ucretsiz lisansli fotograf kullanilir; Blender/3D karakter yoktur.
+          print(f'1/5 Her anlatim olayi icin farkli, ucretsiz Commons fotografi hazirlaniyor | sahne={SCENE_COUNT}')
           voice,scene_durations=make_voice_tracks()
-          # Kare sayisini seslendirmeden hesaplanan dogal video suresine gore ayarla.
+          # Yuvarlama farklarini duzelterek toplam kare sayisini 30 saniyeye gore ayarla.
           frame_counts=[max(1,round(d*FPS)) for d in scene_durations]
           frame_counts[-1]+=int(TARGET_SECONDS*FPS)-sum(frame_counts)
           if frame_counts[-1] < 1: raise RuntimeError('Son sahne suresi gecersiz.')
@@ -1907,15 +1079,15 @@ jobs:
           audio_offset=0.0
           for i,((caption,visual),duration,frame_count) in enumerate(zip(scenes,scene_durations,frame_counts),1):
               clip=CLIPS/f'clip_{i:02d}.mp4'
-              render_animated_clip(i,caption,duration,category,topic_id,seed,clip,frame_count,audio_offset)
+              render_image_scene(i,caption,duration,category,topic_id,seed,clip,frame_count)
               clips.append(clip)
               audio_offset += duration
-              print(f'Blender 3D sahne {i}/6 hazir: {duration:.2f} saniye')
+              print(f'Ücretsiz fotoğraf sahnesi {i}/{SCENE_COUNT} hazır: {duration:.2f} saniye')
 
           print('2/5 Fon muzigi hazirlaniyor...')
           sound=OUT/'soundtrack.wav'
           make_soundtrack(sound)
-          print(f'3/5 {TARGET_SECONDS:.1f} saniyelik video birlestiriliyor...')
+          print('3/5 30 saniyelik video birlestiriliyor...')
           concat=OUT/'concat.txt'
           concat.write_text(''.join("file '"+p.resolve().as_posix()+"'\n" for p in clips),encoding='utf-8')
           silent=OUT/'silent.mp4'
@@ -1925,12 +1097,28 @@ jobs:
               '-filter_complex','[1:a]volume=1.0[voice];[2:a]volume=0.16[music];[voice][music]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.95[a]',
               '-map','0:v:0','-map','[a]','-t',str(TARGET_SECONDS),'-c:v','copy','-c:a','aac','-b:a','160k',
               '-movflags','+faststart',str(final)])
+          # Upload gate: every planned beat must have its own valid, distinct, sourced photograph.
+          generated_images = sorted(IMAGE_DIR.glob('scene_*.jpg'))
+          if len(generated_images) != SCENE_COUNT:
+              raise RuntimeError(f'Sahne fotografi sayisi hatali: {len(generated_images)}/{SCENE_COUNT}. YouTube yuklemesi engellendi.')
+          approved_hashes = []
+          for image_path in generated_images:
+              with Image.open(image_path) as check_img:
+                  check_img.verify()
+              with Image.open(image_path) as check_img:
+                  check_img = check_img.convert('RGB')
+                  if check_img.size != (768, 1365):
+                      raise RuntimeError(f'Sahne boyutu hatali: {image_path.name} {check_img.size}')
+                  h = image_dhash(check_img)
+                  if any(hamming_distance(h, old) < 7 for old in approved_hashes):
+                      raise RuntimeError(f'Benzer/tekrar sahne fotografi bulundu: {image_path.name}. Yayin engellendi.')
+                  approved_hashes.append(h)
           info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(final)],text=True))
           streams=info.get('streams',[])
           if not any(s.get('codec_type')=='video' for s in streams): raise RuntimeError('Videoda goruntu akisi yok.')
           if not any(s.get('codec_type')=='audio' for s in streams): raise RuntimeError('Videoda ses akisi yok.')
           duration=float(info['format']['duration'])
-          if abs(duration-TARGET_SECONDS)>0.35: raise RuntimeError(f'Video hedef suresinde degil: {duration:.2f}s / {TARGET_SECONDS:.2f}s')
+          if abs(duration-TARGET_SECONDS)>0.25: raise RuntimeError(f'Video 30 saniye degil: {duration:.2f}s')
           if int(info.get('streams',[{}])[0].get('width',0))!=OUTPUT_WIDTH: raise RuntimeError('Video genisligi 1080 degil.')
           if int(info.get('streams',[{}])[0].get('height',0))!=OUTPUT_HEIGHT: raise RuntimeError('Video yuksekligi 1920 degil.')
           if final.stat().st_size<250000: raise RuntimeError('Video dosyasi beklenenden kucuk.')
