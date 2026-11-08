@@ -530,11 +530,36 @@ jobs:
                   run_ffmpeg(['-i', str(mp3), '-af', filters, '-ar', '44100', '-ac', '2',
                               '-c:a', 'pcm_s16le', str(wav)])
                   padded_files.append(wav)
-              concat_list = VOICE_DIR / 'voice_concat.txt'
-              concat_list.write_text(''.join("file '" + p.resolve().as_posix() + "'\\n" for p in padded_files), encoding='utf-8')
+              # WAV dosyalarini ffmpeg concat-list dosyasina bagimli kalmadan
+              # Python wave moduluyle sirayla birlestir. Bu yontem, GitHub
+              # runner'da concat-list dosyasinin kaybolmasi/okunamamasi hatasini
+              # ortadan kaldirir.
               voice = OUT / 'narration.wav'
-              run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat_list),
-                          '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(voice)])
+              if len(padded_files) != len(scenes):
+                  raise RuntimeError(f'Birlesecek ses parcasi eksik: {len(padded_files)}/{len(scenes)}')
+              missing_wavs = [str(p) for p in padded_files if not p.exists() or p.stat().st_size < 1000]
+              if missing_wavs:
+                  raise RuntimeError('Ara ses dosyasi olusmadi: ' + ', '.join(missing_wavs))
+              with wave.open(str(padded_files[0]), 'rb') as first_wav:
+                  params = first_wav.getparams()
+                  with wave.open(str(voice), 'wb') as merged:
+                      merged.setnchannels(params.nchannels)
+                      merged.setsampwidth(params.sampwidth)
+                      merged.setframerate(params.framerate)
+                      merged.setcomptype(params.comptype, params.compname)
+                      for wav_path in padded_files:
+                          with wave.open(str(wav_path), 'rb') as part:
+                              part_params = part.getparams()
+                              if (part_params.nchannels != params.nchannels or
+                                  part_params.sampwidth != params.sampwidth or
+                                  part_params.framerate != params.framerate or
+                                  part_params.comptype != params.comptype):
+                                  raise RuntimeError(f'Ses parcasi formatlari uyusmuyor: {wav_path.name}')
+                              while True:
+                                  frames = part.readframes(65536)
+                                  if not frames:
+                                      break
+                                  merged.writeframesraw(frames)
               actual = probe_duration(voice)
               expected = sum(scene_durations)
               if actual <= 0 or abs(actual - expected) > 0.35:
