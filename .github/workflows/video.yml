@@ -72,6 +72,8 @@ jobs:
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_PRIVACY: public
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           cat > create_video.py <<'PY'
           import os, io, json, time, wave, subprocess, random, math, asyncio
@@ -106,6 +108,9 @@ jobs:
           YOUTUBE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET', '').strip()
           YOUTUBE_REFRESH_TOKEN = os.environ.get('YOUTUBE_REFRESH_TOKEN', '').strip()
           YOUTUBE_PRIVACY = os.environ.get('YOUTUBE_PRIVACY', 'public').strip()
+          CLOUDFLARE_ACCOUNT_ID = os.environ.get('CLOUDFLARE_ACCOUNT_ID', '').strip()
+          CLOUDFLARE_API_TOKEN = os.environ.get('CLOUDFLARE_API_TOKEN', '').strip()
+          CLOUDFLARE_IMAGE_MODEL = '@cf/black-forest-labs/flux-2-klein-4b'
           RUN_EVENT = os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch')
           RUN_ID = os.environ.get('GITHUB_RUN_ID', 'local')
 
@@ -593,7 +598,7 @@ jobs:
               raise RuntimeError('GitHub Secrets eksik: ' + ', '.join(missing))
           if YOUTUBE_PRIVACY not in ('public', 'private', 'unlisted'):
               raise RuntimeError('YOUTUBE_PRIVACY public/private/unlisted olmali.')
-          print('Ucretsiz goruntu kaynagi: Wikimedia Commons API (API anahtari/odeme gerektirmez).')
+          print('Gorsel motoru: Cloudflare Workers AI FLUX.2 Klein 4B (ucretsiz gunluk kota; secrets yoksa Wikimedia Commons yedegi).')
 
           now = datetime.now(ZoneInfo('Europe/Istanbul'))
           slot = (f'{now:%Y-%m-%d}-' + ('sabah' if now.hour < 15 else 'aksam')
@@ -622,7 +627,7 @@ jobs:
               'visual_theme': visual_theme,
               'style': 'five distinct photorealistic cinematic 9:16 AI still images, one per narration beat; no Blender, no procedural characters, no toy-like figures, no repeated background; subtle camera movement on each still',
               'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
-              'voice': TTS_VOICE, 'duration_seconds': 30, 'image_source': 'Wikimedia Commons (free licensed photographs)'
+              'voice': TTS_VOICE, 'duration_seconds': 30, 'image_source': 'Cloudflare Workers AI FLUX.2 Klein 4B native portrait; Wikimedia Commons fallback'
           }, ensure_ascii=False, indent=2), encoding='utf-8')
 
           FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
@@ -895,9 +900,98 @@ jobs:
               return list(pages.values())
 
 
-          def generate_scene_image(scene_no, caption, topic_id, seed):
-              """Fetch a distinct, high-resolution, freely licensed real photograph from Wikimedia Commons."""
+          def generate_cloudflare_scene_image(scene_no, caption, topic_id, seed):
+              """Generate a story-specific FLUX image using Cloudflare's free daily Workers AI allocation."""
+              import base64
+              if not (CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN):
+                  raise RuntimeError('Cloudflare AI secrets tanimli degil.')
               path = IMAGE_DIR / f'scene_{scene_no:02d}.jpg'
+              kind = paranormal_visual_kind(topic_id, title)
+              shot = scene_shot_description(scene_no)
+              prompt = (
+                  'Photorealistic live-action supernatural mystery feature-film still, native vertical 9:16 portrait '
+                  'composition designed specifically for a 768x1365 frame. Use the full vertical canvas naturally; '
+                  'keep the main subject and the story-critical clue clearly visible, with cinematic foreground and depth. '
+                  f'Story title: {title}. Story environment: {kind}. Exact narrated moment in Turkish: "{caption}". '
+                  f'Camera direction: {shot}. Show the literal event in the sentence, not generic horror wallpaper. '
+                  'If the line mentions a hospital, show a believable real hospital interior; if it mentions a train, '
+                  'show a real train and platform; if it mentions a window, show a real window and the described clue. '
+                  'Each scene must use a different location detail, camera angle, lighting setup and composition. '
+                  'Premium cinema photography, realistic adult human actors if needed, natural skin texture, '
+                  'physically plausible architecture, detailed surfaces, atmospheric practical lighting, volumetric fog '
+                  'only when appropriate, rich but natural colors, high detail, sharp photographic focus. '
+                  'No cartoon, no illustration, no painting, no 3D render, no CGI character, no toy, no doll, '
+                  'no mannequin, no miniature, no plastic skin, no text, no subtitles, no logo, no watermark.'
+              )
+              url = (f'https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}'
+                     f'/ai/run/{CLOUDFLARE_IMAGE_MODEL}')
+              headers = {'Authorization': f'Bearer {CLOUDFLARE_API_TOKEN}',
+                         'Content-Type': 'application/json'}
+              last_error = None
+              for attempt in range(3):
+                  try:
+                      # FLUX.2 Klein 4B uses multipart form data and supports native portrait dimensions.
+                      response = requests.post(url, headers={'Authorization': headers['Authorization']}, files={
+                          'prompt': (None, prompt[:2048]),
+                          'width': (None, '768'),
+                          'height': (None, '1365'),
+                          'seed': (None, str(int(seed + scene_no * 7919 + attempt * 104729)))
+                      }, timeout=(30, 300))
+                      if response.status_code in (401, 403):
+                          raise RuntimeError('Cloudflare API token yetkisiz. Workers AI Read iznini ve Account ID degerini kontrol edin.')
+                      if response.status_code == 429:
+                          raise RuntimeError('Cloudflare ucretsiz gunluk AI limiti veya hiz limiti dolmus (HTTP 429).')
+                      response.raise_for_status()
+                      payload = response.json()
+                      if not payload.get('success', True):
+                          raise RuntimeError(str(payload.get('errors', payload))[:400])
+                      encoded = (payload.get('result') or {}).get('image')
+                      if not encoded:
+                          raise RuntimeError('Cloudflare yanitinda result.image bulunamadi.')
+                      raw = base64.b64decode(encoded)
+                      if len(raw) < 18000:
+                          raise RuntimeError(f'AI gorseli cok kucuk: {len(raw)} byte.')
+                      with Image.open(io.BytesIO(raw)) as opened:
+                          opened.load()
+                          image = opened.convert('RGB')
+                      if image.width < 400 or image.height < 400:
+                          raise RuntimeError(f'AI kaynak cozunurlugu yetersiz: {image.size}')
+                      # FLUX.2 Klein 4B supports native 9:16 output; only normalize exact dimensions.
+                      image = ImageOps.fit(image, (768, 1365), method=Image.Resampling.LANCZOS,
+                                           centering=(0.5, 0.5))
+                      validate_generated_image(image, scene_no)
+                      image.save(path, 'JPEG', quality=95, optimize=True)
+                      record = {
+                          'scene': scene_no, 'caption': caption,
+                          'source_type': 'AI-generated / Cloudflare Workers AI FLUX.2 Klein 4B',
+                          'commons_title': f'AI-generated scene {scene_no}',
+                          'artist': 'AI-generated', 'license': 'AI-generated image',
+                          'source_page': '', 'image_url': '',
+                      }
+                      source_file = OUT / 'image_sources.json'
+                      sources = json.loads(source_file.read_text(encoding='utf-8')) if source_file.exists() else []
+                      sources.append(record)
+                      source_file.write_text(json.dumps(sources, ensure_ascii=False, indent=2), encoding='utf-8')
+                      print(f'AI GORSEL ONAYLANDI: sahne {scene_no}/{SCENE_COUNT} | FLUX.2 Klein 4B | {image.width}x{image.height}')
+                      return path
+                  except Exception as exc:
+                      last_error = exc
+                      print(f'Cloudflare AI sahne {scene_no} denemesi {attempt+1}/3: {str(exc)[:260]}')
+                      if attempt < 2:
+                          time.sleep(5 * (attempt + 1))
+              raise RuntimeError(f'Cloudflare AI sahne gorseli uretilemedi: {last_error}')
+
+
+          def generate_scene_image(scene_no, caption, topic_id, seed):
+              """Prefer a custom AI image; use Wikimedia Commons only as a free fallback."""
+              path = IMAGE_DIR / f'scene_{scene_no:02d}.jpg'
+              if CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN:
+                  try:
+                      return generate_cloudflare_scene_image(scene_no, caption, topic_id, seed)
+                  except Exception as ai_error:
+                      print(f'UYARI: AI gorseli olusmadi; bu sahnede ucretsiz Commons yedegi deneniyor: {str(ai_error)[:260]}')
+              else:
+                  print('Bilgi: Cloudflare AI anahtarlari yok; Wikimedia Commons yedegi kullaniliyor.')
               kind = paranormal_visual_kind(topic_id, title)
               terms = commons_terms(kind, caption)
               banned = ('diagram', 'map', 'logo', 'coat of arms', 'drawing', 'illustration',
@@ -1065,8 +1159,9 @@ jobs:
                           work = safe_text(item.get('commons_title', 'Gorsel'), 90) or 'Gorsel'
                           artist = safe_text(item.get('artist', 'Bilinmiyor'), 55) or 'Bilinmiyor'
                           license_name = safe_text(item.get('license', 'Lisans bilgisi'), 35) or 'Lisans bilgisi'
+                          source_type = safe_text(item.get('source_type', 'Wikimedia Commons'), 65)
                           page = safe_url(item.get('source_page', ''))
-                          line = 'Scene ' + safe_text(item.get('scene', ''), 2) + ': ' + work + ' / ' + artist + ' / ' + license_name
+                          line = 'Scene ' + safe_text(item.get('scene', ''), 2) + ': ' + source_type + ' / ' + work + ' / ' + artist + ' / ' + license_name
                           if page:
                               line += ' / ' + page
                           credit_lines.append(line[:480])
@@ -1080,12 +1175,12 @@ jobs:
                        '#Shorts #Paranormal #GizemliHikayeler')
               attribution = ''
               if credit_lines:
-                  attribution = ('\n\nIMAGE CREDITS (Wikimedia Commons):\n' + '\n'.join(credit_lines) +
+                  attribution = ('\n\nIMAGE SOURCES / CREDITS:\n' + '\n'.join(credit_lines) +
                       '\nLicense information: see each source page for the applicable license and terms.')
               description = (intro + attribution)[:4500].rstrip()
               # En sade yedek de kaynak atiflarini tutar; aciklama 4000 karakterin altinda kalir.
               fallback_description = ('Gizemli Dunya paranormal hikaye videosu. Kurgu anlatim. #Shorts' +
-                  (('\n\nWikimedia Commons image credits:\n' + '\n'.join(credit_lines)) if credit_lines else ''))[:3900].rstrip()
+                  (('\n\nImage sources / credits:\n' + '\n'.join(credit_lines)) if credit_lines else ''))[:3900].rstrip()
               tags = ['Shorts', 'Gizemli Dunya', 'Paranormal', 'Gizemli Hikayeler', 'Korku Hikayeleri']
               body = {
                   'snippet': {'title': safe_title, 'description': description, 'tags': tags,
