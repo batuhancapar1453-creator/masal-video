@@ -99,11 +99,13 @@ jobs:
           # Ucretsiz lisansli sahne fotograflari 768x1365 hazirlanir; final video 1080x1920 kodlanir.
           WIDTH, HEIGHT, FPS = 480, 854, 20
           OUTPUT_WIDTH, OUTPUT_HEIGHT = 1080, 1920
-          TARGET_SECONDS = 30.0
+          STORY_PAUSE_SECONDS = 0.45
           SCENE_COUNT = 5
           IMAGE_DIR = OUT / 'scene_images'
           SAMPLE_RATE = 22050
-          TTS_VOICE = 'tr-TR-EmelNeural'
+          TTS_VOICE = 'tr-TR-AhmetNeural'
+          TTS_RATE = '-7%'
+          TTS_PITCH = '-12Hz'
           YOUTUBE_CLIENT_ID = os.environ.get('YOUTUBE_CLIENT_ID', '').strip()
           YOUTUBE_CLIENT_SECRET = os.environ.get('YOUTUBE_CLIENT_SECRET', '').strip()
           YOUTUBE_REFRESH_TOKEN = os.environ.get('YOUTUBE_REFRESH_TOKEN', '').strip()
@@ -210,374 +212,194 @@ jobs:
               return 'haunted_room'
 
           TOPICS = [
-            ["paranormal-0317-phone", "Gece 03.17’de Çalan Telefon", "Paranormal", [
-              "Telefon her gece tam 03.17’de çalıyordu.",
-              "Arayan numara, yıllar önce kapatılmış eski evlerine aitti.",
-              "Bir gece cevap verdi; karşıdan kendi sesi duyuldu.",
-              "Ses yalnızca şunu fısıldadı: Sakın kapıyı açma."
+            ["story-bedroom-double", "Yatağımda Kim Var?", "Korku Hikayesi", [
+              "Gece yarısı baba, yedi yaşındaki oğluna iyi geceler demek için odasına girdi. Çocuk yorganın altında yatıyordu. Yüzünde, babasının daha önce hiç görmediği tuhaf bir gülümseme vardı.",
+              "“Bugün neden bu kadar sessizsin?” diye sordu baba. Çocuk gözlerini kırpmadan, “Baba, yatağımın altında bir şey var. Bakabilir misin?” dedi. Baba eğilmeden önce çocuğun elini tuttu; eli buz gibiydi.",
+              "Baba yatağın altına baktığında karanlıkta bir çift göz gördü. Orada, pijamaları içindeki gerçek oğlu yatıyordu. Çocuk ağlamamak için ağzını kapatmıştı. “Baba,” diye fısıldadı, “yatağımda benim gibi görünen biri var.”",
+              "Baba yavaşça doğruldu. Yatakta oturan şey hâlâ gülümsüyordu. “Baba, neden yere bakıyorsun?” dedi. Sonra babasının sesini taklit ederek ekledi: “Oğlum, yatağın altına saklanma. Orası benim yerim.”",
             ]],
-            ["paranormal-thirteenth-room", "Oteldeki On Üçüncü Oda", "Paranormal", [
-              "Eski otelin koridorunda on iki oda görünüyordu.",
-              "Gece görevli, duvarda yeni bir kapı fark etti.",
-              "Kapının ardında kendi odasının birebir aynısı vardı.",
-              "Yatağın üzerinde ise henüz çekilmemiş bir valiz duruyordu."
+            ["story-0317-call", "03.17'de Annemin Sesi", "Korku Hikayesi", [
+              "Deniz, annesini üç yıl önce kaybetmişti. O gece telefonu tam 03.17’de çaldı. Ekranda annesinin eski numarası yazıyordu. Önce kapatmak istedi, sonra titreyen parmağıyla aramayı açtı.",
+              "Karşıdan annesinin sesi geldi: “Oğlum, kapıyı açma. Ben dışarıda değilim.” Deniz dondu. Çünkü aynı anda apartman kapısına üç kez vuruldu ve annesinin sesi koridordan, “Deniz, benim, aç kapıyı,” diye seslendi.",
+              "Telefon hâlâ kulağındaydı. İçerideki ses ağlamaya başladı: “Beni dinle. Dışarıdaki şey benim sesimi kullanıyor.” Deniz kapı dürbününden baktı. Koridor boştu; ama kapının altından içeriye doğru ıslak ayak izleri uzanıyordu.",
+              "Telefonun sesi birden kesildi. Ardından annesinin sesi bu kez Deniz'in arkasından geldi: “Aferin oğlum. Kapıyı açmadın.” Deniz yavaşça döndü. Telefon ekranında arama hâlâ sürüyordu; arayan numara ise kendi numarasıydı.",
             ]],
-            ["paranormal-late-mirror", "Aynadaki Yansıma Bir Saniye Geç Kaldı", "Paranormal", [
-              "Genç adam aynaya baktığında yansıması gülümsedi.",
-              "Ama kendisi hiç gülümsememişti.",
-              "Elini kaldırdı; aynadaki el birkaç saniye sonra kalktı.",
-              "O gece aynayı duvara çevirdi, sabah yine karşısındaydı."
+            ["story-hotel-room", "Otelin Olmayan Odası", "Korku Hikayesi", [
+              "Gece vardiyasındaki resepsiyonist, otelde yalnızca on iki oda bulunduğunu biliyordu. Saat 02.10’da asansörden çıkan yaşlı bir adam, 13 numaralı odanın anahtarını istedi. Adamın elindeki rezervasyon kâğıdı yirmi yıl öncesine aitti.",
+              "Resepsiyonist nazikçe odanın olmadığını söyledi. Yaşlı adam, “Her gece var,” diye cevap verdi. Sonra koridorun sonundaki duvarı gösterdi. Resepsiyonist baktığında orada, az önce olmayan bir kapı duruyordu.",
+              "Kapıyı açtıklarında içeride eski bir oda, tozlu bir yatak ve duvarda resepsiyonistin çocukluk fotoğrafı vardı. Fotoğrafta küçük kız, otel lobisinde aynı yaşlı adamın elini tutuyordu.",
+              "Resepsiyonist geri çekildi. Yaşlı adam fısıldadı: “Beni hatırladın mı? O gece seni odadan çıkarmıştım.” Kadın fotoğrafın arkasını çevirdi. Tarih, kendi doğumundan on yıl öncesini gösteriyordu.",
             ]],
-            ["paranormal-three-knocks", "Ormandan Gelen Üç Vuruş", "Paranormal", [
-              "Kampçılar gece çadırlarının çevresinde üç vuruş duydu.",
-              "Ses her seferinde biraz daha yakından geliyordu.",
-              "Dışarı çıktıklarında ağaçların arasında kimseyi göremediler.",
-              "Sabah çadırın üzerinde içeriden atılmış gibi üç iz vardı."
+            ["story-mirror", "Aynadaki Geç Kalan", "Korku Hikayesi", [
+              "Emre, banyoda dişlerini fırçalarken aynadaki yansımasının gözlerini kendisinden geç kırptığını fark etti. Uykusuz olduğunu düşündü. Başını sağa çevirdi, aynadaki görüntü bir saniye sonra onu takip etti.",
+              "Telefonunu lavaboya dayayıp video kaydını açtı. Bu kez aynaya el salladı. Kayıtta yansıma hiç hareket etmedi; Emre elini indirdikten sonra görüntü yavaşça gülümsedi.",
+              "Emre banyodan çıktı ve kapıyı kilitledi. İçeriden musluk açıldı. Aynaya bakmamaya çalışırken telefonuna yeni bir video bildirimi geldi. Kayıtta, aynadaki görüntü kameraya yaklaşıp cama içeriden vuruyordu.",
+              "Sonra banyodaki kapı kolu aşağı indi. Emre kaçmak için merdivene yöneldi. Telefonundaki son karede aynadaki yansıma artık banyoda değildi; koridorda, tam arkasında duruyordu.",
             ]],
-            ["paranormal-ghost-train", "Son Seferini Yapan Hayalet Tren", "Paranormal", [
-              "Kasabanın eski istasyonu yıllardır kapalıydı.",
-              "Buna rağmen her cuma gece yarısı tren sesi duyuluyordu.",
-              "Bir bekçi raylarda ışıkları yaklaşan eski bir tren gördü.",
-              "Tren durdu; pencerelerde yıllar önce kaybolan yolcular vardı."
+            ["story-cabin", "Dağ Evindeki Misafir", "Korku Hikayesi", [
+              "Kar fırtınası yüzünden dağ evinde mahsur kalan Elif, gece kapının çalındığını duydu. Dışarıda kimse yoktu. Eşi, “Rüzgârdır,” dedi. Ama kapının önündeki karın üzerinde eve doğru gelen tek bir ayak izi vardı.",
+              "Bir süre sonra üst kattan bir sandalye sürüklenme sesi geldi. Evde yalnızca ikisi vardı. Elif eşine baktı; o da sesi duymuştu. “Yukarıda kim var?” diye seslendi. Cevap gelmedi.",
+              "Telefon çekmediği için eşini aşağıda bırakıp merdivenleri çıktı. Yatak odasının kapısı aralıktı. İçeride, kendi montunu giymiş biri pencereye sırtı dönük duruyordu. Elif adını söylediğinde o kişi başını çevirmedi.",
+              "Alt kattan eşi bağırdı: “Elif, sakın içeri girme! Ben hâlâ kapının önündeyim!” Elif'in önündeki kişi yavaşça döndü. Yüzü eşinin yüzüydü; ama ağzı hiç kıpırdamadan onun sesiyle konuştu: “Hangimize inanacaksın?”",
             ]],
-            ["paranormal-lighthouse", "Sis İçindeki Deniz Feneri", "Paranormal", [
-              "Fırtınalı gecede terk edilmiş fener yeniden ışık verdi.",
-              "Balıkçılar ışığın denize değil, kıyıdaki kayalıklara döndüğünü gördü.",
-              "Fenerin kapısı içeriden kilitliydi.",
-              "Ertesi sabah camda ıslak bir el izi belirdi."
+            ["story-baby-monitor", "Bebek Telsizindeki Ninni", "Korku Hikayesi", [
+              "Yeni anne Zeynep, bebeği uyuduktan sonra telsizi açıp mutfağa geçti. Gece yarısı cihazdan hafif bir ninni duyuldu. Eşi uyuyordu; evde ninni söyleyen başka kimse yoktu.",
+              "Zeynep odaya girdiğinde bebek gözleri açık şekilde tavana bakıyordu. Telsizden aynı melodi devam etti. Bu kez şarkının arasında bir kadın, “Birazdan kapıyı açacak,” diye fısıldadı.",
+              "Zeynep cihazı kapattı. Ninni bu kez bebeğin odasındaki dolabın içinden duyuldu. Dolabı açtığında yalnızca battaniyeler vardı. En alttaki battaniyenin altında, kendi çocukluğundan kalma eski bir bebek telsizi buldu.",
+              "Eski cihazın hoparlöründen kendi sesi yükseldi: “Zeynep, sakın bebeği kucağına alma.” Tam o sırada beşikteki bebek, annesinin sesiyle fısıldadı: “Geç kaldın.”",
             ]],
-            ["paranormal-attic-steps", "Kilitli Tavan Arasındaki Adımlar", "Paranormal", [
-              "Aile her gece tavandan ağır adımlar duyuyordu.",
-              "Tavan arasının anahtarı yıllardır aynı çekmecedeydi.",
-              "Kapıyı açtıklarında içeride yalnızca eski bir sandalye buldular.",
-              "Aşağı indiklerinde sandalye merdivenin başında onları bekliyordu."
+            ["story-last-train", "Son Trenin Yolcusu", "Korku Hikayesi", [
+              "Son trenin makinisti Murat, boş vagonda tek bir yolcu gördü. Adam eski model bir palto giymiş, yüzünü camdan dışarı çevirmişti. Bilet kontrolü için yanına gittiğinde adam başını kaldırmadan, “Bu sefer durmayın,” dedi.",
+              "Murat istasyon listesine baktı. Bir sonraki durak on beş yıldır kapalıydı. Telsizden merkeze sordu; cevap alamadı. Tren yavaşlamaya başladığında yolcu ayağa kalktı ve “Burada inmem gerekiyor,” dedi.",
+              "Kapılar açıldı. Peronda onlarca kişi sessizce bekliyordu. Hepsi aynı eski fotoğraftaki insanlara benziyordu. Murat fotoğrafı yıllar önce kaybolan babasının cüzdanında görmüştü.",
+              "Yolcu inerken Murat'a döndü. Adam babasıydı. “O gece treni sen kullanıyordun,” dedi. Murat irkildi; çünkü o kazada makinist değil, kurtulan tek yolcuydu.",
             ]],
-            ["paranormal-stranger-photo", "Fotoğrafta Beliren Yabancı", "Paranormal", [
-              "Arkadaşlar eski evin önünde toplu fotoğraf çekti.",
-              "Fotoğrafta grubun arkasında tanımadıkları biri duruyordu.",
-              "Görüntüyü büyüttüler; yabancı evin penceresinden bakıyordu.",
-              "Evin içinde aynı fotoğrafın daha eski bir kopyası bulundu."
+            ["story-neighbor", "Üst Kattaki Komşu", "Korku Hikayesi", [
+              "Selin, yeni taşındığı dairede her gece saat 01.00'de üst kattan sandalye çekilme sesi duyuyordu. Yöneticiye sorduğunda üst katın yıllardır boş olduğunu öğrendi. Yine de her gece aynı ses tekrarlanıyordu.",
+              "Bir akşam tavana vurup sesin kesilmesini bekledi. Üç saniye sonra tavandan üç kez vuruldu. Ertesi gece tavana “Yeter,” diye bağırdı. Bu kez yukarıdan kendi sesiyle “Yeter,” cevabı geldi.",
+              "Selin telefonunu kayda aldı ve koridora çıktı. Üst katın kapısı aralıktı. İçeride kendi dairesinin aynısı vardı; aynı koltuk, aynı perde, aynı masada duran telefon. Telefon ekranında canlı kayıt açıktı.",
+              "Kayda baktığında kendisini kapının önünde görüyordu. Görüntüdeki Selin başını kaldırıp kameraya baktı ve fısıldadı: “Aşağı inme. Ben zaten aşağıdayım.”",
             ]],
-            ["paranormal-moving-chair", "Her Gece Yer Değiştiren Sandalye", "Paranormal", [
-              "Yaşlı evdeki sandalye her sabah başka yerde bulunuyordu.",
-              "Ev sahibi gece kamerayı açıp odadan çıktı.",
-              "Kayıtta sandalye yavaşça masaya yaklaşıyordu.",
-              "Sonra görünmeyen biri oturmuş gibi minder çöktü."
+            ["story-photo", "Aile Fotoğrafındaki Çocuk", "Korku Hikayesi", [
+              "Bir taşınma sırasında bulunan eski aile fotoğrafında, herkesin arkasında tanımadıkları küçük bir çocuk duruyordu. Fotoğrafın çekildiği gün ailede yalnızca dört kişi vardı. Çocuk, kameraya değil evin penceresine bakıyordu.",
+              "Anne fotoğrafı büyüttü. Çocuğun yüzü, yıllar önce kaybolan komşu çocukla aynıydı. Babası fotoğrafı çöpe attı ve konuyu kapattı. O gece fotoğraf, salon masasının üzerinde yeniden belirdi.",
+              "Ertesi sabah fotoğraftaki çocuk biraz daha yakındı. Sonraki gün aile üyelerinin arasına girmişti. Her gece görüntüdeki mesafe azalıyordu. Aile fotoğrafı kilitli çekmeceye koydu.",
+              "Bir hafta sonra fotoğrafta yalnızca boş salon vardı. Aile rahatladı. Sonra küçük kızları, “Anne, fotoğraftaki çocuk neden artık bizimle kahvaltı ediyor?” diye sordu.",
             ]],
-            ["paranormal-hospital-hall", "Terk Edilmiş Hastanenin Koridoru", "Paranormal", [
-              "Gece güvenliği kapalı hastaneden bir zil sesi duydu.",
-              "Ses, yıllardır kullanılmayan üçüncü kattaki odadan geliyordu.",
-              "Koridordaki ışıklar sırayla yanıp sönmeye başladı.",
-              "Kapının altından bir gölge geçti, ama oda boştu."
+            ["story-hospital", "Boş Hastanedeki Oda", "Korku Hikayesi", [
+              "Gece güvenlik görevlisi Cem, kapatılmış hastanede her gece aynı odadan çağrı zili sesi duyuyordu. Oda 214'ün elektriği kesilmişti. İlk gece kontrol ettiğinde yatak boştu, zil kablosu ise duvardan sökülmüştü.",
+              "Üçüncü gece kapının altından ışık sızdı. İçeri girdiğinde monitör çalışıyordu. Ekranda kalp ritmi vardı; yatakta kimse yoktu. Monitörün yanındaki dosyada kendi adı ve o geceki tarih yazıyordu.",
+              "Cem telsizle yardım istedi. Merkezden gelen ses, “O hastanede görevli değilsin,” dedi. “Sen 214 numaralı hastasın.” Cem dosyayı açtı; içinde yıllar önce geçirdiği kazanın raporu vardı.",
+              "Kapıya koştu ama koridor yerine hastane yatağında uyandığını gördü. Başucundaki hemşire gözlerini açtı: “Sonunda uyandın.” Sonra monitör düz çizgiye geçti.",
             ]],
-            ["paranormal-zero-floor", "Asansördeki Sıfırıncı Kat", "Paranormal", [
-              "Asansör normalde bodrumda durmuyordu.",
-              "Bir gece ekranda daha önce görülmeyen sıfır rakamı yandı.",
-              "Kapılar açılınca aynı binanın karanlık bir kopyası göründü.",
-              "İçerideki duvar saatleri hep aynı dakikayı gösteriyordu."
+            ["story-elevator", "Asansörün Durdurduğu Kat", "Korku Hikayesi", [
+              "Gece eve dönen Barış, asansörde yalnızdı. Düğmelere basmadığı hâlde kabin bodrumun altında durdu. Ekranda eksi bir yerine “0” yazıyordu. Kapılar açılınca kendi apartmanının karanlık bir kopyasını gördü.",
+              "Koridorda aynı kapılar vardı ama daire numaraları tersti. Kendi kapısının önünde çocukluğundaki kırmızı bisiklet duruyordu. Bisikleti yirmi yıl önce kaybolmuştu. İçeriden annesinin sesi geldi: “Barış, geç kaldın.”",
+              "Annesi yıllar önce ölmüştü. Asansöre geri koştu, fakat kapılar kapanmadı. Koridorun sonunda kendisine benzeyen bir adam belirdi ve “Bu sefer sen kal,” dedi.",
+              "Barış sonunda asansöre bindi. Normal kata çıktığında güvenlik görevlisi onu görünce şaşırdı: “Az önce senin cenazenden dönüyorduk.” Kamera kayıtlarında asansöre binen kimse görünmüyordu.",
             ]],
-            ["paranormal-village-bell", "Kayıp Köyün Gece Çanı", "Paranormal", [
-              "Haritalarda görünmeyen köyden geceleri çan sesi yükseliyordu.",
-              "Meraklı gezgin sesi takip ederek sisli yola girdi.",
-              "Taş evlerin pencerelerinde solgun ışıklar yanıyordu.",
-              "Sabah aynı yerde yalnızca boş bir tarla vardı."
+            ["story-forest", "Ormandaki Telefon", "Korku Hikayesi", [
+              "İki arkadaş yürüyüşte yollarını kaybetti. Telefon çekmiyordu. Yerde çamura bulanmış eski bir telefon buldular. Ekranı çatlak olmasına rağmen çalışıyordu ve tek bir numaradan arama geliyordu.",
+              "Aramayı açınca kendi seslerinden biri duyuldu: “Sakın patikadan ayrılmayın.” Arkadaşlar birbirine baktı. Ses, birkaç saniye sonra yanlarında yaşanacak tartışmayı kelimesi kelimesine anlattı.",
+              "Telefon yeniden çaldı. Bu kez ses ağlıyordu: “Biri arkamızda. Sakın dönmeyin.” İkisi de koşmaya başladı. Ağaçların arasında üçüncü birinin ayak sesleri onlarla aynı hızda ilerliyordu.",
+              "Yola çıktıklarında telefon sustu. Ekranda yeni bir fotoğraf belirdi: İkisi ormanda yürürken çekilmişti. Fotoğrafın arkasında, yüzü kameraya dönük üçüncü arkadaşları duruyordu. Oysa yanlarında yalnızca ikisi vardı.",
             ]],
-            ["paranormal-door-light", "Kapının Altından Sızan Işık", "Paranormal", [
-              "Evde kimse yokken bodrum kapısının altı aydınlandı.",
-              "Ev sahibi ışığı kapattı, fakat parıltı geri geldi.",
-              "Kapıyı açınca aşağıda eski bir koridor uzanıyordu.",
-              "Koridorun sonunda kendi evinin kapısı görünüyordu."
+            ["story-door", "Kapıyı Açan Kimdi?", "Korku Hikayesi", [
+              "Gece vardiyasından dönen Mert, evinin kapısının içeriden kilitlendiğini fark etti. Eşi evdeydi; anahtarı çevirdiğinde kapı açılmadı. İçeriden eşi, “Bir dakika, kapıyı ben açayım,” diye seslendi.",
+              "Kapı açıldığında eşi koridorda duruyordu. Mert içeri girdi, ayakkabılarını çıkardı. Tam o sırada telefonuna eşinden mesaj geldi: “Neredesin? Kapıyı çalmanı bekliyorum.”",
+              "Mert mesajı okurken karşısındaki kadın gülümsedi. “Telefonunu kapat,” dedi. “O sana yazamaz.” Mert geri çekildi. Kadının ayakları yerde değil, birkaç santim yukarıda duruyordu.",
+              "Kapının dışından gerçek eşinin sesi geldi: “Mert, sakın içeridekiyle konuşma!” Mert kapıya koştu. Arkasındaki kadın, bu kez kendi sesiyle fısıldadı: “Beni dışarıda bırakma. Sen beni içeri aldın.”",
             ]],
-            ["paranormal-piano", "Gece Yarısı Çalan Piyano", "Paranormal", [
-              "Terk edilmiş konaktan her gece aynı melodi duyuluyordu.",
-              "Mahalleli piyanonun tuşlarının kendi kendine hareket ettiğini anlattı.",
-              "Bir müzisyen melodiyi kaydetmek için içeri girdi.",
-              "Kayıtta ikinci bir piyano daha ona eşlik ediyordu."
+            ["story-radio", "Radyodaki Son Haber", "Korku Hikayesi", [
+              "Gece araba kullanan Ozan, eski radyosunda kendi adını duydu. Spiker, “Saat 02.40'ta şehir çıkışında meydana gelen kazada sürücü Ozan Yılmaz hayatını kaybetti,” diyordu. Saat henüz 02.12'ydi.",
+              "Ozan radyoyu kapattı. Telefonundan haber sitelerine baktı; hiçbir şey yoktu. Birkaç kilometre sonra spiker tekrar konuştu: “Sürücü şu anda sağ şeritte, farları yanmayan beyaz bir kamyonun arkasında.”",
+              "Ozan aynadan baktı. Beyaz kamyon gerçekten arkasındaydı. Hızlandı, ama kamyon da hızlandı. Radyodaki spiker bu kez kazanın nasıl olacağını anlattı: “Bir sonraki virajda direksiyon kilitlenecek.”",
+              "Ozan viraja girmeden durdu. Kamyon yanından geçerken sürücüsünün yüzünü gördü. Direksiyonda kendisi oturuyordu; başını çevirip radyodaki sesiyle “Yayını dinlemeye devam et,” dedi.",
             ]],
-            ["paranormal-wall-whisper", "Duvarın İçindeki Fısıltı", "Paranormal", [
-              "Yeni taşındıkları evde duvarlardan fısıltılar geliyordu.",
-              "Sesler yalnızca ev tamamen sessizken duyuluyordu.",
-              "Bir gece fısıltı, odadaki eşyaların yerini tek tek söyledi.",
-              "Sabah bütün eşyalar anlatıldığı gibi dizilmişti."
+            ["story-basement", "Bodrumdaki Çocuk", "Korku Hikayesi", [
+              "Ev sahibi tadilat için bodruma indiğinde duvarın arkasından çocuk ağlaması duydu. Duvarı açtırdı; arkasında eski bir merdiven ve küçük bir kapı vardı. Evin planında böyle bir bölüm görünmüyordu.",
+              "Kapının ardında çocuk odası vardı. Yerde oyuncak araba, masada yarım kalmış bir resim duruyordu. Resimde evin bugünkü hâli çizilmişti; pencerede ise bodruma inen bir adam vardı.",
+              "Adam resmi eline alınca arkasından küçük bir ses geldi: “Babam nerede?” Döndüğünde odada kimse yoktu. Kapının dışından kendi çocukluk lakabını duyan adam dondu kaldı.",
+              "Yukarı çıkıp eşiyle konuştu. Eşi, “Bizim çocuğumuz olmadı,” dedi. Adam itiraz edecekti ki eşinin elindeki eski fotoğrafı gördü. Fotoğrafta, bodrumdaki resimdeki çocukla yan yana kendisi duruyordu.",
             ]],
-            ["paranormal-ghost-ship", "Kıyıya Dönen Hayalet Gemi", "Paranormal", [
-              "Balıkçılar sisin içinden eski bir yelkenli çıktığını gördü.",
-              "Geminin yelkenleri rüzgâr yokken şişiyordu.",
-              "Güvertede kimse yoktu, ama bir fener sallanıyordu.",
-              "Şafakta gemi sisle birlikte gözden kayboldu."
+            ["story-window", "Penceredeki Kadın", "Korku Hikayesi", [
+              "Her gece karşı apartmanın aynı penceresinde bir kadın duruyordu. Perde aralığından sokağı izliyor, ışıklar sönene kadar kıpırdamıyordu. Ece, komşusuna kadını sorduğunda o dairede kimsenin yaşamadığını öğrendi.",
+              "Bir gece kadın elini cama koydu. Ece de istemsizce elini kendi penceresine koydu. Kadın başını yana eğdi ve dudaklarını oynattı: “Arkanda.” Ece hızla döndü; odada kimse yoktu.",
+              "Ertesi akşam pencerenin önüne kamera koydu. Kayıtta karşı daire boştu. Ancak kendi odasının camında, Ece'nin arkasında duran başka bir kadın görünüyordu.",
+              "Ece kaydı durdurup arkasına baktı. Oda boştu. Telefonuna karşı apartmandan bir mesaj geldi: “Bu gece pencereye çıkma. Seni gören kadın ben değilim.” Mesajı gönderen kişi, kendi telefon numarasıydı.",
             ]],
-            ["paranormal-red-window", "Kırmızı Işıklı Pencere", "Paranormal", [
-              "Kasabanın boş evinde her gece kırmızı bir pencere yanıyordu.",
-              "Elektrik bağlantısı yıllar önce kesilmişti.",
-              "Bir komşu yaklaştığında içeride perde arkasında bir siluet gördü.",
-              "Ertesi gece evin bütün pencereleri duvarla örülmüştü."
+            ["story-taxi", "Son Yolcu", "Korku Hikayesi", [
+              "Taksi şoförü Hakan, yağmurlu gecede mezarlık önünden bir kadın aldı. Kadın adres vermedi; yalnızca “Beni eve götürün, ama aynaya bakmayın,” dedi. Hakan bunun tuhaf bir şaka olduğunu düşündü.",
+              "Yol boyunca kadın hiç konuşmadı. Dikiz aynasında arka koltuk boş görünüyordu. Hakan başını çevirdiğinde kadın oradaydı. Kadın sakin bir sesle, “Söylemiştim,” dedi.",
+              "Adresin önüne geldiklerinde kadın indi ve arka koltuğa eski bir fotoğraf bıraktı. Fotoğrafta Hakan, genç bir kadınla mezarlıkta duruyordu. Kadının yüzü, az önceki yolcunun yüzüydü.",
+              "Hakan fotoğrafı çevirdi. Arkasında kendi el yazısıyla şu not vardı: “Bu gece onu yine eve götürdüm.” Tarih on iki yıl öncesine aitti; o gece Hakan'ın yaptığı ilk taksi yolculuğuydu.",
             ]],
-            ["paranormal-shared-dream", "Aynı Rüyayı Gören Komşular", "Paranormal", [
-              "Aynı sokaktaki üç kişi aynı gece aynı rüyayı gördü.",
-              "Rüyalarında kapısız uzun bir koridorda yürüyorlardı.",
-              "Koridorun sonunda kendi sokaklarının tabelası duruyordu.",
-              "Sabah üçü de aynı saatte kapı zilini duydu."
+            ["story-cassette", "Kasetteki Kayıt", "Korku Hikayesi", [
+              "Babası öldükten sonra eşyalarını toplayan Aslı, üzerinde kendi adının yazdığı bir kaset buldu. Kasetin tarihi, doğduğu günden üç ay öncesiydi. Eski teybe takıp oynattığında önce annesinin sesi duyuldu.",
+              "Annesi kayıtta, “Bunu dinliyorsan evde yalnız değilsin,” diyordu. Ardından bir kapı kapanma sesi geldi. Aslı kaydı durdurdu; evin giriş kapısı az önce kendiliğinden kapanmıştı.",
+              "Kaseti başa sardı. Bu kez kendi çocuk sesini duydu: “Anne, odamdaki kadın yine geldi.” Aslı'nın hiç hatırlamadığı bir çocukluk anısıydı. Kayıt ilerledikçe kadın, teybe çok yakından nefes almaya başladı.",
+              "Son bölümde babası konuştu: “Aslı, anneni dinleme. O kadın annenin yüzünü aldı.” Aslı kaseti elinden düşürdü. Mutfaktan annesinin sesi geldi: “Kızım, sonunda buldun mu?”",
             ]],
-            ["paranormal-missing-passenger", "Son Duraktaki Yolcu", "Paranormal", [
-              "Gece otobüs şoförü son durakta tek yolcu aldı.",
-              "Yolcu hiç konuşmadan arka koltuğa oturdu.",
-              "Aynadan baktığında koltuk boş görünüyordu.",
-              "Bilet makinesinde ise yeni basılmış bir bilet vardı."
+            ["story-school", "Okulda Son Yoklama", "Korku Hikayesi", [
+              "Temizlik görevlisi Nihat, kapatılmış okulda son turunu atarken sınıflardan birinde yoklama sesi duydu. İçeride ışık yanıyordu. Kapıyı açtığında sıralar doluydu; öğrenciler başları öne eğik oturuyordu.",
+              "Öğretmen adları okuyor, her isme aynı çocuk cevap veriyordu: “Buradayım.” Nihat içeri girdiğinde öğretmen başını kaldırmadan, “Geç kaldınız, müdür bey,” dedi.",
+              "Nihat yıllar önce bu okulda müdürdü. Bir yangında sınıftaki çocukları kurtaramamıştı. Öğretmen, boş bir sırayı gösterdi: “Sizin yeriniz hâlâ boş.”",
+              "Nihat kaçmak için döndü. Kapı yerine sınıfın arka duvarında eski bir yangın merdiveni vardı. Öğrenciler aynı anda başlarını kaldırdı ve tek ağızdan, “Bu kez bizi bırakmayın,” dedi.",
             ]],
-            ["paranormal-umbrella", "Mezarlıkta Açılan Şemsiye", "Paranormal", [
-              "Yağmursuz bir gecede mezarlıkta siyah şemsiye belirdi.",
-              "Bekçi şemsiyeyi kapatıp kulübeye götürdü.",
-              "Sabah şemsiye yine aynı mezarın başındaydı.",
-              "Toprağın üzerinde bu kez iki çift ayak izi vardı."
+            ["story-lighthouse", "Fenerdeki Işık", "Korku Hikayesi", [
+              "Balıkçı Cemil, yıllardır terk edilmiş deniz fenerinin her gece yandığını fark etti. Işık denize değil, kendi teknesine dönüyordu. Bir gece kıyıya çıkıp fenerin kapısını zorladı; kapı içeriden kilitliydi.",
+              "İçeriden telsiz sesi geldi: “Cemil, geri dön.” Ses kendi sesiydi. Merdivenlerden yukarı çıktığında duvarda ıslak ayak izleri gördü. İzler, fenerin tepesine çıkıyor ama aşağı inmiyordu.",
+              "Fenerin lambasının yanında eski bir seyir defteri vardı. Son sayfada o geceki tarih ve “Cemil kıyıya çıkarsa ışığı söndür” yazıyordu. Defterin altında kendi teknesinin anahtarı duruyordu.",
+              "Tam ışığı kapatırken denizden yardım çığlığı duydu. Kıyıda kendi teknesi boştu. Uzakta, dalgaların arasında kendisi suya tutunmuş yardım istiyordu. Fenerdeki Cemil ise ıslak değildi.",
             ]],
-            ["paranormal-last-cassette", "Eski Kasetin Son Kaydı", "Paranormal", [
-              "Bit pazarından alınan kasette evin eski sakinleri konuşuyordu.",
-              "Kayıt yıllar önce yapılmış görünüyordu.",
-              "Son bölümde biri bugünün tarihini fısıldadı.",
-              "Ardından kayıttaki ses, dinleyenin adını söyledi."
+            ["story-wardrobe", "Dolabın İçindeki Oda", "Korku Hikayesi", [
+              "Taşındıkları evde çocuk odasındaki gömme dolap normalden derindi. Duru içine kutu koyarken arka duvarın hafifçe oynadığını fark etti. Duvarı ittiğinde dar bir koridor açıldı; içeriden sıcak yemek kokusu geliyordu.",
+              "Koridorun sonunda kendi evlerinin aynısı vardı. Mutfakta masa kurulmuş, salonda televizyon açıktı. Masanın başında Duru'nun ailesi oturuyordu; ama hepsi birkaç yaş daha yaşlı görünüyordu.",
+              "Öteki Duru ayağa kalktı. “Buraya gelmemeliydin,” dedi. “Biz seni yıllardır bekliyoruz.” Duru geri dönmek istedi, ama koridorun kapısı kapanmıştı.",
+              "Evdeki annesi onu bulduğunda dolabın içinde yalnızca kutular vardı. Duru ortadan kaybolmuştu. O gece anne, dolabın arkasından kızının sesini duydu: “Anne, buradaki Duru gerçek değil.”",
             ]],
-            ["paranormal-empty-class", "Boş Sınıfta Yapılan Yoklama", "Paranormal", [
-              "Okul kapandıktan sonra sınıftan öğretmen sesi geliyordu.",
-              "Güvenlik kamerasında sıralar boş görünüyordu.",
-              "Tahtada her gece yeni bir isim beliriyordu.",
-              "Son yazılan isim, ertesi gün okula gelen bekçinindi."
+            ["story-bridge", "Köprüdeki İkinci Araba", "Korku Hikayesi", [
+              "Gece vardiyasından dönen iki kardeş, sisli köprüde yol kenarında duran aynı model arabayı gördü. İçinde kimse yoktu. Birkaç dakika sonra kendi arabalarının farları arkadan göründü; oysa onlar hâlâ köprüde ilerliyordu.",
+              "Arkalarındaki araç selektör yaptı. Şoför koltuğunda ağabeyleri oturuyordu. Kardeşler birbirine baktı; ağabey direksiyondaydı ve aynadan arkasındaki aracı görmüyordu.",
+              "Telefon çaldı. Arayan, köprüden beş dakika önce geçtiklerini söyleyen polis memuruydu. “Aracınız kaza yaptı,” dedi. “İkiniz de olay yerinde değilsiniz. Ama arka koltukta bir kişi daha var.”",
+              "Ön koltuktaki kardeşler arka aynaya baktı. Arka koltukta üçüncü bir yolcu oturuyordu. Polis telefonda fısıldadı: “Sakın ona bakmayın. O, kazadan önce arabada değildi.”",
             ]],
-            ["paranormal-night-shop", "Gece Açılan Dükkân", "Paranormal", [
-              "Sokaktaki terk edilmiş dükkân yalnızca gece yarısı açılıyordu.",
-              "Vitrinde yıllar önce kaybolan eşyalar sergileniyordu.",
-              "Bir kadın içeri girince çocukluğundaki oyuncağını gördü.",
-              "Dışarı çıktığında dükkânın yerinde boş bir duvar vardı."
+            ["story-clock", "Saat 04.04", "Korku Hikayesi", [
+              "Evdeki eski duvar saati her gece 04.04'te duruyordu. Saat tamircisi Selim mekanizmayı değiştirdi, pili yeniledi. Ertesi sabah saat yine aynı dakikada durmuştu. Üstelik akrep ve yelkovan geriye dönük takılmıştı.",
+              "Bir gece saatin önünde bekledi. 04.03'te tik taklar hızlandı. 04.04 olduğunda evin bütün ışıkları söndü ve koridordan bir çocuk sesi geldi: “Bu kez saklanma.”",
+              "Selim saatin arkasını açtı. İçinde eski bir fotoğraf sıkışmıştı. Fotoğrafta çocukken kendisi, saatin yanında duruyordu. Arkasında annesi, “O gece seni bulamadık,” diye yazmıştı.",
+              "Selim fotoğrafı eline alınca kapı çaldı. Dışarıda annesi duruyordu; annesi yirmi yıl önce ölmüştü. Kadın saate baktı ve “Saat durmadan önce içeri gir,” dedi.",
             ]],
-            ["paranormal-bridge-shadow", "Köprüdeki İkinci Gölge", "Paranormal", [
-              "Bisikletli genç köprüden geçerken iki gölge fark etti.",
-              "Ay ışığında yalnızca kendisi görünüyordu.",
-              "İkinci gölge korkuluğa doğru yürüyüp durdu.",
-              "Genç arkasına baktığında köprü tamamen boştu."
+            ["story-ferry", "Gece Feribotundaki Yolcu", "Korku Hikayesi", [
+              "Son feribotta görevli olan Ayhan, güvertede tek başına oturan yaşlı bir adam gördü. Biletini istediğinde adam cebinden sararmış bir kâğıt çıkardı. Biletin tarihi, feribotun battığı geceye aitti.",
+              "Adam, “Bu sefer karşıya geçeceğim,” dedi. Ayhan kaptana haber verdi. Kaptan kameraları kontrol etti; güverte görüntüsünde Ayhan tek başına görünüyordu.",
+              "Ayhan yeniden güverteye çıktığında adam hâlâ oradaydı. “Beni hatırlamadın mı?” diye sordu. Sonra Ayhan'ın babasının adını söyledi. Babası o feribot kazasında kaybolmuştu.",
+              "Feribot kıyıya yanaştığında adam kayboldu. Ayhan'ın elindeki biletin arkasında tek satır vardı: “O gece seni ben kıyıya çıkardım. Şimdi sıra sende.”",
             ]],
-            ["paranormal-thirteen-clock", "On Üçüncü Kez Çalan Saat", "Paranormal", [
-              "Eski duvar saati gece yarısı on iki kez vurdu.",
-              "Ev halkı ses kesildi sanırken bir vuruş daha geldi.",
-              "Saatin akrebi geriye doğru dönmeye başladı.",
-              "Sabah takvimde bir günün eksildiğini fark ettiler."
+            ["story-attic", "Tavan Arasındaki Kayıt", "Korku Hikayesi", [
+              "Evini yenileyen Murat, tavan arasında eski bir ses kayıt cihazı buldu. Cihazın içindeki tek kasette kendi adı yazıyordu. Oysa ev, ailesine ondan önce aitti. Kaydı açınca kendi sesiyle konuşan birini duydu.",
+              "Ses, “Şimdi merdivenden çıkacak. Elinde tornavida var,” dedi. Murat elindeki tornavidaya baktı. Kayıt devam etti: “Kapıyı açma. İçerideki sen değil.”",
+              "Merdivenden bir gıcırtı geldi. Murat tavan arasının kapısını kapattı. Dışarıdan kendi sesiyle biri, “Aç, aşağıda kaldım,” diye seslendi. Kayıttaki ses ise ağlayarak “Sakın cevap verme,” dedi.",
+              "Kapı kolu yavaşça döndü. Murat kayıt cihazını yere bıraktı. Cihazdan son bir cümle duyuldu: “Beni dinlediğin için teşekkürler. Artık kapıyı ben açabilirim.”",
             ]],
-            ["paranormal-snow-cabin", "Karlı Ormandaki Kulübe", "Paranormal", [
-              "Dağcılar kar fırtınasında terk edilmiş bir kulübeye sığındı.",
-              "Şömine kendi kendine yanmaya başladı.",
-              "Duvara asılı fotoğraftaki kişiler her bakışta değişiyordu.",
-              "Sabah fotoğrafta dağcıların kendileri vardı."
+            ["story-subway", "Boş Metro Vagonu", "Korku Hikayesi", [
+              "Gece son metrosuna binen İrem, vagonda kendisinden başka kimse olmadığını sandı. Bir sonraki istasyonda kapılar açıldı; bütün koltuklarda insanlar oturuyordu. Hepsi başlarını öne eğmiş, aynı ıslak kıyafetleri giymişti.",
+              "İrem kapıya yaklaştı. İstasyondaki tabelada yıllar önce kapatılan bir durak yazıyordu. Telefonuna annesinden mesaj geldi: “O istasyonda inme. Seni orada kaybettik.”",
+              "Vagonun ışıkları titredi. Yolcular aynı anda başlarını kaldırdı. İrem hepsinin yüzünde kendi yüzünü gördü; yaşlı, çocuk, yaralı ve ağlayan hâlleri ona bakıyordu.",
+              "Tren durdu. Kapının dışında küçük bir kız el salladı. İrem onu çocukluk fotoğrafından tanıdı. Kız camın ardından dudaklarını oynattı: “Ben dışarıda kaldım. Sen benim yerime bindin.”",
             ]],
-            ["paranormal-lost-number", "Telefon Rehberindeki Kayıp Numara", "Paranormal", [
-              "Eski telefonda kayıtlı olmayan bir numara belirdi.",
-              "Arandığında karşıdan evin içindeki sesler duyuldu.",
-              "Telefon kapalı olmasına rağmen konuşma sürdü.",
-              "Son cümle, arayan kişinin arkasından geliyordu."
+            ["story-pet", "Köpeğin Baktığı Köşe", "Korku Hikayesi", [
+              "Kerem'in köpeği her gece salonun boş bir köşesine bakıp hırlıyordu. Kerem oraya kamera koydu. Görüntüde köpek normal davranıyor, köşeye hiç bakmıyordu. Ama ses kaydında köpek bütün gece aynı noktaya havlıyordu.",
+              "Bir gece Kerem köpeğin tasmasını tuttu ve “Orada ne var?” diye sordu. Köpek ilk kez havlamadı; kuyruğunu kıstı ve kapıya doğru geri çekildi. Köşeden, Kerem'in çocukluk lakabını söyleyen bir ses geldi.",
+              "Kerem ışığı açtı. Köşe boştu. Sabah kamera kayıtlarını izlediğinde kendisini koltukta uyurken gördü. Görüntünün arkasında, köşede duran uzun bir siluet vardı.",
+              "Kerem kaydı durdurdu. Köpeği yanına çağırdı; köpek gelmedi. Çünkü kamera görüntüsünde köpek hâlâ köşeye bakıyordu. Gerçek odada ise köpek, Kerem'in arkasındaki boşluğa hırlıyordu.",
             ]],
-            ["paranormal-bus-stop-woman", "Her Gece Aynı Durakta Bekleyen Kadın", "Paranormal", [
-              "Şoför her gece boş durakta aynı kadını görüyordu.",
-              "Kadın hep aynı saatte aynı yere bakıyordu.",
-              "Bir gece şoför durdu, fakat durakta kimse yoktu.",
-              "Otobüsün arka camında kadının silueti belirdi."
+            ["story-library", "Kütüphanedeki İsim", "Korku Hikayesi", [
+              "Üniversite kütüphanesinde çalışan Eylül, iade edilen kitapların arasında kendi adı yazılı eski bir günlük buldu. İlk sayfada doğum tarihi, son sayfada ise ertesi günün tarihi vardı. Günlüğün içindeki el yazısı kendisininkiyle aynıydı.",
+              "Sayfaları çevirdi. Her gün için yaptığı şeyler yazılmıştı; hatta o gün öğle yemeğinde ne yiyeceği bile. Son sayfada tek cümle vardı: “Bu gece bodrumdaki kapıyı açma.”",
+              "Eylül kütüphaneyi kapatırken bodrumdan üç kez vuruldu. Güvenlik görevlisi o katta bodrum olmadığını söyledi. Günlüğü çantasına koydu ve çıkışa yöneldi; kapı kilitliydi.",
+              "Son sayfa kendi kendine çevrildi. Yeni bir satır belirdi: “Kapıyı açtı.” Eylül başını kaldırdı. Kütüphanenin rafları arasında, kendi kıyafetlerini giymiş başka bir kadın duruyordu.",
             ]],
-            ["paranormal-museum-steps", "Kapalı Müzedeki Ayak Sesleri", "Paranormal", [
-              "Müze kapandıktan sonra mermer salonda adımlar duyuluyordu.",
-              "Güvenlik görevlisi sesleri eski zırhların yanından takip etti.",
-              "Zırhlardan birinin vizörü yavaşça açıldı.",
-              "Kamera kaydında koridor boyunca yürüyen boş bir zırh vardı."
+            ["story-rain", "Yağmurda Gelen Misafir", "Korku Hikayesi", [
+              "Şiddetli yağmurda kapısı çalınan yaşlı çift, sırılsıklam bir genç kadını içeri aldı. Kadın, “Telefonum çekmiyor. Biraz oturabilir miyim?” dedi. Ev sahibi ona havlu verdi; kadın aynaya hiç bakmadı.",
+              "Kadın salonda otururken evin köpeği yatağın altına saklandı. Yaşlı adam, “Daha önce burada mıydın?” diye sordu. Kadın başını salladı: “Siz beni geçen kış da içeri almıştınız.”",
+              "Kadın gittikten sonra yaşlı kadın, masadaki ıslak havluyu gördü. Üzerinde çamurla yazılmış bir tarih vardı. O tarih, kızlarının trafik kazasında öldüğü geceydi.",
+              "Yaşlı adam kapıya koştu. Dışarıda kimse yoktu. Eşine dönüp “Kızımız geldi,” dedi. Kadın başını salladı: “Hayır. Kızımız o gece öldü.” Sonra ikisi de fark etti: Evdeki misafir, kızlarının çocukluk fotoğrafındaki yaşındaydı.",
             ]],
-            ["paranormal-lantern", "Karanlıkta Yanıp Sönen Fener", "Paranormal", [
-              "Dağ yolunda uzakta küçük bir fener görünüyordu.",
-              "Yolcu yaklaştıkça ışık daha uzağa taşındı.",
-              "Sonunda fenerin eski bir kuyunun üzerinde durduğunu gördü.",
-              "Işık söndüğünde arkasında bir ayak sesi duydu."
-            ]],
-            ["paranormal-rain-house", "Yalnızca Yağmurda Görünen Ev", "Paranormal", [
-              "Köylüler sisli tepede yalnızca yağmur yağınca bir ev görüyordu.",
-              "Güneş açtığında ev tamamen kayboluyordu.",
-              "Bir fotoğrafçı yağmurda tepeye çıktı ve kapıyı buldu.",
-              "Fotoğrafta ev görünüyordu, fakat fotoğrafçı görünmüyordu."
-            ]],
-            ["paranormal-empty-playground", "Gece Yarısı Dönen Salıncak", "Paranormal", [
-              "Parktaki salıncak rüzgârsız gecelerde kendi kendine sallanıyordu.",
-              "Güvenlik kamerasında salıncağın yanında küçük bir gölge belirdi.",
-              "Gölge bir süre boş salıncağa baktı.",
-              "Sonra salıncak durdu ve kamera aniden karardı."
-            ]],
-            ["paranormal-last-bus", "Eski Otobüsün Son Yolcusu", "Paranormal", [
-              "Şehir dışındaki eski otobüs her gece garaja dönüyordu.",
-              "Şoför koltukta kimse olmadığını söylüyordu.",
-              "Temizlikçi arka koltukta ıslak bir bilet buldu.",
-              "Biletin üzerinde yarının tarihi yazıyordu."
-            ]],
-            ["paranormal-rooftop-steps", "Çatıdaki Ayak Sesleri", "Paranormal", [
-              "Apartman sakinleri her gece çatıda koşan birini duyuyordu.",
-              "Kapı kilitliydi ve anahtar yöneticideydi.",
-              "Bir gece herkes merdivene çıktı; ses üstlerinde devam etti.",
-              "Çatıya ulaştıklarında ayak sesleri dairenin içinden geldi."
-            ]],
-            ["paranormal-street-silhouette", "Sokağın Sonundaki Siluet", "Paranormal", [
-              "Gece yürüyen adam sokağın sonunda uzun bir siluet gördü.",
-              "Her adım attığında siluet de yaklaşıyordu.",
-              "Adam koştu, ama gölge aynı yerde kaldı.",
-              "Eve vardığında gölgenin kapı önünde beklediğini gördü."
-            ]],
-            ["paranormal-self-opening-door", "Kendi Kendine Açılan Kapı", "Paranormal", [
-              "Evdeki bütün kapılar kilitlenmişti.",
-              "Buna rağmen koridorun sonundaki kapı her gece açılıyordu.",
-              "Ailenin koyduğu mühür sabaha kadar bozulmadan kalıyordu.",
-              "Bir sabah kapının ardında yeni bir oda belirdi."
-            ]],
-            ["paranormal-carousel", "Boş Lunaparkta Dönen Atlıkarınca", "Paranormal", [
-              "Terk edilmiş lunaparkta atlıkarınca geceleri dönmeye başladı.",
-              "Elektrik bağlantısı yıllar önce sökülmüştü.",
-              "Hoparlörden eski bir çocuk şarkısı duyuldu.",
-              "Sabah atlardan birinin üzerinde taze bir el izi vardı."
-            ]],
-            ["paranormal-lake-light", "Gölün Üstündeki Işık", "Paranormal", [
-              "Balıkçılar gölün ortasında suya değmeyen bir ışık gördü.",
-              "Işık kıyıya yaklaşınca mavi renge dönüştü.",
-              "Su yüzeyinde hiçbir dalga oluşmadı.",
-              "Sabah aynı noktada eski bir pusula bulundu."
-            ]],
-            ["paranormal-station-announcement", "İstasyondaki İsimsiz Anons", "Paranormal", [
-              "Son tren gittikten sonra istasyonda anons sesi duyuldu.",
-              "Anons, yıllardır kullanılmayan bir peronu tarif ediyordu.",
-              "Görevli perona indiğinde raylarda taze ayak izleri gördü.",
-              "Hoparlör son kez konuştu: Treniniz geldi."
-            ]],
-            ["paranormal-basement-door", "Kapanmayan Bodrum Kapısı", "Paranormal", [
-              "Bodrum kapısı her kilitlendiğinde yeniden aralanıyordu.",
-              "Aile kapının önüne ağır bir dolap koydu.",
-              "Gece dolap sessizce duvardan uzaklaşmış bulundu.",
-              "Kapının arkasından merdiven değil, uzun bir koridor görünüyordu."
-            ]],
-            ["paranormal-village-map", "Haritada Olmayan Kasabanın Haritası", "Paranormal", [
-              "Antikacıdan alınan haritada kasabanın yakınında başka bir yer işaretliydi.",
-              "İşaretli yere giden yol eski bir taş köprüye çıktı.",
-              "Köprünün ötesinde evlerin ışıkları yanıyordu.",
-              "Dönüşte haritadaki kasaba silinmişti."
-            ]],
-            ["paranormal-night-photo", "Gece Fotoğrafındaki Fazladan Işık", "Paranormal", [
-              "Fotoğrafçı gece ormanını çektiğinde görüntüde fazladan ışık belirdi.",
-              "Işık her karede kameraya biraz daha yaklaşıyordu.",
-              "Son fotoğrafta ışığın içinde bir yüz seçiliyordu.",
-              "Fotoğrafçı makinesini kapattı; flaş kendi kendine patladı."
-            ]],
-            ["paranormal-cold-spot", "Odadaki Buz Gibi Nokta", "Paranormal", [
-              "Eski evin tek bir köşesi yazın bile buz gibiydi.",
-              "Termometre o noktada aniden düşüyordu.",
-              "Bir gece soğuk alan odanın ortasına doğru ilerledi.",
-              "Sabah duvarda içeriden çizilmiş gibi bir el izi vardı."
-            ]],
-            ["paranormal-window-fingerprints", "Camın Dışındaki Parmak İzleri", "Paranormal", [
-              "Üçüncü kattaki pencerenin dışında her sabah izler beliriyordu.",
-              "Yağmur izleri siliyor, ertesi gün yeniden ortaya çıkarıyordu.",
-              "Bir gece ev sahibi camın önünde gölge gördü.",
-              "Gölge içeriden değil, dışarıdan el sallıyordu."
-            ]],
-            ["paranormal-old-key", "Eski Otelin Anahtarı", "Paranormal", [
-              "Resepsiyonda üzerinde numara olmayan eski bir anahtar bulundu.",
-              "Anahtar hiçbir kapıyı açmıyordu.",
-              "Gece otelin duvarından hafif bir kilit sesi geldi.",
-              "Sabah anahtarın üzerinde yeni bir oda numarası yazıyordu."
-            ]],
-            ["paranormal-third-floor", "Asansörün Durduğu Üçüncü Kat", "Paranormal", [
-              "Binada yalnızca iki kat vardı.",
-              "Yine de asansör her gece üçüncü katta duruyordu.",
-              "Kapılar açılınca karanlıkta bir koridor görünüyordu.",
-              "Bir gece koridorun sonunda asansörün kendisi belirdi."
-            ]],
-            ["paranormal-pine-forest", "Çam Ormanındaki Yüzen Işıklar", "Paranormal", [
-              "Köylüler çamların arasında yerden yükselen ışıklar görüyordu.",
-              "Işıklar birbirini takip ederek ormanın derinine gidiyordu.",
-              "Bir araştırmacı onları kameraya almak için yaklaştı.",
-              "Kayıtta ışıkların arkasında kendisini izleyen bir siluet vardı."
-            ]],
-            ["paranormal-empty-cinema", "Terk Edilmiş Sinemadaki Son Gösterim", "Paranormal", [
-              "Kapalı sinemadan geceleri projektör sesi geliyordu.",
-              "Perdede yıllar önce çekilmiş boş bir salon görünüyordu.",
-              "Bir gece koltuklarda yavaşça beliren siluetler sayıldı.",
-              "Son karede salondaki tek kişi kameraya baktı."
-            ]],
-            ["paranormal-library-book", "Kütüphanedeki Kendi Kendine Açılan Kitap", "Paranormal", [
-              "Kapalı kütüphanede her sabah aynı kitap açık bulunuyordu.",
-              "Kitabın sayfalarında henüz yaşanmamış olaylar yazıyordu.",
-              "Görevli son sayfayı çevirdiğinde kendi adını gördü.",
-              "Altında o gece eve dönmemesi gerektiği yazıyordu."
-            ]],
-            ["paranormal-window-face", "Pencerede Beliren Yüz", "Paranormal", [
-              "Aynı evin penceresinde her gece solgun bir yüz beliriyordu.",
-              "Ev aylardır boştu ve perdeleri içeriden kapalıydı.",
-              "Bir komşu fotoğraf çektiğinde pencere tamamen karanlıktı.",
-              "Telefon ekranında ise yüz hemen arkasında görünüyordu."
-            ]],
-            ["paranormal-doorbell", "Gece Yarısı Çalan Kapı Zili", "Paranormal", [
-              "Kapı zili her gece tam on ikide çalıyordu.",
-              "Dürbünden bakıldığında merdiven boş görünüyordu.",
-              "Bir gece zil çalarken kapının önüne kamera koydular.",
-              "Kayıtta kapı açılmadan içeri giren bir gölge vardı."
-            ]],
-            ["paranormal-fog-road", "Sisli Yolda İlerleyen Işık", "Paranormal", [
-              "Sürücü sisli yolda önünde ilerleyen tek bir ışık gördü.",
-              "Işık virajları tam onun hızında dönüyordu.",
-              "Yol bittiğinde ışık eski bir tabelanın üzerinde durdu.",
-              "Tabelada sürücünün henüz gitmediği evin adresi yazıyordu."
-            ]],
-            ["paranormal-dancing-shadow", "Karanlıkta Dans Eden Gölge", "Paranormal", [
-              "Boş salonda duvardaki gölge müzik olmadan dans ediyordu.",
-              "Işıklar açılınca odada kimse bulunamadı.",
-              "Işıklar kapandığında gölge bu kez tavanda belirdi.",
-              "Sabah duvarda eski bir balo fotoğrafı asılıydı."
-            ]],
-            ["paranormal-radio-time", "Her Gece Aynı Saate Dönen Radyo", "Paranormal", [
-              "Eski radyo her gece kendiliğinden açılıyordu.",
-              "Aynı haber bülteni ve aynı tarih okunuyordu.",
-              "Bir gece spiker dinleyenin adını söyledi.",
-              "Ardından yayın, evin içinden gelen bir sesle kesildi."
-            ]],
-            ["paranormal-clock-thirteen", "Kule Saatinin On Üçüncü Vuruşu", "Paranormal", [
-              "Kasaba kulesi gece yarısı on üç kez çaldı.",
-              "Saat ustası mekanizmayı kontrol etti; her şey normaldi.",
-              "Ertesi gece on üçüncü vuruş daha yakından duyuldu.",
-              "Kulenin kapısında içeriden çevrilmiş bir anahtar bulundu."
-            ]],
-            ["paranormal-warm-tea", "Boş Evdeki Sıcak Çay", "Paranormal", [
-              "Terk edilmiş evde masanın üzerinde sıcak bir fincan vardı.",
-              "Pencereler kapalı, şömine soğuktu.",
-              "Araştırmacı fincana dokununca üst kattaki lamba yandı.",
-              "Merdivenden biri yavaşça aşağı inmeye başladı."
-            ]],
-            ["paranormal-photo-album", "Kayıp Fotoğraf Albümü", "Paranormal", [
-              "Pazardan alınan albümde aynı evin fotoğrafları bulunuyordu.",
-              "Her fotoğrafta penceredeki yabancı biraz daha yaklaşıyordu.",
-              "Son fotoğrafta yabancı kameranın hemen önündeydi.",
-              "Albümün arkasında yeni sahibinin çekilmiş bir fotoğrafı vardı."
-            ]],
-            ["paranormal-hidden-room", "Duvarın Ardındaki Gizli Oda", "Paranormal", [
-              "Tadilat sırasında duvarın arkasında boş bir oda bulundu.",
-              "Odanın içinde tozlanmamış bir masa ve saat vardı.",
-              "Saat çalışmıyor, ama tik tak sesi duvarlardan geliyordu.",
-              "Kapı kapatılınca odanın içeriden kilitlendiği duyuldu."
-            ]],
-            ["paranormal-last-ferry", "Son Feribotun Yolcusu", "Paranormal", [
-              "Gece son feribotta güvertede tek yolcu oturuyordu.",
-              "Görevli bilet sorduğunda yolcu eski bir tarih gösterdi.",
-              "Feribot kıyıya yanaşınca koltuk boş kaldı.",
-              "Bilet defterinde yolcunun adı yıllar önce silinmişti."
-            ]],
-            ["paranormal-footprints", "Sabah Kaybolan Ayak İzleri", "Paranormal", [
-              "Kar yağınca evin kapısına kadar ayak izleri oluştu.",
-              "İzler dışarıdan gelmiyor, evin içinden başlıyordu.",
-              "Aile bütün gece kapıları kilitli tuttu.",
-              "Sabah izler yatak odasının önünde aniden sona erdi."
+            ["story-cctv", "Güvenlik Kamerasındaki Ben", "Korku Hikayesi", [
+              "Site güvenliği yapan Onur, gece kameralarında otoparkta dolaşan bir adam gördü. Adam sürekli kameraya bakıyordu. Onur görüntüyü yakınlaştırınca adamın kendi üniformasını giydiğini fark etti.",
+              "Devriye kayıtlarına baktı. O saatte kendisi güvenlik kulübesinden hiç çıkmamıştı. Kameradaki adam bir araca yaklaştı, bagajı açtı ve içeri baktı. Sonra başını kaldırıp kulübeye doğru yürüdü.",
+              "Onur kapıyı kilitledi. Monitördeki görüntüde adam kulübenin önüne geldi. Gerçek kapıya da üç kez vuruldu. Kameradaki adam ekrana eğilip dudaklarını oynattı: “Aç. Sen içeride değilsin.”",
+              "Onur diğer kamerayı açtı. Kulübenin içi boş görünüyordu. Monitörde kendisini dışarıda, kapıyı çalarken izledi. Ardından kulübenin içinden kendi sesi geldi: “Sonunda yerimi buldun.”",
             ]],
           ]
           topic_ids = [item[0] for item in TOPICS]
-          if len(TOPICS) != 60:
-              raise RuntimeError(f'TOPICS listesi tam 60 konu olmali; bulunan: {len(TOPICS)}')
+          if len(TOPICS) != 30:
+              raise RuntimeError(f'TOPICS listesi tam 30 hikaye olmali; bulunan: {len(TOPICS)}')
           if len(set(topic_ids)) != len(topic_ids):
               raise RuntimeError('TOPICS listesinde tekrar eden konu IDsi var.')
           if any(len(item[3]) != 4 for item in TOPICS):
-              raise RuntimeError('Her konu tam 4 bilgi sahnesi icermeli.')
+              raise RuntimeError('Her hikaye 4 anlatim bolumu ve baslik girisi icermeli.')
 
           for folder in (OUT, CAPTIONS, CLIPS, VOICE_DIR, HISTORY_FILE.parent, IMAGE_DIR):
               folder.mkdir(parents=True, exist_ok=True)
@@ -615,9 +437,9 @@ jobs:
               raise RuntimeError('Tum hazir konular kullanildi. Tekrar yapmamak icin durduruldu; TOPICS havuzuna yeni konular ekleyin.')
           topic_id, title, category, facts = available[0]
           visual_theme = paranormal_visual_kind(topic_id, title)
-          print(f'Konu: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan konu: {len(available)}')
+          print(f'Hikaye: {title} | Animasyon temasi: {visual_theme} | Kayitli video: {len(history)} | Kalan hikaye: {len(available)}')
           scenes = [
-              (f'{title}. Her şey o gece başladı.', ''),
+              (f'{title}.', ''),
               *((story_beat, '') for story_beat in facts),
           ]
           assert len(scenes) == SCENE_COUNT
@@ -626,8 +448,9 @@ jobs:
               'scenes': [{'caption': c, 'visual': v} for c, v in scenes],
               'visual_theme': visual_theme,
               'style': 'five distinct photorealistic cinematic 9:16 AI still images, one per narration beat; no Blender, no procedural characters, no toy-like figures, no repeated background; subtle camera movement on each still',
-              'fiction_notice': 'Kurgusal paranormal hikaye; gercek oldugu iddia edilmez.',
-              'voice': TTS_VOICE, 'duration_seconds': 30, 'image_source': 'Cloudflare Workers AI FLUX.2 Klein 4B native portrait; Wikimedia Commons fallback'
+              'fiction_notice': 'Kurgusal korku hikayesi; gercek oldugu iddia edilmez.',
+              'story_format': 'Naturalistic micro-horror with grounded everyday setup, believable dialogue, gradual escalation, specific visual moments and a sharp final twist; variable duration based on narration.',
+              'voice': TTS_VOICE, 'voice_style': 'deep male Turkish narration, restrained and natural, slower final line', 'duration_seconds': 'automatic from narration; no fixed 30-second limit', 'image_source': 'Cloudflare Workers AI FLUX.2 Klein 4B native portrait; Wikimedia Commons fallback'
           }, ensure_ascii=False, indent=2), encoding='utf-8')
 
           FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
@@ -648,12 +471,12 @@ jobs:
               ], text=True).strip())
 
 
-          async def create_tts(text_value, path):
+          async def create_tts(text_value, path, rate=TTS_RATE, pitch=TTS_PITCH):
               last_error = None
               for attempt in range(3):
                   try:
                       communicator = edge_tts.Communicate(
-                          text_value, TTS_VOICE, rate='+15%', volume='+0%', pitch='+0Hz'
+                          text_value, TTS_VOICE, rate=rate, volume='+0%', pitch=pitch
                       )
                       await communicator.save(str(path))
                       if path.exists() and path.stat().st_size > 1000:
@@ -667,7 +490,7 @@ jobs:
               # Internet tabanli ucretsiz TTS erisilemezse, tamamen yerel espeak-ng yedegi.
               fallback_wav = path.with_suffix('.fallback.wav')
               try:
-                  subprocess.run(['espeak-ng','-v','tr','-s','160','-p','48','-a','170',
+                  subprocess.run(['espeak-ng','-v','tr','-s','145','-p','35','-a','170',
                                   '-w',str(fallback_wav),text_value],check=True)
                   subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-y','-i',str(fallback_wav),
                                   '-codec:a','libmp3lame','-q:a','4',str(path)],check=True)
@@ -681,11 +504,14 @@ jobs:
 
 
           def make_voice_tracks():
-              print('1/5 Ucretsiz Turkce seslendirme olusturuluyor...')
+              print('1/5 Ucretsiz Turkce erkek seslendirme olusturuluyor...')
               raw_files, raw_durations = [], []
               for i, (caption, _) in enumerate(scenes, 1):
                   mp3 = VOICE_DIR / f'voice_{i:02d}.mp3'
-                  asyncio.run(create_tts(caption, mp3))
+                  final_beat = (i == len(scenes))
+                  voice_rate = '-12%' if final_beat else TTS_RATE
+                  voice_pitch = '-18Hz' if final_beat else TTS_PITCH
+                  asyncio.run(create_tts(caption, mp3, rate=voice_rate, pitch=voice_pitch))
                   duration = probe_duration(mp3)
                   if duration <= 0.2:
                       raise RuntimeError(f'{i}. sahnenin seslendirmesi gecersiz.')
@@ -693,63 +519,27 @@ jobs:
                   raw_durations.append(duration)
                   print(f'Ses {i}/{SCENE_COUNT}: {duration:.2f} saniye')
 
-              total = sum(raw_durations)
-              speed_factor = max(1.0, total / (TARGET_SECONDS - 0.15))
-              if speed_factor > 1.65:
-                  raise RuntimeError('Seslendirme 30 saniyeye sigmiyor; metinler kisaltilmali.')
-              spoken_durations = [d / speed_factor for d in raw_durations]
-              extra_each = max(0.0, (TARGET_SECONDS - sum(spoken_durations)) / SCENE_COUNT)
-              scene_durations = [d + extra_each for d in spoken_durations]
-              # Son klipte kayan nokta farkini kapat; toplam tam 30 saniye olsun.
-              scene_durations[-1] += TARGET_SECONDS - sum(scene_durations)
-
+              # Sabit 30 saniyeye sikistirma yok: dogal konusma hizi korunur.
+              # Her sahne sonuna kisa bir nefes araligi eklenir; goruntu suresi sese gore belirlenir.
+              scene_durations = [d + STORY_PAUSE_SECONDS for d in raw_durations]
               padded_files = []
-              for i, (mp3, spoken, scene_duration) in enumerate(zip(raw_files, spoken_durations, scene_durations), 1):
+              for i, (mp3, spoken, scene_duration) in enumerate(zip(raw_files, raw_durations, scene_durations), 1):
                   wav = VOICE_DIR / f'voice_padded_{i:02d}.wav'
                   pad = max(0.0, scene_duration - spoken)
-                  filters = f'atempo={speed_factor:.6f},apad=pad_dur={pad:.6f},atrim=duration={scene_duration:.6f}'
+                  filters = f'apad=pad_dur={pad:.6f},atrim=duration={scene_duration:.6f}'
                   run_ffmpeg(['-i', str(mp3), '-af', filters, '-ar', '44100', '-ac', '2',
                               '-c:a', 'pcm_s16le', str(wav)])
                   padded_files.append(wav)
               concat_list = VOICE_DIR / 'voice_concat.txt'
-              concat_list.write_text(''.join("file '" + p.resolve().as_posix() + "'\n" for p in padded_files), encoding='utf-8')
+              concat_list.write_text(''.join("file '" + p.resolve().as_posix() + "'\\n" for p in padded_files), encoding='utf-8')
               voice = OUT / 'narration.wav'
               run_ffmpeg(['-f', 'concat', '-safe', '0', '-i', str(concat_list),
                           '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', str(voice)])
               actual = probe_duration(voice)
-              # Concat/MP3 zaman damgalarindaki kucuk farklari son WAV dosyasinda duzelt.
-              # Buyuk sapmalari sessizce kapatmak yerine hata ver; 0.5 saniyeden fazlasi
-              # seslendirme veya sahne zamanlamasinda gercek bir soruna isaret eder.
-              if actual <= 0 or abs(actual - TARGET_SECONDS) > 0.5:
-                  raise RuntimeError(
-                      f'Seslendirme suresi beklenenden fazla sasti: {actual:.3f}s '
-                      f'(hedef {TARGET_SECONDS:.2f}s).'
-                  )
-
-              fixed_voice = VOICE_DIR / 'narration_exact_30s.wav'
-              exact_filter = (
-                  f'apad=whole_dur={TARGET_SECONDS:.6f},'
-                  f'atrim=duration={TARGET_SECONDS:.6f},'
-                  'asetpts=N/SR/TB'
-              )
-              run_ffmpeg([
-                  '-i', str(voice), '-af', exact_filter,
-                  '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le',
-                  str(fixed_voice)
-              ])
-              fixed_actual = probe_duration(fixed_voice)
-              if abs(fixed_actual - TARGET_SECONDS) > 0.002:
-                  raise RuntimeError(
-                      f'Seslendirme 30 saniyeye sabitlenemedi: {fixed_actual:.3f}s'
-                  )
-
-              fixed_voice.replace(voice)
-              actual = probe_duration(voice)
-              if abs(actual - TARGET_SECONDS) > 0.002:
-                  raise RuntimeError(
-                      f'Son seslendirme suresi 30 saniye degil: {actual:.3f}s'
-                  )
-              print(f'Seslendirme kesin suresi: {actual:.3f} saniye')
+              expected = sum(scene_durations)
+              if actual <= 0 or abs(actual - expected) > 0.35:
+                  raise RuntimeError(f'Seslendirme/sahne zamanlamasi uyusmuyor: {actual:.3f}s / {expected:.3f}s.')
+              print(f'Dogal seslendirme suresi: {actual:.2f} saniye (30 saniye siniri yok)')
               return voice, scene_durations
 
 
@@ -1112,18 +902,18 @@ jobs:
 
 
 
-          def make_soundtrack(path):
-              total=int(TARGET_SECONDS*SAMPLE_RATE)
+          def make_soundtrack(path, duration):
+              total=int(duration*SAMPLE_RATE)
               t=np.arange(total,dtype=np.float32)/SAMPLE_RATE
               # Original, generated ambient bed; intentionally quiet under narration.
               audio=(0.035*np.sin(2*np.pi*55*t)+0.018*np.sin(2*np.pi*82.41*t)+
                      0.010*np.sin(2*np.pi*110*t)*(0.5+0.5*np.sin(2*np.pi*0.35*t)))
               notes=[329.63,392,493.88,440,392,293.66]
-              for i,start in enumerate(np.arange(0.5,TARGET_SECONDS,2.5)):
+              for i,start in enumerate(np.arange(0.5,duration,2.5)):
                   first=int(start*SAMPLE_RATE); size=min(int(1.8*SAMPLE_RATE),total-first)
                   lt=np.arange(size,dtype=np.float32)/SAMPLE_RATE
                   audio[first:first+size]+=0.018*np.sin(2*np.pi*notes[i%len(notes)]*lt)*np.exp(-1.8*lt)
-              fade=int(SAMPLE_RATE*1.0)
+              fade=min(int(SAMPLE_RATE*1.0), max(1, total//3))
               audio[:fade]*=np.linspace(0,1,fade); audio[-fade:]*=np.linspace(1,0,fade)
               peak=float(np.max(np.abs(audio)))
               if peak>0: audio*=0.6/peak
@@ -1262,13 +1052,12 @@ jobs:
               return youtube_id
 
 
-          # Uretim: Her anlatim sahnesi icin ayri, ucretsiz lisansli fotograf kullanilir; Blender/3D karakter yoktur.
-          print(f'1/5 Her anlatim olayi icin farkli, ucretsiz Commons fotografi hazirlaniyor | sahne={SCENE_COUNT}')
+          # Uretim: Her anlatim sahnesi icin ayri AI gorseli; Blender/3D karakter yoktur.
+          print(f'1/5 Her hikaye sahnesi icin farkli gorsel hazirlaniyor | sahne={SCENE_COUNT}')
           voice,scene_durations=make_voice_tracks()
-          # Yuvarlama farklarini duzelterek toplam kare sayisini 30 saniyeye gore ayarla.
+          # Her sahne kendi ses suresine gore render edilir; toplam video suresi hikayeye gore degisir.
           frame_counts=[max(1,round(d*FPS)) for d in scene_durations]
-          frame_counts[-1]+=int(TARGET_SECONDS*FPS)-sum(frame_counts)
-          if frame_counts[-1] < 1: raise RuntimeError('Son sahne suresi gecersiz.')
+          total_duration=sum(scene_durations)
           seed=int.from_bytes(__import__('hashlib').sha256((topic_id+slot).encode()).digest()[:4],'big')
           clips=[]
           audio_offset=0.0
@@ -1281,8 +1070,8 @@ jobs:
 
           print('2/5 Fon muzigi hazirlaniyor...')
           sound=OUT/'soundtrack.wav'
-          make_soundtrack(sound)
-          print('3/5 30 saniyelik video birlestiriliyor...')
+          make_soundtrack(sound, total_duration)
+          print(f'3/5 {total_duration:.1f} saniyelik hikaye videosu birlestiriliyor...')
           concat=OUT/'concat.txt'
           concat.write_text(''.join("file '"+p.resolve().as_posix()+"'\n" for p in clips),encoding='utf-8')
           silent=OUT/'silent.mp4'
@@ -1290,7 +1079,7 @@ jobs:
           final=ROOT/'gizemli-dunya-video.mp4'
           run_ffmpeg(['-i',str(silent),'-i',str(voice),'-i',str(sound),
               '-filter_complex','[1:a]volume=1.0[voice];[2:a]volume=0.16[music];[voice][music]amix=inputs=2:duration=longest:dropout_transition=0,alimiter=limit=0.95[a]',
-              '-map','0:v:0','-map','[a]','-t',str(TARGET_SECONDS),'-c:v','copy','-c:a','aac','-b:a','160k',
+              '-map','0:v:0','-map','[a]','-shortest','-c:v','copy','-c:a','aac','-b:a','160k',
               '-movflags','+faststart',str(final)])
           # Upload gate: every planned beat must have its own valid, distinct, sourced photograph.
           generated_images = sorted(IMAGE_DIR.glob('scene_*.jpg'))
@@ -1313,7 +1102,7 @@ jobs:
           if not any(s.get('codec_type')=='video' for s in streams): raise RuntimeError('Videoda goruntu akisi yok.')
           if not any(s.get('codec_type')=='audio' for s in streams): raise RuntimeError('Videoda ses akisi yok.')
           duration=float(info['format']['duration'])
-          if abs(duration-TARGET_SECONDS)>0.25: raise RuntimeError(f'Video 30 saniye degil: {duration:.2f}s')
+          if abs(duration-total_duration)>1.0: raise RuntimeError(f'Video/ses suresi uyusmuyor: video {duration:.2f}s, beklenen {total_duration:.2f}s')
           if int(info.get('streams',[{}])[0].get('width',0))!=OUTPUT_WIDTH: raise RuntimeError('Video genisligi 1080 degil.')
           if int(info.get('streams',[{}])[0].get('height',0))!=OUTPUT_HEIGHT: raise RuntimeError('Video yuksekligi 1920 degil.')
           if final.stat().st_size<250000: raise RuntimeError('Video dosyasi beklenenden kucuk.')
