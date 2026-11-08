@@ -904,7 +904,6 @@ jobs:
                         'painting', 'poster', 'flag', 'icon', 'screenshot', 'svg', 'collage')
               used_titles = set()
               last_error = None
-              rejected = {'boyut': 0, 'mime': 0, 'indirilemedi': 0, 'benzer': 0, 'diger': 0}
               for query in terms:
                   try:
                       candidates = commons_search_images(query)
@@ -920,16 +919,13 @@ jobs:
                           if not info_list:
                               continue
                           info = info_list[0]
-                          mime = info.get('mime', '')
-                          if mime not in ('image/jpeg', 'image/png', 'image/webp'):
-                              rejected['mime'] += 1
+                          # Commons metadata MIME values vary by original file format.
+                          # Do not reject candidates by metadata MIME: request the generated
+                          # thumbnail and let Pillow verify/decode the actual downloaded bytes.
+                          mime = str(info.get('mime', '')).lower()
+                          if mime in ('image/svg+xml', 'application/pdf', 'application/postscript'):
                               continue
-                          # Wikimedia aramasinda cogu kaliteli fotograf yatay olabilir.
-                          # 9:16 videoya kirpmak icin en-boy yonu degil, kisa kenar ve toplam detay onemlidir.
-                          original_w = int(info.get('width', 0) or 0)
-                          original_h = int(info.get('height', 0) or 0)
-                          if min(original_w, original_h) < 650 or max(original_w, original_h) < 1000:
-                              rejected['boyut'] += 1
+                          if int(info.get('width', 0)) < 900 or int(info.get('height', 0)) < 1200:
                               continue
                           ext = info.get('extmetadata', {})
                           desc = str(ext.get('ImageDescription', {}).get('value', '')).lower()
@@ -937,23 +933,24 @@ jobs:
                               continue
                           url = info.get('thumburl') or info.get('url')
                           if not url:
-                              rejected['indirilemedi'] += 1
                               continue
                           image_response = requests.get(url, headers={'User-Agent': 'GizemliDunyaVideoBot/1.0'}, timeout=60)
                           image_response.raise_for_status()
-                          if len(image_response.content) < 20000:
-                              rejected['indirilemedi'] += 1
+                          if len(image_response.content) < 45000:
                               continue
-                          image = Image.open(io.BytesIO(image_response.content)).convert('RGB')
-                          # Dikey ve yatay kaynaklari kabul et; ImageOps.fit dikey kadraja kirpar.
-                          if min(image.width, image.height) < 600 or max(image.width, image.height) < 950:
-                              rejected['boyut'] += 1
+                          try:
+                              with Image.open(io.BytesIO(image_response.content)) as opened:
+                                  opened.load()
+                                  image = opened.convert('RGB')
+                          except Exception as image_error:
+                              last_error = f'Fotograf cozulemedi ({mime}): {image_error}'
+                              continue
+                          if image.width < 640 or image.height < 1000:
                               continue
                           image = ImageOps.fit(image, (768, 1365), method=Image.Resampling.LANCZOS, centering=(0.5, 0.48))
                           try:
                               validate_generated_image(image, scene_no)
                           except RuntimeError:
-                              rejected['benzer'] += 1
                               used_titles.add(title_text)
                               continue
                           image.save(path, 'JPEG', quality=94, optimize=True)
@@ -975,7 +972,7 @@ jobs:
                   except Exception as exc:
                       last_error = exc
                       print(f'Commons arama uyarisi ({query}): {str(exc)[:180]}')
-              raise RuntimeError(f'{scene_no}. sahne icin uygun Commons fotografi bulunamadi. Reddedilenler: {rejected}. Son hata: {last_error}. Yayin engellendi.')
+              raise RuntimeError(f'{scene_no}. sahne icin yeterli kalitede, benzersiz ve lisans bilgisi olan ucretsiz fotograf bulunamadi. Yayin engellendi. Son hata: {last_error}')
 
 
           def render_image_scene(scene_no, caption, duration, category, topic_id, seed, output, frame_count=None):
