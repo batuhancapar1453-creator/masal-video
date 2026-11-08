@@ -1053,8 +1053,25 @@ jobs:
               source_file = OUT / 'image_sources.json'
               if source_file.exists():
                   credits = json.loads(source_file.read_text(encoding='utf-8'))
-                  description += '\n\nGÖRSEL KAYNAKLARI / LİSANSLAR:\n' + '\n'.join(
-                      f"Sahne {x['scene']}: {x['commons_title']} — {x['artist']} — {x['license']} — {x['source_page']}" for x in credits)
+                  credit_lines = []
+                  for x in credits:
+                      # Commons dosya basliklari cok uzun veya kontrol karakterli olabilir.
+                      credit_lines.append(
+                          'Sahne ' + str(x.get('scene', '')) + ': ' +
+                          str(x.get('commons_title', 'Gorsel'))[:110] + ' — ' +
+                          str(x.get('artist', 'Bilinmiyor'))[:80] + ' — ' +
+                          str(x.get('license', 'Lisans bilgisi'))[:45] + ' — ' +
+                          str(x.get('source_page', ''))[:220]
+                      )
+                  description += '\n\nGÖRSEL KAYNAKLARI / LİSANSLAR:\n' + '\n'.join(credit_lines)
+              # YouTube aciklamasi en fazla 5000 karakter olabilir. Kontrol karakterlerini
+              # temizle, Unicode metni koru ve guvenli pay birakarak 4500 karakterde kes.
+              import unicodedata
+              description = unicodedata.normalize('NFC', str(description))
+              description = ''.join(ch for ch in description
+                  if ch in '\n\r\t' or unicodedata.category(ch)[0] != 'C')
+              description = description.replace('\r\n', '\n').replace('\r', '\n').strip()
+              description = description[:4500].rstrip()
               body={'snippet':{'title':f'{title} | Paranormal Hikâye #Shorts'[:100],
                 'description':description,'tags':['Shorts','Gizemli Dünya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','Şehir Efsaneleri'],
                 'categoryId':'24','defaultLanguage':'tr'},
