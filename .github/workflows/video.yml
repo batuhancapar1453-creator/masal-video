@@ -1039,57 +1039,131 @@ jobs:
 
 
           def youtube_upload(path):
-              creds=Credentials(token=None,refresh_token=YOUTUBE_REFRESH_TOKEN,
-                  token_uri='https://oauth2.googleapis.com/token',client_id=YOUTUBE_CLIENT_ID,
-                  client_secret=YOUTUBE_CLIENT_SECRET,scopes=['https://www.googleapis.com/auth/youtube.upload'])
-              creds.refresh(Request())
-              youtube=build('youtube','v3',credentials=creds,cache_discovery=False)
-              description=(f'{title}\n\n'
-                'Gizemli Dünya’da bu kez kısa bir paranormal hikâye anlatıyoruz. '
-                'Bu video, hikâyedeki anlatım anlarına eşleştirilmiş ücretsiz lisanslı fotoğraflar ve Türkçe seslendirme içerir. '
-                'Hikâye kurgu ve şehir efsanesi atmosferinde anlatılmıştır; gerçek olduğu iddia edilmez.\n'
-                'Bu hikâyeyle ilgili teorini yorumlarda paylaş.\n\n'
-                '#Shorts #Paranormal #GizemliHikayeler #KorkuHikayeleri #Gizem')
+              import re, unicodedata, random
+              from google.auth.exceptions import RefreshError
+
+              def safe_text(value, limit):
+                  value = unicodedata.normalize('NFKD', str(value or ''))
+                  value = value.encode('ascii', 'ignore').decode('ascii')
+                  value = re.sub(r'[^A-Za-z0-9 .,;:!?()_/#&+\-]', ' ', value)
+                  value = re.sub(r'\s+', ' ', value).strip()
+                  return value[:limit].rstrip()
+
+              def safe_url(value):
+                  value = str(value or '').strip()
+                  if value.startswith('https://') and all(c.isalnum() or c in ':/._-%?=&+#' for c in value):
+                      return value[:300]
+                  return ''
+
+              safe_title = safe_text(title, 100) or 'Gizemli paranormal hikaye'
+              credit_lines = []
               source_file = OUT / 'image_sources.json'
               if source_file.exists():
-                  credits = json.loads(source_file.read_text(encoding='utf-8'))
-                  credit_lines = []
-                  for x in credits:
-                      # Commons dosya basliklari cok uzun veya kontrol karakterli olabilir.
-                      credit_lines.append(
-                          'Sahne ' + str(x.get('scene', '')) + ': ' +
-                          str(x.get('commons_title', 'Gorsel'))[:110] + ' — ' +
-                          str(x.get('artist', 'Bilinmiyor'))[:80] + ' — ' +
-                          str(x.get('license', 'Lisans bilgisi'))[:45] + ' — ' +
-                          str(x.get('source_page', ''))[:220]
-                      )
-                  description += '\n\nGÖRSEL KAYNAKLARI / LİSANSLAR:\n' + '\n'.join(credit_lines)
-              # YouTube aciklamasi en fazla 5000 karakter olabilir. Kontrol karakterlerini
-              # temizle, Unicode metni koru ve guvenli pay birakarak 4500 karakterde kes.
-              import unicodedata
-              description = unicodedata.normalize('NFC', str(description))
-              description = ''.join(ch for ch in description
-                  if ch in '\n\r\t' or unicodedata.category(ch)[0] != 'C')
-              description = description.replace('\r\n', '\n').replace('\r', '\n').strip()
-              description = description[:4500].rstrip()
-              body={'snippet':{'title':f'{title} | Paranormal Hikâye #Shorts'[:100],
-                'description':description,'tags':['Shorts','Gizemli Dünya','Paranormal','Paranormal Hikayeler','Gizemli Hikayeler','Korku Hikayeleri','Şehir Efsaneleri'],
-                'categoryId':'24','defaultLanguage':'tr'},
-                'status':{'privacyStatus':YOUTUBE_PRIVACY,'selfDeclaredMadeForKids':False,'containsSyntheticMedia':True}}
-              media=MediaFileUpload(str(path),mimetype='video/mp4',chunksize=-1,resumable=True)
-              request=youtube.videos().insert(part='snippet,status',body=body,media_body=media)
-              result=None; retry=0
+                  try:
+                      credits = json.loads(source_file.read_text(encoding='utf-8'))
+                      for item in credits[:SCENE_COUNT]:
+                          work = safe_text(item.get('commons_title', 'Gorsel'), 90) or 'Gorsel'
+                          artist = safe_text(item.get('artist', 'Bilinmiyor'), 55) or 'Bilinmiyor'
+                          license_name = safe_text(item.get('license', 'Lisans bilgisi'), 35) or 'Lisans bilgisi'
+                          page = safe_url(item.get('source_page', ''))
+                          line = 'Scene ' + safe_text(item.get('scene', ''), 2) + ': ' + work + ' / ' + artist + ' / ' + license_name
+                          if page:
+                              line += ' / ' + page
+                          credit_lines.append(line[:480])
+                  except Exception as credit_error:
+                      print('Kaynakca okunamadi:', str(credit_error)[:160])
+
+              # Aciklama sadece ASCII, satir sonlari ve guvenli noktalama icerir.
+              intro = (safe_title + '\n\n'
+                       'Gizemli Dunya paranormal hikaye videosu. Hikaye kurgu ve sehir efsanesi atmosferinde anlatilmistir.\n'
+                       'Teorini yorumlarda paylas.\n\n'
+                       '#Shorts #Paranormal #GizemliHikayeler')
+              attribution = ''
+              if credit_lines:
+                  attribution = ('\n\nIMAGE CREDITS (Wikimedia Commons):\n' + '\n'.join(credit_lines) +
+                      '\nLicense information: see each source page for the applicable license and terms.')
+              description = (intro + attribution)[:4500].rstrip()
+              # En sade yedek de kaynak atiflarini tutar; aciklama 4000 karakterin altinda kalir.
+              fallback_description = ('Gizemli Dunya paranormal hikaye videosu. Kurgu anlatim. #Shorts' +
+                  (('\n\nWikimedia Commons image credits:\n' + '\n'.join(credit_lines)) if credit_lines else ''))[:3900].rstrip()
+              tags = ['Shorts', 'Gizemli Dunya', 'Paranormal', 'Gizemli Hikayeler', 'Korku Hikayeleri']
+              body = {
+                  'snippet': {'title': safe_title, 'description': description, 'tags': tags,
+                              'categoryId': '24', 'defaultLanguage': 'tr'},
+                  'status': {'privacyStatus': YOUTUBE_PRIVACY, 'selfDeclaredMadeForKids': False,
+                             'containsSyntheticMedia': True}
+              }
+
+              creds = Credentials(token=None, refresh_token=YOUTUBE_REFRESH_TOKEN,
+                  token_uri='https://oauth2.googleapis.com/token', client_id=YOUTUBE_CLIENT_ID,
+                  client_secret=YOUTUBE_CLIENT_SECRET,
+                  scopes=['https://www.googleapis.com/auth/youtube.upload'])
+              try:
+                  creds.refresh(Request())
+              except RefreshError as exc:
+                  raise RuntimeError('YouTube oturum anahtari yenilenemedi. YOUTUBE_REFRESH_TOKEN ve OAuth izinlerini kontrol edin: ' + str(exc)[:300]) from exc
+              youtube = build('youtube', 'v3', credentials=creds, cache_discovery=False)
+
+              def new_request():
+                  media = MediaFileUpload(str(path), mimetype='video/mp4',
+                      chunksize=8 * 1024 * 1024, resumable=True)
+                  return youtube.videos().insert(part='snippet,status', body=body, media_body=media)
+
+              request = new_request()
+              result = None
+              used_fallback = False
+              retry = 0
+              max_retries = 6
               while result is None:
                   try:
-                      _,result=request.next_chunk(); retry=0
+                      # google-api-client icindeki gecici 5xx yeniden denemeleri de etkin.
+                      _, result = request.next_chunk(num_retries=3)
+                      retry = 0
                   except HttpError as error:
-                      if error.resp.status not in (500,502,503,504) or retry>=4: raise
-                      retry+=1; time.sleep(min(2**retry,30))
-                  except (OSError,ConnectionError):
-                      if retry>=4: raise
-                      retry+=1; time.sleep(min(2**retry,30))
-              youtube_id=result.get('id')
-              if not youtube_id: raise RuntimeError('YouTube ID donmedi: '+str(result)[:300])
+                      status = getattr(error.resp, 'status', 0)
+                      raw = getattr(error, 'content', b'')
+                      try:
+                          payload = json.loads(raw.decode('utf-8', 'replace'))
+                          api_error = payload.get('error', {})
+                          reasons = [e.get('reason', '') for e in api_error.get('errors', [])]
+                          message = api_error.get('message', '')
+                      except Exception:
+                          reasons, message = [], str(error)
+                      reason_text = ' '.join(reasons)
+
+                      if status == 400 and ('invalidDescription' in raw.decode('utf-8', 'replace')) and not used_fallback:
+                          print('YouTube aciklamayi reddetti; kaynak atiflarini koruyan sade aciklama deneniyor.')
+                          used_fallback = True
+                          body['snippet']['description'] = fallback_description
+                          request = new_request()
+                          retry = 0
+                          continue
+
+                      transient = (status in (408, 429, 500, 502, 503, 504) or
+                                   (status == 403 and any(x in reason_text for x in
+                                    ('rateLimitExceeded', 'userRateLimitExceeded', 'backendError'))))
+                      if transient and retry < max_retries:
+                          retry += 1
+                          delay = min(60, 2 ** retry) + random.uniform(0, 1.5)
+                          print(f'YouTube gecici HTTP {status} hatasi ({retry}/{max_retries}); {delay:.1f} sn sonra ayni yukleme devam edecek. {message[:180]}')
+                          time.sleep(delay)
+                          continue
+                      if status == 403 and 'quotaExceeded' in reason_text:
+                          raise RuntimeError('YouTube API gunluk kotasi dolmus. Video hazir; kota sifirlaninca tekrar yuklenmeli. Yeni API istegiyle tekrar denemek kotayi artirmaz.') from error
+                      if status in (401, 403):
+                          raise RuntimeError(f'YouTube yetki/izin hatasi (HTTP {status}, {reason_text or "unknown"}): {message[:300]}. OAuth izinleri ve kanal erisimini kontrol edin.') from error
+                      raise RuntimeError(f'YouTube yukleme hatasi (HTTP {status}, {reason_text or "unknown"}): {message[:400]}') from error
+                  except (OSError, ConnectionError, TimeoutError) as error:
+                      if retry >= max_retries:
+                          raise RuntimeError('YouTube yuklemesinde ag hatasi; tekrar deneme siniri asildi: ' + str(error)[:250]) from error
+                      retry += 1
+                      delay = min(60, 2 ** retry) + random.uniform(0, 1.5)
+                      print(f'Ag baglantisi kesildi ({retry}/{max_retries}); {delay:.1f} sn sonra yukleme surdurulecek.')
+                      time.sleep(delay)
+
+              youtube_id = result.get('id') if isinstance(result, dict) else None
+              if not youtube_id:
+                  raise RuntimeError('YouTube yukleme yaniti video ID icermiyor: ' + str(result)[:300])
               return youtube_id
 
 
