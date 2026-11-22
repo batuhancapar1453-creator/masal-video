@@ -3,7 +3,7 @@ name: Tuhaf Kasaba - 10 Bolum Otomatik Cizgi Film
 on:
   workflow_dispatch:
   schedule:
-    # Istanbul saatiyle 09:23 ve 20:23
+    # Onceki duzendeki iki calisma saati korunmustur (UTC).
     - cron: '23 6,17 * * *'
 
 permissions:
@@ -29,10 +29,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Sistem paketlerini kur
+      - name: FFmpeg kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core unzip
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
 
       - name: Python bagimliliklarini kur
         run: |
@@ -42,70 +42,63 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Tuhaf Kasaba kaynak dosyalarini hazirla
-        shell: bash
+      - name: Tuhaf Kasaba kaynaklarini hazirla
         run: |
-          set -euo pipefail
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
 
-          # Kaynak klasorleri depoya daha once acik halde eklendiyse ZIP gerekmez.
-          required_files=(
-            "cizgi-short/kit/engine/index.html"
-            "tuhaf-kasaba/run_episode.py"
-            "tuhaf-kasaba/story.js"
-            "tuhaf-kasaba/episodes/episode_10.json"
-          )
+          source_zip = Path("tuhaf-kasaba-source.zip")
+          app_package = Path("GitHub_Tuhaf_Kasaba_Uygulama_Paketi.zip")
 
-          sources_ready=true
-          for file in "${required_files[@]}"; do
-            if [[ ! -f "$file" ]]; then
-              sources_ready=false
-              break
-            fi
-          done
+          # Kaynak ZIP dogrudan depoda yoksa uygulama paketinin icinden al.
+          if not source_zip.is_file() and app_package.is_file():
+              with zipfile.ZipFile(app_package) as package:
+                  matches = [
+                      name for name in package.namelist()
+                      if name == "tuhaf-kasaba-source.zip"
+                      or name.endswith("/tuhaf-kasaba-source.zip")
+                  ]
+                  if not matches:
+                      raise SystemExit(
+                          "Uygulama paketi bulundu ancak icinde "
+                          "tuhaf-kasaba-source.zip yok."
+                      )
+                  source_zip.write_bytes(package.read(matches[0]))
 
-          if [[ "$sources_ready" == true ]]; then
-            echo "Kaynak klasorleri zaten depoda; ZIP acma atlandi."
-          else
-            # ZIP dosyasini yalnizca ana dizinde degil, deponun alt klasorlerinde de ara.
-            mapfile -t archives < <(find . -type f -iname 'tuhaf-kasaba-source.zip' -not -path './.git/*' -print)
+          if not source_zip.is_file():
+              raise SystemExit(
+                  "Kaynak paketi bulunamadi. Depo ana dizinine "
+                  "tuhaf-kasaba-source.zip veya "
+                  "GitHub_Tuhaf_Kasaba_Uygulama_Paketi.zip yukleyin."
+              )
 
-            if [[ ${#archives[@]} -eq 0 ]]; then
-              echo "HATA: Kaynak klasorleri eksik ve tuhaf-kasaba-source.zip depoda bulunamadi."
-              echo "Beklenen dosyalar:"
-              for file in "${required_files[@]}"; do
-                [[ -f "$file" ]] || echo " - $file (eksik)"
-              done
-              echo "ZIP dosyasini GitHub deposuna ekleyin veya ZIP'ten cikan klasorleri dogrudan depoya yukleyin."
-              exit 1
-            fi
+          with zipfile.ZipFile(source_zip) as archive:
+              bad = archive.testzip()
+              if bad:
+                  raise SystemExit(f"ZIP bozuk: {bad}")
+              archive.extractall(".")
 
-            if [[ ${#archives[@]} -gt 1 ]]; then
-              echo "HATA: Birden fazla tuhaf-kasaba-source.zip bulundu:"
-              printf ' - %s\n' "${archives[@]}"
-              echo "Yalnizca bir kaynak ZIP dosyasi birakin."
-              exit 1
-            fi
+          required = [
+              Path("cizgi-short/kit/engine/index.html"),
+              Path("tuhaf-kasaba/run_episode.py"),
+              Path("tuhaf-kasaba/story.js"),
+          ] + [
+              Path(f"tuhaf-kasaba/episodes/episode_{n:02d}.json")
+              for n in range(1, 11)
+          ]
 
-            archive="${archives[0]}"
-            echo "Kaynak paketi aciliyor: $archive"
-            unzip -oq "$archive" -d .
-          fi
+          missing = [str(path) for path in required if not path.is_file()]
+          if missing:
+              raise SystemExit(
+                  "Kaynak paketinden cikarilan dosyalar eksik:\\n - "
+                  + "\\n - ".join(missing)
+              )
 
-          # Arsiv acildiktan sonra da tum zorunlu dosyalari dogrula.
-          missing=()
-          for file in "${required_files[@]}"; do
-            [[ -f "$file" ]] || missing+=("$file")
-          done
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "HATA: Kaynak paketi acildi ancak beklenen dosyalar bulunamadi:"
-            printf ' - %s\n' "${missing[@]}"
-            echo "ZIP'in icindeki klasor yapisi beklenen dizinlerle uyumlu degil."
-            exit 1
-          fi
+          print("Tuhaf Kasaba kaynaklari ve 10 bolum basariyla hazir.")
+          PY
 
-          echo "Animasyon motoru ve 10 bolum hazir."
-
-      - name: YouTube OAuth baglantisini denetle
+      - name: YouTube OAuth baglantisini onceden denetle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -113,25 +106,26 @@ jobs:
         run: |
           python - <<'PY'
           import os, requests
-          names = ('YOUTUBE_CLIENT_ID', 'YOUTUBE_CLIENT_SECRET', 'YOUTUBE_REFRESH_TOKEN')
-          values = {k: os.getenv(k, '').strip() for k in names}
+          values = {k: os.getenv(k, "").strip() for k in (
+              "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"
+          )}
           missing = [k for k, v in values.items() if not v]
           if missing:
-              raise SystemExit('Eksik GitHub Secrets: ' + ', '.join(missing))
-          response = requests.post('https://oauth2.googleapis.com/token', data={
-              'grant_type': 'refresh_token',
-              'client_id': values['YOUTUBE_CLIENT_ID'],
-              'client_secret': values['YOUTUBE_CLIENT_SECRET'],
-              'refresh_token': values['YOUTUBE_REFRESH_TOKEN'],
+              raise SystemExit("Eksik GitHub Secrets: " + ", ".join(missing))
+          r = requests.post("https://oauth2.googleapis.com/token", data={
+              "grant_type": "refresh_token",
+              "client_id": values["YOUTUBE_CLIENT_ID"],
+              "client_secret": values["YOUTUBE_CLIENT_SECRET"],
+              "refresh_token": values["YOUTUBE_REFRESH_TOKEN"],
           }, timeout=30)
-          payload = response.json()
-          if not response.ok or not payload.get('access_token'):
-              raise SystemExit('YouTube OAuth hatasi: ' + str(payload.get('error')) +
-                               ' (' + str(payload.get('error_description', ''))[:180] + ')')
-          print('YouTube OAuth testi basarili.')
+          payload = r.json()
+          if not r.ok or not payload.get("access_token"):
+              raise SystemExit("YouTube OAuth hatasi: " + str(payload.get("error")) +
+                               " (" + str(payload.get("error_description", ""))[:180] + ")")
+          print("YouTube OAuth testi basarili.")
           PY
 
-      - name: Siradaki bolumu uret ve YouTube'a yukle
+      - name: Siradaki Tuhaf Kasaba bolumunu uret ve yukle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -141,7 +135,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: python tuhaf-kasaba/run_episode.py
 
-      - name: Video ve yayin kaydini sakla
+      - name: Video, onizleme ve yayin kaydini sakla
         if: always()
         uses: actions/upload-artifact@v4
         with:
