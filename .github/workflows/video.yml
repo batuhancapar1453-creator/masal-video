@@ -48,35 +48,73 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          source_zip = Path("tuhaf-kasaba-source.zip")
-          app_package = Path("GitHub_Tuhaf_Kasaba_Uygulama_Paketi.zip")
+          # Depodaki ZIP dosyalarini isim/klasor farki olmadan bul.
+          candidates = sorted(
+              p for p in Path(".").rglob("*")
+              if p.is_file() and p.suffix.lower() == ".zip"
+              and ".git" not in p.parts
+          )
 
-          # Kaynak ZIP dogrudan depoda yoksa uygulama paketinin icinden al.
-          if not source_zip.is_file() and app_package.is_file():
-              with zipfile.ZipFile(app_package) as package:
-                  matches = [
-                      name for name in package.namelist()
-                      if name == "tuhaf-kasaba-source.zip"
-                      or name.endswith("/tuhaf-kasaba-source.zip")
-                  ]
-                  if not matches:
-                      raise SystemExit(
-                          "Uygulama paketi bulundu ancak icinde "
-                          "tuhaf-kasaba-source.zip yok."
-                      )
-                  source_zip.write_bytes(package.read(matches[0]))
+          source_zip = None
+          for candidate in candidates:
+              try:
+                  with zipfile.ZipFile(candidate) as z:
+                      names = set(z.namelist())
+                      # Kaynak ZIP dogrudan yuklenmis olabilir.
+                      if (
+                          "cizgi-short/kit/engine/index.html" in names
+                          and "tuhaf-kasaba/run_episode.py" in names
+                      ):
+                          source_zip = candidate
+                          print(f"Kaynak ZIP bulundu: {candidate}")
+                          break
 
-          if not source_zip.is_file():
+                      # Uygulama paketi, kaynak ZIP'i kendi icinde tasiyor olabilir.
+                      for member in z.namelist():
+                          if member.lower().endswith("tuhaf-kasaba-source.zip"):
+                              data = z.read(member)
+                              import io
+                              with zipfile.ZipFile(io.BytesIO(data)) as inner:
+                                  inner_names = set(inner.namelist())
+                                  if (
+                                      "cizgi-short/kit/engine/index.html" in inner_names
+                                      and "tuhaf-kasaba/run_episode.py" in inner_names
+                                  ):
+                                      source_zip = Path(".tuhaf-kasaba-source-found.zip")
+                                      source_zip.write_bytes(data)
+                                      print(
+                                          f"Uygulama paketi bulundu: {candidate} "
+                                          f"(icindeki {member} kullaniliyor)"
+                                      )
+                                      break
+                          if source_zip:
+                              break
+              except (zipfile.BadZipFile, OSError):
+                  print(f"Gecersiz ZIP atlandi: {candidate}")
+              if source_zip:
+                  break
+
+          if source_zip is None:
+              print("Depoda bulunan ZIP dosyalari:")
+              for item in candidates:
+                  print(" -", item)
               raise SystemExit(
-                  "Kaynak paketi bulunamadi. Depo ana dizinine "
-                  "tuhaf-kasaba-source.zip veya "
-                  "GitHub_Tuhaf_Kasaba_Uygulama_Paketi.zip yukleyin."
+                  "Tuhaf Kasaba kaynak ZIP'i bulunamadi. ZIP'i depo ana dizinine "
+                  "yeniden yukleyin; uygulama paketinin icinde "
+                  "tuhaf-kasaba-source.zip bulunmalidir."
               )
 
           with zipfile.ZipFile(source_zip) as archive:
               bad = archive.testzip()
               if bad:
                   raise SystemExit(f"ZIP bozuk: {bad}")
+
+              # ZIP icindeki dosyalari guvenli sekilde depo calisma alanina cikar.
+              root = Path(".").resolve()
+              for info in archive.infolist():
+                  target = (root / info.filename).resolve()
+                  if target != root and root not in target.parents:
+                      raise SystemExit(f"ZIP icinde guvensiz dosya yolu: {info.filename}")
               archive.extractall(".")
 
           required = [
