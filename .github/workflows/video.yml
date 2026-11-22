@@ -42,17 +42,68 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Tuhaf Kasaba kaynak paketini ac
+      - name: Tuhaf Kasaba kaynak dosyalarini hazirla
         shell: bash
         run: |
           set -euo pipefail
-          test -f tuhaf-kasaba-source.zip || { echo 'HATA: Depo ana dizininde tuhaf-kasaba-source.zip bulunamadi.'; exit 1; }
-          unzip -oq tuhaf-kasaba-source.zip -d .
-          test -f cizgi-short/kit/engine/index.html
-          test -f tuhaf-kasaba/run_episode.py
-          test -f tuhaf-kasaba/story.js
-          test -f tuhaf-kasaba/episodes/episode_10.json
-          echo 'Animasyon motoru ve 10 bolum hazir.'
+
+          # Kaynak klasorleri depoya daha once acik halde eklendiyse ZIP gerekmez.
+          required_files=(
+            "cizgi-short/kit/engine/index.html"
+            "tuhaf-kasaba/run_episode.py"
+            "tuhaf-kasaba/story.js"
+            "tuhaf-kasaba/episodes/episode_10.json"
+          )
+
+          sources_ready=true
+          for file in "${required_files[@]}"; do
+            if [[ ! -f "$file" ]]; then
+              sources_ready=false
+              break
+            fi
+          done
+
+          if [[ "$sources_ready" == true ]]; then
+            echo "Kaynak klasorleri zaten depoda; ZIP acma atlandi."
+          else
+            # ZIP dosyasini yalnizca ana dizinde degil, deponun alt klasorlerinde de ara.
+            mapfile -t archives < <(find . -type f -iname 'tuhaf-kasaba-source.zip' -not -path './.git/*' -print)
+
+            if [[ ${#archives[@]} -eq 0 ]]; then
+              echo "HATA: Kaynak klasorleri eksik ve tuhaf-kasaba-source.zip depoda bulunamadi."
+              echo "Beklenen dosyalar:"
+              for file in "${required_files[@]}"; do
+                [[ -f "$file" ]] || echo " - $file (eksik)"
+              done
+              echo "ZIP dosyasini GitHub deposuna ekleyin veya ZIP'ten cikan klasorleri dogrudan depoya yukleyin."
+              exit 1
+            fi
+
+            if [[ ${#archives[@]} -gt 1 ]]; then
+              echo "HATA: Birden fazla tuhaf-kasaba-source.zip bulundu:"
+              printf ' - %s\n' "${archives[@]}"
+              echo "Yalnizca bir kaynak ZIP dosyasi birakin."
+              exit 1
+            fi
+
+            archive="${archives[0]}"
+            echo "Kaynak paketi aciliyor: $archive"
+            unzip -oq "$archive" -d .
+          fi
+
+          # Arsiv acildiktan sonra da tum zorunlu dosyalari dogrula.
+          missing=()
+          for file in "${required_files[@]}"; do
+            [[ -f "$file" ]] || missing+=("$file")
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "HATA: Kaynak paketi acildi ancak beklenen dosyalar bulunamadi:"
+            printf ' - %s\n' "${missing[@]}"
+            echo "ZIP'in icindeki klasor yapisi beklenen dizinlerle uyumlu degil."
+            exit 1
+          fi
+
+          echo "Animasyon motoru ve 10 bolum hazir."
 
       - name: YouTube OAuth baglantisini denetle
         env:
