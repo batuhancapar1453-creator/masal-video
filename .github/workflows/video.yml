@@ -42,98 +42,26 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Tuhaf Kasaba kaynaklarini hazirla
+      - name: Tuhaf Kasaba kaynak paketini ac
         run: |
           python - <<'PY'
           import zipfile
           from pathlib import Path
-
-          # Depodaki ZIP dosyalarini isim/klasor farki olmadan bul.
-          candidates = sorted(
-              p for p in Path(".").rglob("*")
-              if p.is_file() and p.suffix.lower() == ".zip"
-              and ".git" not in p.parts
-          )
-
-          source_zip = None
-          for candidate in candidates:
-              try:
-                  with zipfile.ZipFile(candidate) as z:
-                      names = set(z.namelist())
-                      # Kaynak ZIP dogrudan yuklenmis olabilir.
-                      if (
-                          "cizgi-short/kit/engine/index.html" in names
-                          and "tuhaf-kasaba/run_episode.py" in names
-                      ):
-                          source_zip = candidate
-                          print(f"Kaynak ZIP bulundu: {candidate}")
-                          break
-
-                      # Uygulama paketi, kaynak ZIP'i kendi icinde tasiyor olabilir.
-                      for member in z.namelist():
-                          if member.lower().endswith("tuhaf-kasaba-source.zip"):
-                              data = z.read(member)
-                              import io
-                              with zipfile.ZipFile(io.BytesIO(data)) as inner:
-                                  inner_names = set(inner.namelist())
-                                  if (
-                                      "cizgi-short/kit/engine/index.html" in inner_names
-                                      and "tuhaf-kasaba/run_episode.py" in inner_names
-                                  ):
-                                      source_zip = Path(".tuhaf-kasaba-source-found.zip")
-                                      source_zip.write_bytes(data)
-                                      print(
-                                          f"Uygulama paketi bulundu: {candidate} "
-                                          f"(icindeki {member} kullaniliyor)"
-                                      )
-                                      break
-                          if source_zip:
-                              break
-              except (zipfile.BadZipFile, OSError):
-                  print(f"Gecersiz ZIP atlandi: {candidate}")
-              if source_zip:
-                  break
-
-          if source_zip is None:
-              print("Depoda bulunan ZIP dosyalari:")
-              for item in candidates:
-                  print(" -", item)
-              raise SystemExit(
-                  "Tuhaf Kasaba kaynak ZIP'i bulunamadi. ZIP'i depo ana dizinine "
-                  "yeniden yukleyin; uygulama paketinin icinde "
-                  "tuhaf-kasaba-source.zip bulunmalidir."
-              )
-
-          with zipfile.ZipFile(source_zip) as archive:
-              bad = archive.testzip()
-              if bad:
-                  raise SystemExit(f"ZIP bozuk: {bad}")
-
-              # ZIP icindeki dosyalari guvenli sekilde depo calisma alanina cikar.
-              root = Path(".").resolve()
-              for info in archive.infolist():
-                  target = (root / info.filename).resolve()
-                  if target != root and root not in target.parents:
-                      raise SystemExit(f"ZIP icinde guvensiz dosya yolu: {info.filename}")
-              archive.extractall(".")
-
+          archive = Path("tuhaf-kasaba-source.zip")
+          if not archive.exists():
+              raise SystemExit("Depo kokunde tuhaf-kasaba-source.zip bulunamadi.")
+          with zipfile.ZipFile(archive) as z:
+              z.extractall(".")
           required = [
               Path("cizgi-short/kit/engine/index.html"),
               Path("tuhaf-kasaba/run_episode.py"),
               Path("tuhaf-kasaba/story.js"),
-          ] + [
-              Path(f"tuhaf-kasaba/episodes/episode_{n:02d}.json")
-              for n in range(1, 11)
+              Path("tuhaf-kasaba/episodes/episode_01.json"),
           ]
-
-          missing = [str(path) for path in required if not path.is_file()]
+          missing = [str(p) for p in required if not p.exists()]
           if missing:
-              raise SystemExit(
-                  "Kaynak paketinden cikarilan dosyalar eksik:\\n - "
-                  + "\\n - ".join(missing)
-              )
-
-          print("Tuhaf Kasaba kaynaklari ve 10 bolum basariyla hazir.")
+              raise SystemExit("Kaynak pakette eksik dosyalar: " + ", ".join(missing))
+          print("Tuhaf Kasaba kaynaklari hazir.")
           PY
 
       - name: YouTube OAuth baglantisini onceden denetle
