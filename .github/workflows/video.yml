@@ -42,26 +42,67 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Tuhaf Kasaba kaynak paketini ac
+      - name: Tuhaf Kasaba kaynak paketini bul ve ac
         run: |
           python - <<'PY'
+          import io
           import zipfile
           from pathlib import Path
-          archive = Path("tuhaf-kasaba-source.zip")
-          if not archive.exists():
-              raise SystemExit("Depo kokunde tuhaf-kasaba-source.zip bulunamadi.")
-          with zipfile.ZipFile(archive) as z:
-              z.extractall(".")
-          required = [
-              Path("cizgi-short/kit/engine/index.html"),
-              Path("tuhaf-kasaba/run_episode.py"),
-              Path("tuhaf-kasaba/story.js"),
-              Path("tuhaf-kasaba/episodes/episode_01.json"),
-          ]
-          missing = [str(p) for p in required if not p.exists()]
-          if missing:
-              raise SystemExit("Kaynak pakette eksik dosyalar: " + ", ".join(missing))
-          print("Tuhaf Kasaba kaynaklari hazir.")
+
+          required_names = {
+              "cizgi-short/kit/engine/index.html",
+              "tuhaf-kasaba/run_episode.py",
+              "tuhaf-kasaba/story.js",
+              "tuhaf-kasaba/episodes/episode_01.json",
+          }
+
+          # Beklenen dosya adini ve depodaki diger ZIP dosyalarini tara.
+          candidates = []
+          exact = Path("tuhaf-kasaba-source.zip")
+          if exact.is_file():
+              candidates.append(exact)
+          candidates.extend(
+              p for p in Path(".").rglob("*.zip")
+              if p.is_file() and p not in candidates
+          )
+
+          source_bytes = None
+          source_label = None
+          for candidate in candidates:
+              try:
+                  with zipfile.ZipFile(candidate) as outer:
+                      names = set(outer.namelist())
+                      if required_names.issubset(names):
+                          source_bytes = candidate.read_bytes()
+                          source_label = str(candidate)
+                          break
+                      nested = next(
+                          (n for n in names if n.replace("\\", "/").endswith(
+                              "tuhaf-kasaba-source.zip"
+                          )),
+                          None
+                      )
+                      if nested:
+                          source_bytes = outer.read(nested)
+                          source_label = f"{candidate} icindeki {nested}"
+                          break
+              except (zipfile.BadZipFile, OSError):
+                  continue
+
+          if source_bytes is None:
+              raise SystemExit(
+                  "Kaynak ZIP bulunamadi. Depo ana dizinine "
+                  "'tuhaf-kasaba-source.zip' veya buyuk kurulum ZIP'ini yukleyin."
+              )
+
+          with zipfile.ZipFile(io.BytesIO(source_bytes)) as source:
+              names = set(source.namelist())
+              missing = sorted(required_names - names)
+              if missing:
+                  raise SystemExit("Kaynak ZIP eksik dosyalar iceriyor: " + ", ".join(missing))
+              source.extractall(".")
+
+          print(f"Tuhaf Kasaba kaynaklari acildi: {source_label}")
           PY
 
       - name: YouTube OAuth baglantisini onceden denetle
