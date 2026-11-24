@@ -1,4 +1,4 @@
-name: Gizemli404 - KIRILMA Otomatik Bölüm Yayını
+name: Gizemli404 - KIRILMA KAYIP ADA Otomatik Bölüm Yayını
 
 on:
   workflow_dispatch:
@@ -42,7 +42,7 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Gizemli404 kaynak paketini bul ve aç
+      - name: Gizemli404 KAYIP ADA kaynak paketini bul ve aç
         run: |
           python - <<'PY'
           import io, zipfile
@@ -90,10 +90,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .render_cache
-          key: gizemli404-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
+          key: gizemli404-kayip-ada-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
           save-always: true
           restore-keys: |
-            gizemli404-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
+            gizemli404-kayip-ada-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
 
       - name: YouTube OAuth bağlantısını önceden denetle
         env:
@@ -115,7 +115,7 @@ jobs:
           print("YouTube OAuth testi başarılı.")
           PY
 
-      - name: Sıradaki KIRILMA bölümünü üret ve yükle
+      - name: KAYIP ADA bölümünü üret ve yükle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -138,6 +138,5 @@ jobs:
             work_gizemli404/episode.json
             data/gizemli404_history.json
             data/tuhaf_kasaba_history.json
-            .render_cache/
           if-no-files-found: ignore
           retention-days: 7
