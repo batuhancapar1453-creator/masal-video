@@ -1,22 +1,22 @@
-name: Tuhaf Kasaba - 10 Bolum Otomatik Cizgi Film
+name: Gizemli404 - KIRILMA Otomatik Bölüm Yayını
 
 on:
   workflow_dispatch:
   schedule:
-    # Onceki duzendeki iki calisma saati korunmustur (UTC).
-    - cron: '23 6,17 * * *'
+    # Her gün Türkiye saati 09:00 (UTC 06:00; Türkiye UTC+3).
+    - cron: '0 6 * * *'
 
 permissions:
   contents: write
 
 concurrency:
-  group: youtube-tuhaf-kasaba-publisher
+  group: youtube-gizemli404-publisher
   cancel-in-progress: false
 
 jobs:
   video:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 350
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
@@ -29,12 +29,12 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: FFmpeg kur
+      - name: FFmpeg ve font kur
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-dejavu-core
 
-      - name: Python bagimliliklarini kur
+      - name: Python bağımlılıklarını kur
         run: |
           python -m pip install --upgrade pip
           python -m pip install numpy pillow edge-tts playwright requests google-auth google-auth-oauthlib google-api-python-client
@@ -42,70 +42,60 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Tuhaf Kasaba kaynak paketini bul ve ac
+      - name: Gizemli404 kaynak paketini bul ve aç
         run: |
           python - <<'PY'
-          import io
-          import zipfile
+          import io, zipfile
           from pathlib import Path
-
-          required_names = {
+          required = {
               "cizgi-short/kit/engine/index.html",
-              "tuhaf-kasaba/run_episode.py",
-              "tuhaf-kasaba/story.js",
-              "tuhaf-kasaba/episodes/episode_01.json",
+              "gizemli404/run_episode.py",
+              "gizemli404/story.js",
+              "gizemli404/episodes/episode_01.json",
           }
-
-          # Beklenen dosya adini ve depodaki diger ZIP dosyalarini tara.
-          candidates = []
-          exact = Path("tuhaf-kasaba-source.zip")
-          if exact.is_file():
-              candidates.append(exact)
-          candidates.extend(
-              p for p in Path(".").rglob("*.zip")
-              if p.is_file() and p not in candidates
-          )
-
-          source_bytes = None
-          source_label = None
-          for candidate in candidates:
+          candidates=[]
+          for name in ("gizemli404-source.zip", "tuhaf-kasaba-source.zip"):
+              p=Path(name)
+              if p.is_file(): candidates.append(p)
+          candidates.extend(p for p in Path(".").rglob("*.zip") if p.is_file() and p not in candidates)
+          source_bytes=None;source_label=None
+          for p in candidates:
               try:
-                  with zipfile.ZipFile(candidate) as outer:
-                      names = set(outer.namelist())
-                      if required_names.issubset(names):
-                          source_bytes = candidate.read_bytes()
-                          source_label = str(candidate)
-                          break
-                      nested = next(
-                          (n for n in names if n.replace("\\", "/").endswith(
-                              "tuhaf-kasaba-source.zip"
-                          )),
-                          None
-                      )
+                  with zipfile.ZipFile(p) as z:
+                      if required.issubset(set(z.namelist())):
+                          source_bytes=p.read_bytes();source_label=str(p);break
+                      nested=next((n for n in z.namelist() if n.replace("\\","/").endswith("gizemli404-source.zip")),None)
                       if nested:
-                          source_bytes = outer.read(nested)
-                          source_label = f"{candidate} icindeki {nested}"
-                          break
-              except (zipfile.BadZipFile, OSError):
+                          b=z.read(nested)
+                          with zipfile.ZipFile(io.BytesIO(b)) as inner:
+                              if required.issubset(set(inner.namelist())):
+                                  source_bytes=b;source_label=f"{p} içindeki {nested}";break
+              except (zipfile.BadZipFile,OSError):
                   continue
-
           if source_bytes is None:
-              raise SystemExit(
-                  "Kaynak ZIP bulunamadi. Depo ana dizinine "
-                  "'tuhaf-kasaba-source.zip' veya buyuk kurulum ZIP'ini yukleyin."
-              )
-
-          with zipfile.ZipFile(io.BytesIO(source_bytes)) as source:
-              names = set(source.namelist())
-              missing = sorted(required_names - names)
-              if missing:
-                  raise SystemExit("Kaynak ZIP eksik dosyalar iceriyor: " + ", ".join(missing))
-              source.extractall(".")
-
-          print(f"Tuhaf Kasaba kaynaklari acildi: {source_label}")
+              raise SystemExit("Gizemli404 kaynak ZIP bulunamadı. Depo köküne gizemli404-source.zip yükleyin.")
+          with zipfile.ZipFile(io.BytesIO(source_bytes)) as z:
+              missing=sorted(required-set(z.namelist()))
+              if missing: raise SystemExit("Kaynak ZIP eksik dosyalar içeriyor: "+", ".join(missing))
+              z.extractall(".")
+          print("Gizemli404 kaynakları açıldı:",source_label)
           PY
 
-      - name: YouTube OAuth baglantisini onceden denetle
+      - name: Sıradaki bölüm kimliğini belirle
+        id: episode
+        run: python gizemli404/select_episode.py
+
+      - name: Yarım kalan render karelerini geri yükle
+        if: steps.episode.outputs.episode_id != 'season-complete'
+        uses: actions/cache@v4
+        with:
+          path: .render_cache
+          key: gizemli404-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
+          save-always: true
+          restore-keys: |
+            gizemli404-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
+
+      - name: YouTube OAuth bağlantısını önceden denetle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -113,26 +103,19 @@ jobs:
         run: |
           python - <<'PY'
           import os, requests
-          values = {k: os.getenv(k, "").strip() for k in (
-              "YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"
-          )}
-          missing = [k for k, v in values.items() if not v]
-          if missing:
-              raise SystemExit("Eksik GitHub Secrets: " + ", ".join(missing))
-          r = requests.post("https://oauth2.googleapis.com/token", data={
-              "grant_type": "refresh_token",
-              "client_id": values["YOUTUBE_CLIENT_ID"],
-              "client_secret": values["YOUTUBE_CLIENT_SECRET"],
-              "refresh_token": values["YOUTUBE_REFRESH_TOKEN"],
-          }, timeout=30)
-          payload = r.json()
+          values={k:os.getenv(k,"").strip() for k in ("YOUTUBE_CLIENT_ID","YOUTUBE_CLIENT_SECRET","YOUTUBE_REFRESH_TOKEN")}
+          missing=[k for k,v in values.items() if not v]
+          if missing: raise SystemExit("Eksik GitHub Secrets: "+", ".join(missing))
+          r=requests.post("https://oauth2.googleapis.com/token",data={
+              "grant_type":"refresh_token","client_id":values["YOUTUBE_CLIENT_ID"],
+              "client_secret":values["YOUTUBE_CLIENT_SECRET"],"refresh_token":values["YOUTUBE_REFRESH_TOKEN"]},timeout=30)
+          payload=r.json()
           if not r.ok or not payload.get("access_token"):
-              raise SystemExit("YouTube OAuth hatasi: " + str(payload.get("error")) +
-                               " (" + str(payload.get("error_description", ""))[:180] + ")")
-          print("YouTube OAuth testi basarili.")
+              raise SystemExit("YouTube OAuth hatası: "+str(payload.get("error"))+" ("+str(payload.get("error_description",""))[:180]+")")
+          print("YouTube OAuth testi başarılı.")
           PY
 
-      - name: Siradaki Tuhaf Kasaba bolumunu uret ve yukle
+      - name: Sıradaki KIRILMA bölümünü üret ve yükle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -140,18 +123,21 @@ jobs:
           YOUTUBE_PRIVACY: public
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-        run: python tuhaf-kasaba/run_episode.py
+        run: python gizemli404/run_episode.py
 
-      - name: Video, onizleme ve yayin kaydini sakla
+      - name: Çalışma önizlemesini ve yayın kaydını sakla
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tuhaf-kasaba-run-${{ github.run_id }}
+          name: gizemli404-run-${{ github.run_id }}
           path: |
             output/
-            work_tuhaf_kasaba/out/
-            work_tuhaf_kasaba/stills/preview_sheet.jpg
-            work_tuhaf_kasaba/work/words.json
+            work_gizemli404/out/
+            work_gizemli404/stills/preview_sheet.jpg
+            work_gizemli404/work/words.json
+            work_gizemli404/episode.json
+            data/gizemli404_history.json
             data/tuhaf_kasaba_history.json
+            .render_cache/
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 7
