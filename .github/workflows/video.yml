@@ -1,4 +1,4 @@
-name: Gizemli404 - KIRILMA KAYIP ADA Otomatik Bölüm Yayını
+name: GizemliStüdyo - KIRILMA Kayıp Ada Sezon 1 Günlük Yayın
 
 on:
   workflow_dispatch:
@@ -10,13 +10,13 @@ permissions:
   contents: write
 
 concurrency:
-  group: youtube-gizemli404-publisher
+  group: youtube-gizemlistudyo-publisher
   cancel-in-progress: false
 
 jobs:
   video:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 355
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
       - name: Chromium kur
         run: python -m playwright install --with-deps chromium
 
-      - name: Gizemli404 KAYIP ADA kaynak paketini bul ve aç
+      - name: GizemliStüdyo kaynak paketini bul ve aç
         run: |
           python - <<'PY'
           import io, zipfile
@@ -54,7 +54,7 @@ jobs:
               "gizemli404/episodes/episode_01.json",
           }
           candidates=[]
-          for name in ("gizemli404-source.zip", "tuhaf-kasaba-source.zip"):
+          for name in ("GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip", "gizemli404-source.zip"):
               p=Path(name)
               if p.is_file(): candidates.append(p)
           candidates.extend(p for p in Path(".").rglob("*.zip") if p.is_file() and p not in candidates)
@@ -73,12 +73,30 @@ jobs:
               except (zipfile.BadZipFile,OSError):
                   continue
           if source_bytes is None:
-              raise SystemExit("Gizemli404 kaynak ZIP bulunamadı. Depo köküne gizemli404-source.zip yükleyin.")
+              raise SystemExit("GizemliStüdyo kaynak ZIP bulunamadı. Depo köküne GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip yükleyin.")
           with zipfile.ZipFile(io.BytesIO(source_bytes)) as z:
               missing=sorted(required-set(z.namelist()))
               if missing: raise SystemExit("Kaynak ZIP eksik dosyalar içeriyor: "+", ".join(missing))
               z.extractall(".")
-          print("Gizemli404 kaynakları açıldı:",source_label)
+          print("GizemliStüdyo kaynakları açıldı:",source_label)
+          PY
+
+      - name: Sezon dosyalarını ve Python kodunu doğrula
+        run: |
+          python -m compileall -q gizemli404 cizgi-short/kit/tools
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files=sorted(Path("gizemli404/episodes").glob("episode_*.json"))
+          if len(files)!=10: raise SystemExit(f"Sezon 1 için 10 bölüm bekleniyordu, bulundu: {len(files)}")
+          expected=["Son Rota","İlk Gece","Ormandaki İzler","Şelalenin Ardında","Terk Edilmiş Yerleşke","Fırtınadan Sonra","Yeraltındaki Geçit","Dağın Zirvesi","Son Kayıt","Kıyıdaki Tekne"]
+          for i,p in enumerate(files,1):
+              d=json.loads(p.read_text(encoding="utf-8"))
+              words=sum(len(x["text"].split()) for x in d["lines"])
+              if d.get("number")!=i or d.get("title")!=expected[i-1]: raise SystemExit(f"Bölüm sırası/başlığı hatalı: {p}")
+              if not 600 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
+              if d.get("word_count")!=words: raise SystemExit(f"{p.name}: word_count eşleşmiyor")
+          print("10 bölüm, sıra, JSON ve senaryo kelime kontrolleri başarılı.")
           PY
 
       - name: Sıradaki bölüm kimliğini belirle
@@ -90,10 +108,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .render_cache
-          key: gizemli404-kayip-ada-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
+          key: gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
           save-always: true
           restore-keys: |
-            gizemli404-kayip-ada-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
+            gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
 
       - name: YouTube OAuth bağlantısını önceden denetle
         env:
@@ -115,7 +133,7 @@ jobs:
           print("YouTube OAuth testi başarılı.")
           PY
 
-      - name: KAYIP ADA bölümünü üret ve yükle
+      - name: Sıradaki Kayıp Ada bölümünü üret ve yükle
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -129,7 +147,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gizemli404-run-${{ github.run_id }}
+          name: gizemlistudyo-kayip-ada-run-${{ github.run_id }}
           path: |
             output/
             work_gizemli404/out/
@@ -138,5 +156,6 @@ jobs:
             work_gizemli404/episode.json
             data/gizemli404_history.json
             data/tuhaf_kasaba_history.json
+            .render_cache/
           if-no-files-found: ignore
           retention-days: 7
