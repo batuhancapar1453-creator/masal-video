@@ -99,8 +99,10 @@ jobs:
               d=json.loads(p.read_text(encoding="utf-8"))
               words=sum(len(x["text"].split()) for x in d["lines"])
               if d.get("number")!=i or d.get("title")!=expected[i-1]: raise SystemExit(f"Bölüm sırası/başlığı hatalı: {p}")
-              if not 600 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
+              if not 80 <= words <= 190: raise SystemExit(f"{p.name}: Shorts senaryo kelime sayısı hedef dışında: {words}")
               if d.get("word_count")!=words: raise SystemExit(f"{p.name}: word_count eşleşmiyor")
+              if not 15 <= len(d.get("lines",[])) <= 22: raise SystemExit(f"{p.name}: 4 saniyelik sahne ritmi için 15–22 görsel vuruş bekleniyor")
+              if any(not x.get("scene") for x in d["lines"]): raise SystemExit(f"{p.name}: sahne arka planı eksik")
           print("10 bölüm, sıra, JSON ve senaryo kelime kontrolleri başarılı.")
           PY
 
