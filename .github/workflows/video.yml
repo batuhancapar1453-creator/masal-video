@@ -32,7 +32,9 @@ jobs:
       - name: Blender, FFmpeg ve font kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core blender
+          sudo apt-get install -y ffmpeg fonts-dejavu-core blender \
+  libegl1 libegl-mesa0 libgl1 libglx-mesa0 libgl1-mesa-dri libgles2 \
+  libgbm1 libx11-6 libxext6 libxrender1 libxi6 libxxf86vm1 libsm6 libice6
 
       - name: Python bağımlılıklarını kur
         run: |
@@ -139,6 +141,10 @@ jobs:
           YOUTUBE_PRIVACY: public
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          # Headless GitHub runner: use Mesa software rendering and provide EGL.
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          MESA_LOADER_DRIVER_OVERRIDE: llvmpipe
+          EGL_PLATFORM: surfaceless
         run: python gizemli404/run_episode.py
 
       - name: Çalışma önizlemesini ve yayın kaydını sakla
