@@ -54,7 +54,7 @@ jobs:
               "gizemli404/episodes/episode_01.json",
           }
           candidates=[]
-          for name in ("GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip", "gizemli404-source.zip"):
+          for name in ("GizemliStudyo_KayipAda_Sezon1_Kaynak.zip", "GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip", "GizemliStudyo_KayıpAda_Sezon1_Kaynak.zip", "01_KayipAda_Sezon1_Kaynak.zip", "gizemli404-source.zip"):
               p=Path(name)
               if p.is_file(): candidates.append(p)
           candidates.extend(p for p in Path(".").rglob("*.zip") if p.is_file() and p not in candidates)
@@ -73,7 +73,7 @@ jobs:
               except (zipfile.BadZipFile,OSError):
                   continue
           if source_bytes is None:
-              raise SystemExit("GizemliStüdyo kaynak ZIP bulunamadı. Depo köküne GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip yükleyin.")
+              raise SystemExit("GizemliStüdyo kaynak ZIP bulunamadı. Depo köküne GizemliStudyo_KayipAda_Sezon1_Kaynak.zip dosyasını yükleyin.")
           with zipfile.ZipFile(io.BytesIO(source_bytes)) as z:
               missing=sorted(required-set(z.namelist()))
               if missing: raise SystemExit("Kaynak ZIP eksik dosyalar içeriyor: "+", ".join(missing))
