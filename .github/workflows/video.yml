@@ -16,7 +16,7 @@ concurrency:
 jobs:
   video:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 345
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
@@ -54,7 +54,7 @@ jobs:
               "gizemli404/episodes/episode_01.json",
           }
           candidates=[]
-          for name in ("GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip", "gizemli404-source.zip"):
+          for name in ("GizemliStudyo_KayipAda_Sezon1_Kaynak.zip", "gizemli404-source.zip"):
               p=Path(name)
               if p.is_file(): candidates.append(p)
           candidates.extend(p for p in Path(".").rglob("*.zip") if p.is_file() and p not in candidates)
@@ -73,7 +73,7 @@ jobs:
               except (zipfile.BadZipFile,OSError):
                   continue
           if source_bytes is None:
-              raise SystemExit("GizemliStüdyo kaynak ZIP bulunamadı. Depo köküne GizemliStüdyo_KayıpAda_Sezon1_Kaynak.zip yükleyin.")
+              raise SystemExit("GizemliStüdyo kaynak ZIP bulunamadı. Depo köküne GizemliStudyo_KayipAda_Sezon1_Kaynak.zip yükleyin.")
           with zipfile.ZipFile(io.BytesIO(source_bytes)) as z:
               missing=sorted(required-set(z.namelist()))
               if missing: raise SystemExit("Kaynak ZIP eksik dosyalar içeriyor: "+", ".join(missing))
@@ -84,19 +84,24 @@ jobs:
       - name: Sezon dosyalarını ve Python kodunu doğrula
         run: |
           python -m compileall -q gizemli404 cizgi-short/kit/tools
+          node --check gizemli404/story.js
           python - <<'PY'
           import json
           from pathlib import Path
           files=sorted(Path("gizemli404/episodes").glob("episode_*.json"))
           if len(files)!=10: raise SystemExit(f"Sezon 1 için 10 bölüm bekleniyordu, bulundu: {len(files)}")
           expected=["Son Rota","İlk Gece","Ormandaki İzler","Şelalenin Ardında","Terk Edilmiş Yerleşke","Fırtınadan Sonra","Yeraltındaki Geçit","Dağın Zirvesi","Son Kayıt","Kıyıdaki Tekne"]
+          ids=set()
           for i,p in enumerate(files,1):
               d=json.loads(p.read_text(encoding="utf-8"))
               words=sum(len(x["text"].split()) for x in d["lines"])
               if d.get("number")!=i or d.get("title")!=expected[i-1]: raise SystemExit(f"Bölüm sırası/başlığı hatalı: {p}")
-              if not 600 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
+              if not 700 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
               if d.get("word_count")!=words: raise SystemExit(f"{p.name}: word_count eşleşmiyor")
-          print("10 bölüm, sıra, JSON ve senaryo kelime kontrolleri başarılı.")
+              if d.get("id") in ids: raise SystemExit(f"Tekrarlanan bölüm kimliği: {d.get('id')}")
+              ids.add(d.get("id"))
+              if not all(x.get("speaker") and x.get("text") and x.get("action") and x.get("shot") for x in d["lines"]): raise SystemExit(f"Eksik replik sahne alanı: {p.name}")
+          print("10 bölüm, sıra, benzersiz kimlik, JSON, diyalog ve kelime kontrolleri başarılı.")
           PY
 
       - name: Sıradaki bölüm kimliğini belirle
