@@ -1,4 +1,4 @@
-name: GizemliStüdyo - KIRILMA Kayıp Ada Sezon 1 Günlük Yayın
+name: GizemliStüdyo - KIRILMA Kayıp Ada Blender 3D Sezon 1
 
 on:
   workflow_dispatch:
@@ -29,18 +29,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: FFmpeg ve font kur
+      - name: Blender, FFmpeg ve font kur
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core blender
 
       - name: Python bağımlılıklarını kur
         run: |
           python -m pip install --upgrade pip
-          python -m pip install numpy pillow edge-tts playwright requests google-auth google-auth-oauthlib google-api-python-client
-
-      - name: Chromium kur
-        run: python -m playwright install --with-deps chromium
+          python -m pip install numpy pillow edge-tts requests google-auth google-auth-oauthlib google-api-python-client
 
       - name: GizemliStüdyo kaynak paketini bul ve aç
         run: |
@@ -51,6 +48,7 @@ jobs:
               "cizgi-short/kit/engine/index.html",
               "gizemli404/run_episode.py",
               "gizemli404/story.js",
+              "gizemli404/blender_movie.py",
               "gizemli404/episodes/episode_01.json",
           }
           candidates=[]
@@ -64,17 +62,12 @@ jobs:
                   with zipfile.ZipFile(p) as z:
                       if required.issubset(set(z.namelist())):
                           source_bytes=p.read_bytes();source_label=str(p);break
-                      # Combined delivery ZIPs may contain the actual source ZIP under
-                      # any filename; inspect every nested ZIP instead of relying on a name.
-                      for nested in (n for n in z.namelist() if n.lower().endswith(".zip")):
-                          try:
-                              b=z.read(nested)
-                              with zipfile.ZipFile(io.BytesIO(b)) as inner:
-                                  if required.issubset(set(inner.namelist())):
-                                      source_bytes=b;source_label=f"{p} içindeki {nested}";break
-                          except (zipfile.BadZipFile,KeyError):
-                              continue
-                      if source_bytes is not None: break
+                      nested=next((n for n in z.namelist() if n.replace("\\","/").endswith("gizemli404-source.zip")),None)
+                      if nested:
+                          b=z.read(nested)
+                          with zipfile.ZipFile(io.BytesIO(b)) as inner:
+                              if required.issubset(set(inner.namelist())):
+                                  source_bytes=b;source_label=f"{p} içindeki {nested}";break
               except (zipfile.BadZipFile,OSError):
                   continue
           if source_bytes is None:
@@ -99,10 +92,8 @@ jobs:
               d=json.loads(p.read_text(encoding="utf-8"))
               words=sum(len(x["text"].split()) for x in d["lines"])
               if d.get("number")!=i or d.get("title")!=expected[i-1]: raise SystemExit(f"Bölüm sırası/başlığı hatalı: {p}")
-              if not 80 <= words <= 190: raise SystemExit(f"{p.name}: Shorts senaryo kelime sayısı hedef dışında: {words}")
+              if not 600 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
               if d.get("word_count")!=words: raise SystemExit(f"{p.name}: word_count eşleşmiyor")
-              if not 15 <= len(d.get("lines",[])) <= 22: raise SystemExit(f"{p.name}: 4 saniyelik sahne ritmi için 15–22 görsel vuruş bekleniyor")
-              if any(not x.get("scene") for x in d["lines"]): raise SystemExit(f"{p.name}: sahne arka planı eksik")
           print("10 bölüm, sıra, JSON ve senaryo kelime kontrolleri başarılı.")
           PY
 
@@ -115,10 +106,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .render_cache
-          key: gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
+          key: gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/blender_movie.py', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-${{ github.run_id }}
           save-always: true
           restore-keys: |
-            gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
+            gizemlistudyo-frames-${{ steps.episode.outputs.episode_id }}-${{ hashFiles('gizemli404/story.js', 'gizemli404/blender_movie.py', 'gizemli404/run_episode.py', 'gizemli404/episodes/episode_*.json', 'cizgi-short/kit/engine/**', 'cizgi-short/kit/tools/**', 'cizgi-short/kit/vendor/**', 'cizgi-short/kit/fonts/**') }}-
 
       - name: YouTube OAuth bağlantısını önceden denetle
         env:
