@@ -16,7 +16,7 @@ concurrency:
 jobs:
   video:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
+    timeout-minutes: 180
     steps:
       - name: Depoyu indir
         uses: actions/checkout@v4
