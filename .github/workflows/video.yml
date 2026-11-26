@@ -94,9 +94,9 @@ jobs:
               d=json.loads(p.read_text(encoding="utf-8"))
               words=sum(len(x["text"].split()) for x in d["lines"])
               if d.get("number")!=i or d.get("title")!=expected[i-1]: raise SystemExit(f"Bölüm sırası/başlığı hatalı: {p}")
-              if not 600 <= words <= 1000: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words}")
+              if not 430 <= words <= 510: raise SystemExit(f"{p.name}: senaryo kelime sayısı hedef dışında: {words} (430–510 bekleniyor)")
               if d.get("word_count")!=words: raise SystemExit(f"{p.name}: word_count eşleşmiyor")
-          print("10 bölüm, sıra, JSON ve senaryo kelime kontrolleri başarılı.")
+          print("10 bölüm, sıra, JSON ve 430–510 kelimelik senaryo kontrolleri başarılı.")
           PY
 
       - name: Sıradaki bölüm kimliğini belirle
